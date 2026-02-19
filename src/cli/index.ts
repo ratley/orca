@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 
+import { createRequire } from "node:module";
 import { Command } from "commander";
+
+const require = createRequire(import.meta.url);
+const { version } = require("../../package.json") as { version: string };
 
 import { registerAnswerCommand } from "./commands/answer.js";
 import { registerCancelCommand } from "./commands/cancel.js";
@@ -16,7 +20,7 @@ import { registerStatusCommand } from "./commands/status.js";
 
 const program = new Command();
 
-program.name("orca").description("Orca CLI: coordinated agent run harness").version("0.2.0");
+program.name("orca").description("Orca CLI: coordinated agent run harness").version(version);
 
 registerRunCommand(program);
 registerAnswerCommand(program);
