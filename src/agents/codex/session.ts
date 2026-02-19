@@ -1,0 +1,255 @@
+import { CodexClient } from "codex-client";
+import type { CompletedTurn } from "codex-client";
+
+import type { OrcaConfig, Task } from "../../types/index.js";
+
+export interface PlanResult {
+  tasks: Task[];
+  rawResponse: string;
+}
+
+export interface TaskExecutionResult {
+  outcome: "done" | "failed";
+  rawResponse: string;
+  error?: string;
+}
+
+function buildPlanningPrompt(spec: string, systemContext: string): string {
+  return [
+    systemContext,
+    "You are decomposing a spec into an ordered task graph.",
+    "Return a JSON array of tasks.",
+    "Each task must include fields: id, name, description, dependencies, acceptance_criteria, status, retries, maxRetries.",
+    'Set status to "pending", retries to 0, and maxRetries to 3 for every task.',
+    "dependencies must be an array of task IDs.",
+    "acceptance_criteria must be an array of strings.",
+    "Return ONLY valid JSON. No markdown fences. No explanation.",
+    "Spec:",
+    spec,
+  ].join("\n\n");
+}
+
+function buildTaskExecutionPrompt(
+  task: Task,
+  runId: string,
+  cwd: string,
+): string {
+  return [
+    "You are Orca's task execution assistant.",
+    `Run ID: ${runId}`,
+    `Repository CWD: ${cwd}`,
+    `Task ID: ${task.id}`,
+    `Task Name: ${task.name}`,
+    "Task Description:",
+    task.description,
+    "Acceptance Criteria:",
+    ...task.acceptance_criteria.map(
+      (criterion, index) => `${index + 1}. ${criterion}`,
+    ),
+    "Execute this task. You have full shell access — run commands, read/write files, and do whatever is needed.",
+    "When done, output ONLY JSON on the last line:",
+    '{"outcome":"done"|"failed","error"?:"string"}',
+    "If you cannot complete the task, return outcome=failed with a short error reason.",
+  ].join("\n\n");
+}
+
+function extractAgentText(result: CompletedTurn): string {
+  if (result.agentMessage.length > 0) {
+    return result.agentMessage;
+  }
+
+  const agentItems = result.items.filter((item) => item.type === "agentMessage");
+  if (agentItems.length > 0) {
+    const last = agentItems[agentItems.length - 1];
+    if ("text" in last && typeof last.text === "string") {
+      return last.text;
+    }
+  }
+
+  throw new Error("Codex response was empty");
+}
+
+function extractJson(text: string): string {
+  // Try to find JSON in the response — could be wrapped in markdown fences
+  const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+  if (fenceMatch?.[1]) {
+    return fenceMatch[1].trim();
+  }
+
+  // Try the last line (common pattern: explanation then JSON)
+  const lines = text.trim().split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (line.startsWith("{") || line.startsWith("[")) {
+      try {
+        JSON.parse(line);
+        return line;
+      } catch {
+        // not valid JSON, keep looking
+      }
+    }
+  }
+
+  // Fall back to entire text
+  return text.trim();
+}
+
+function parseTaskArray(raw: string): Task[] {
+  const json = extractJson(raw);
+  const parsed = JSON.parse(json) as unknown;
+  if (!Array.isArray(parsed)) {
+    throw new Error("Codex plan response was not a JSON array");
+  }
+
+  return parsed as Task[];
+}
+
+function parseTaskExecution(raw: string): TaskExecutionResult {
+  const json = extractJson(raw);
+  const parsed = JSON.parse(json) as unknown;
+
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Codex task response was not a JSON object");
+  }
+
+  const candidate = parsed as { outcome?: unknown; error?: unknown };
+
+  if (candidate.outcome !== "done" && candidate.outcome !== "failed") {
+    throw new Error("Codex task response missing valid outcome");
+  }
+
+  if (candidate.error !== undefined && typeof candidate.error !== "string") {
+    throw new Error("Codex task response error must be a string");
+  }
+
+  return {
+    outcome: candidate.outcome,
+    rawResponse: raw,
+    ...(typeof candidate.error === "string" ? { error: candidate.error } : {}),
+  };
+}
+
+function getModel(config?: OrcaConfig): string {
+  return config?.codex?.model ?? process.env.ORCA_CODEX_MODEL ?? "gpt-5.3-codex";
+}
+
+function getCodexPath(): string {
+  return (
+    process.env.ORCA_CODEX_PATH ??
+    `${process.env.HOME}/.nvm/versions/node/v22.22.0/bin/codex`
+  );
+}
+
+/**
+ * Create a persistent Codex session. The thread persists across calls —
+ * planSpec and executeTask share context within the same session.
+ */
+export async function createCodexSession(
+  cwd: string,
+  config?: OrcaConfig,
+): Promise<{
+  planSpec: (spec: string, systemContext: string) => Promise<PlanResult>;
+  executeTask: (task: Task, runId: string) => Promise<TaskExecutionResult>;
+  reviewChanges: (threadId?: string) => Promise<string>;
+  disconnect: () => Promise<void>;
+  threadId: string;
+}> {
+  const client = new CodexClient({
+    codexPath: getCodexPath(),
+    model: getModel(config),
+    cwd,
+    approvalPolicy: "never",
+    sandbox: "workspace-write",
+  });
+
+  await client.connect();
+
+  const thread = await client.startThread({});
+  const threadId = thread.id;
+
+  return {
+    threadId,
+
+    async planSpec(
+      spec: string,
+      systemContext: string,
+    ): Promise<PlanResult> {
+      const result = await client.runTurn({
+        threadId,
+        input: [{ type: "text", text: buildPlanningPrompt(spec, systemContext) }],
+      });
+
+      const rawResponse = extractAgentText(result);
+
+      return {
+        tasks: parseTaskArray(rawResponse),
+        rawResponse,
+      };
+    },
+
+    async executeTask(
+      task: Task,
+      runId: string,
+    ): Promise<TaskExecutionResult> {
+      const result = await client.runTurn({
+        threadId,
+        input: [
+          {
+            type: "text",
+            text: buildTaskExecutionPrompt(task, runId, cwd),
+          },
+        ],
+      });
+
+      const rawResponse = extractAgentText(result);
+
+      return parseTaskExecution(rawResponse);
+    },
+
+    async reviewChanges(): Promise<string> {
+      const result = await client.runReview({
+        threadId,
+        target: { type: "uncommittedChanges" },
+      });
+
+      return result.reviewText;
+    },
+
+    async disconnect(): Promise<void> {
+      await client.disconnect();
+    },
+  };
+}
+
+/**
+ * Stateless wrappers that match the Claude adapter interface.
+ * Each call creates a new client + thread (no persistence).
+ * Use createCodexSession() for persistent threads.
+ */
+export async function planSpec(
+  spec: string,
+  systemContext: string,
+  config?: OrcaConfig,
+): Promise<PlanResult> {
+  const session = await createCodexSession(process.cwd(), config);
+
+  try {
+    return await session.planSpec(spec, systemContext);
+  } finally {
+    await session.disconnect();
+  }
+}
+
+export async function executeTask(
+  task: Task,
+  runId: string,
+  config?: OrcaConfig,
+): Promise<TaskExecutionResult> {
+  const session = await createCodexSession(process.cwd(), config);
+
+  try {
+    return await session.executeTask(task, runId);
+  } finally {
+    await session.disconnect();
+  }
+}

@@ -79,6 +79,7 @@ export interface OrcaConfig {
   };
   codex?: {
     enabled?: boolean;
+    model?: string;
     command?: string;
     timeoutMs?: number;
   };
