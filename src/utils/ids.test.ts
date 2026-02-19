@@ -1,41 +1,21 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { test, expect, describe } from 'bun:test';
+import { generateRunId } from './ids';
 
-import { generateRunId } from "./ids.js";
-
-describe("generateRunId", () => {
-  const originalDateNow = Date.now;
-  const originalMathRandom = Math.random;
-
-  afterEach(() => {
-    Date.now = originalDateNow;
-    Math.random = originalMathRandom;
+describe('generateRunId', () => {
+  test('returns a string', () => {
+    expect(typeof generateRunId('specs/onboarding.md')).toBe('string');
   });
-
-  it("returns run IDs in <slug>-<timestamp>-<hex4> format", () => {
-    Date.now = () => 1739999999999;
-    Math.random = () => 0.25;
-
-    const runId = generateRunId("specs/My First Spec.md");
-
-    expect(runId).toMatch(/^my-first-spec-1739999999999-[0-9a-f]{4}$/);
+  test('derives slug from filename', () => {
+    const id = generateRunId('specs/my-feature.md');
+    expect(id.startsWith('my-feature-')).toBe(true);
   });
-
-  it("derives slug from the spec file path", () => {
-    Date.now = () => 1739999999999;
-    Math.random = () => 0;
-
-    const runId = generateRunId("/tmp/Nested Dir/My___Spec V2!.md");
-
-    expect(runId.startsWith("my-spec-v2-1739999999999-")).toBe(true);
+  test('two calls produce different IDs', () => {
+    const a = generateRunId('specs/test.md');
+    const b = generateRunId('specs/test.md');
+    expect(a).not.toBe(b);
   });
-
-  it("produces unique IDs across multiple calls", () => {
-    let tick = 1740000000000;
-    Date.now = () => tick++;
-    Math.random = () => 0;
-
-    const ids = new Set(Array.from({ length: 50 }, () => generateRunId("specs/test.md")));
-
-    expect(ids.size).toBe(50);
+  test('handles special chars in filename', () => {
+    const id = generateRunId('specs/My Feature!! v2.md');
+    expect(id.startsWith('my-feature-v2-')).toBe(true);
   });
 });

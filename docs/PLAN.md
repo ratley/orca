@@ -87,9 +87,11 @@ Core principle: standardize the agent loop (plan, decompose, execute, track, not
 
 ## 4. Key Design Decisions and Rationale
 
-1. Bun as runtime.
-- Rationale: native TypeScript, built-in test runner, simpler toolchain.
-- Consequence: favor Bun-native workflows for local execution and testing.
+1. Node.js runtime.
+- Rationale: broad cross-platform compatibility and mature ecosystem.
+- Consequence: default assumptions remain Node-compatible unless explicitly overridden.
+
+1b. Bun as runtime and test runner. Rationale: native TypeScript execution without transpile, built-in fast test runner (bun test), simpler toolchain. tsc --noEmit is used for type checking only. Cross-platform caveat accepted for speed of development.
 
 2. Strict TypeScript everywhere.
 - Rationale: orchestration systems become state-heavy quickly; strict types reduce runtime drift.

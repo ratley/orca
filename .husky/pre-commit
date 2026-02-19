@@ -2,13 +2,13 @@
 
 set -eu
 
-bun x lint-staged
+bunx lint-staged
 
 LATEST_LOG="session-logs/LATEST.md"
 MAX_AGE_SECONDS=1800
 
 if [ ! -f "$LATEST_LOG" ]; then
-  echo "Error: $LATEST_LOG does not exist. Update the session log before committing." >&2
+  echo "Error: $LATEST_LOG missing or stale. Update it before committing." >&2
   exit 1
 fi
 
@@ -27,6 +27,6 @@ fi
 AGE_SECONDS=$((NOW_EPOCH - FILE_EPOCH))
 
 if [ "$AGE_SECONDS" -gt "$MAX_AGE_SECONDS" ]; then
-  echo "Error: $LATEST_LOG is older than 30 minutes. Update it before committing." >&2
+  echo "Error: $LATEST_LOG missing or stale. Update it before committing." >&2
   exit 1
 fi
