@@ -1,6 +1,6 @@
 {
   "name": "orcastrator",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "bin": {
     "orca": "./dist/cli/index.js"
@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "start": "bun run src/cli/index.ts",
-    "prepare": "husky"
+    "prepare": "husky",
+    "postbuild": "chmod +x dist/cli/index.js"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.47",
