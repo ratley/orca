@@ -62,10 +62,12 @@ export interface TaskRunnerOptions {
   store: RunStore;
   config?: OrcaConfig;
   emitHook?: EmitHook;
+  executeTask?: ExecuteTaskFn;
 }
 
 export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
   const emitHook = options.emitHook ?? defaultEmitHook;
+  const executeTaskFn = options.executeTask ?? executeTaskImpl;
   const { runId, store, config } = options;
 
   let run = await store.getRun(runId);
@@ -194,7 +196,7 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
       });
 
       try {
-        const result = await executeTaskImpl(task, runId, config);
+        const result = await executeTaskFn(task, runId, config);
 
         if (result.outcome === "done") {
           const doneTasks = inProgressTasks.map((candidate) => {

@@ -4,6 +4,7 @@ import path from "node:path";
 
 import type { Command } from "commander";
 
+import { createCodexSession } from "../../agents/codex/session.js";
 import { loadConfig } from "../../core/config-loader.js";
 import { runPlanner } from "../../core/planner.js";
 import { runTaskRunner } from "../../core/task-runner.js";
@@ -131,12 +132,47 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
     await dispatcher.dispatch(event);
   };
 
-  await runTaskRunner({
-    runId,
-    store,
-    ...(orcaConfig ? { config: orcaConfig } : {}),
-    emitHook
-  });
+  const cwd = process.cwd();
+  const codexSession = await createCodexSession(cwd, orcaConfig ?? undefined);
+
+  try {
+    // Phase 4: Codex consults the task graph before execution begins.
+    const plannedRun = await store.getRun(runId);
+    if (!plannedRun) {
+      throw new Error(`Run not found after planning: ${runId}`);
+    }
+
+    console.log("Phase 4: Codex reviewing task graph...");
+    const consultation = await codexSession.consultTaskGraph(plannedRun.tasks);
+    if (consultation.issues.length > 0) {
+      console.log("Codex consultation issues:");
+      for (const issue of consultation.issues) {
+        console.log(`  - ${issue}`);
+      }
+    }
+
+    if (!consultation.ok) {
+      console.error("Codex flagged the task graph as not OK. Aborting.");
+      await store.updateRun(runId, { overallStatus: "failed" });
+      return;
+    }
+
+    console.log("Codex consultation passed. Starting execution...");
+
+    await runTaskRunner({
+      runId,
+      store,
+      ...(orcaConfig ? { config: orcaConfig } : {}),
+      emitHook,
+      executeTask: (task, runId, _config) => codexSession.executeTask(task, runId),
+    });
+
+    const reviewText = await codexSession.reviewChanges();
+    console.log("Codex post-execution review:");
+    console.log(reviewText);
+  } finally {
+    await codexSession.disconnect();
+  }
 
   const run = await store.getRun(runId);
   if (!run) {

@@ -104,18 +104,67 @@ function parseTaskArray(raw: string): Task[] {
   return parsed as Task[];
 }
 
+const POSITIVE_COMPLETION_PATTERNS = [
+  /\bdone\b/i,
+  /\bcomplet/i,
+  /\bsuccess/i,
+  /\bwrote\b/i,
+  /\bwritten\b/i,
+  /\bcreated\b/i,
+  /\bfinished\b/i,
+];
+
+const FAILURE_PATTERNS = [
+  /\berror\b/i,
+  /\bfailed?\b/i,
+  /\bcannot\b/i,
+  /\bunable\b/i,
+  /\bpermission denied\b/i,
+];
+
+function inferOutcomeFromText(raw: string): TaskExecutionResult {
+  const hasFailure = FAILURE_PATTERNS.some((p) => p.test(raw));
+  if (hasFailure) {
+    return {
+      outcome: "failed",
+      rawResponse: raw,
+      error: "Codex did not emit a JSON completion marker; inferred failure from response text.",
+    };
+  }
+
+  const hasSuccess = POSITIVE_COMPLETION_PATTERNS.some((p) => p.test(raw));
+  if (hasSuccess) {
+    return { outcome: "done", rawResponse: raw };
+  }
+
+  // Ambiguous — cannot determine outcome from response text; treat as failed.
+  return {
+    outcome: "failed",
+    rawResponse: raw,
+    error: "Codex did not emit a JSON completion marker and outcome could not be inferred.",
+  };
+}
+
 function parseTaskExecution(raw: string): TaskExecutionResult {
-  const json = extractJson(raw);
-  const parsed = JSON.parse(json) as unknown;
+  let json: string;
+  let parsed: unknown;
+
+  try {
+    json = extractJson(raw);
+    parsed = JSON.parse(json);
+  } catch {
+    // Codex did not emit a JSON completion marker — fall back to text inference.
+    return inferOutcomeFromText(raw);
+  }
 
   if (!parsed || typeof parsed !== "object") {
-    throw new Error("Codex task response was not a JSON object");
+    return inferOutcomeFromText(raw);
   }
 
   const candidate = parsed as { outcome?: unknown; error?: unknown };
 
   if (candidate.outcome !== "done" && candidate.outcome !== "failed") {
-    throw new Error("Codex task response missing valid outcome");
+    return inferOutcomeFromText(raw);
   }
 
   if (candidate.error !== undefined && typeof candidate.error !== "string") {
@@ -144,12 +193,18 @@ function getCodexPath(): string {
  * Create a persistent Codex session. The thread persists across calls —
  * planSpec and executeTask share context within the same session.
  */
+export interface ConsultationResult {
+  issues: string[];
+  ok: boolean;
+}
+
 export async function createCodexSession(
   cwd: string,
   config?: OrcaConfig,
 ): Promise<{
   planSpec: (spec: string, systemContext: string) => Promise<PlanResult>;
   executeTask: (task: Task, runId: string) => Promise<TaskExecutionResult>;
+  consultTaskGraph: (tasks: Task[]) => Promise<ConsultationResult>;
   reviewChanges: (threadId?: string) => Promise<string>;
   disconnect: () => Promise<void>;
   threadId: string;
@@ -204,6 +259,40 @@ export async function createCodexSession(
       const rawResponse = extractAgentText(result);
 
       return parseTaskExecution(rawResponse);
+    },
+
+    async consultTaskGraph(tasks: Task[]): Promise<ConsultationResult> {
+      const taskGraphJson = JSON.stringify(tasks, null, 2);
+      const prompt = [
+        "Review this Orca task graph before execution.",
+        "Flag any: missing steps, wrong dependency order, tasks that are underdefined, or potential blockers.",
+        "Be brief. Output JSON on the last line: { \"issues\": [...], \"ok\": boolean }",
+        "",
+        "Task graph:",
+        taskGraphJson,
+      ].join("\n");
+
+      const result = await client.runTurn({
+        threadId,
+        input: [{ type: "text", text: prompt }],
+      });
+
+      const rawResponse = extractAgentText(result);
+      const json = extractJson(rawResponse);
+      const parsed = JSON.parse(json) as unknown;
+
+      if (!parsed || typeof parsed !== "object") {
+        throw new Error("Codex consultation response was not a JSON object");
+      }
+
+      const candidate = parsed as { issues?: unknown; ok?: unknown };
+
+      return {
+        issues: Array.isArray(candidate.issues)
+          ? (candidate.issues as unknown[]).filter((i): i is string => typeof i === "string")
+          : [],
+        ok: typeof candidate.ok === "boolean" ? candidate.ok : false,
+      };
     },
 
     async reviewChanges(): Promise<string> {
