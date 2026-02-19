@@ -56,17 +56,23 @@ export async function answerCommandHandler(
 
     runId = await selectRun(store) ?? undefined;
     if (!runId) {
-      throw new Error("no run id provided");
+      console.error("No runs found.");
+      process.exitCode = 1;
+      return;
     }
   }
 
   const run = await store.getRun(runId);
   if (!run) {
-    throw new Error(`Run not found: ${runId}`);
+    console.error(`Run not found: ${runId}`);
+    process.exitCode = 1;
+    return;
   }
 
   if (run.overallStatus !== "waiting_for_answer") {
-    throw new Error(`Run ${runId} is not waiting for an answer.`);
+    console.error(`Run ${runId} is not waiting for an answer (status: ${run.overallStatus}).`);
+    process.exitCode = 1;
+    return;
   }
 
   const answer = await resolveAnswer(answerArg);
@@ -83,7 +89,12 @@ export function registerAnswerCommand(program: Command): void {
     .command("answer [run-id] [answer]")
     .description("Submit an answer for a run waiting for input")
     .option("--run <id>", "Run ID waiting for answer")
-    .action(async (runId: string | undefined, answer: string | undefined, options: AnswerCommandOptions) =>
-      answerCommandHandler(runId, answer, options)
-    );
+    .action(async (runId: string | undefined, answer: string | undefined, options: AnswerCommandOptions) => {
+      try {
+        await answerCommandHandler(runId, answer, options);
+      } catch (err) {
+        console.error(err instanceof Error ? err.message : String(err));
+        process.exitCode = 1;
+      }
+    });
 }

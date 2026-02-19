@@ -111,9 +111,9 @@ describe("answer command", () => {
 
     const { answerModule } = await loadAnswerModule();
 
-    await expect(answerModule.answerCommandHandler(runId, "yes", {})).rejects.toThrow(
-      `Run ${runId} is not waiting for an answer.`
-    );
+    await answerModule.answerCommandHandler(runId, "yes", {});
+    expect(process.exitCode).toBe(1);
+    expect(errors.join("\n")).toContain(`is not waiting for an answer`);
   });
 
   test("fails when no answer is provided in non-tty mode", async () => {

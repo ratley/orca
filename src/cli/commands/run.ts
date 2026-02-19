@@ -103,7 +103,9 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
   }
 
   try {
-    await access(specPath, fsConstants.R_OK);
+    await access(specPath, fsConstants.R_OK).catch(() => {
+      throw new Error(`Spec file not found or not readable: ${specPath}`);
+    });
 
     const orcaConfig = await resolveConfig(options.config);
 
@@ -253,29 +255,42 @@ export function registerRunCommand(program: Command): void {
     .option("--on-complete <cmd>", "Shell hook command for onComplete")
     .option("--on-error <cmd>", "Shell hook command for onError")
     .action(async (goal: string | undefined, commandOptions: RunCommandOptions) => {
-      const normalizedOptions: RunCommandOptions = {
-        ...commandOptions,
-        ...(goal !== undefined ? { goal } : {})
-      };
-      const inlineTask = normalizedOptions.task ?? normalizedOptions.prompt ?? normalizedOptions.goal;
-      const inputSpecPath = normalizedOptions.spec ?? normalizedOptions.plan;
+      try {
+        const normalizedOptions: RunCommandOptions = {
+          ...commandOptions,
+          ...(goal !== undefined ? { goal } : {})
+        };
+        const inlineTask = normalizedOptions.task ?? normalizedOptions.prompt ?? normalizedOptions.goal;
+        const inputSpecPath = normalizedOptions.spec ?? normalizedOptions.plan;
 
-      if (normalizedOptions.goal !== undefined && (normalizedOptions.task || normalizedOptions.prompt)) {
-        throw new Error("positional goal and --task/--prompt are mutually exclusive");
+        if (normalizedOptions.goal !== undefined && (normalizedOptions.task || normalizedOptions.prompt)) {
+          console.error("Error: positional goal and --task/--prompt are mutually exclusive.");
+          process.exitCode = 1;
+          return;
+        }
+
+        if (normalizedOptions.goal !== undefined && inputSpecPath) {
+          console.error("Error: positional goal and --spec/--plan are mutually exclusive.");
+          process.exitCode = 1;
+          return;
+        }
+
+        if (!inputSpecPath && !inlineTask) {
+          console.error("Error: one of --spec, --task, or --prompt (-p) must be provided.");
+          process.exitCode = 1;
+          return;
+        }
+
+        if (inputSpecPath && inlineTask) {
+          console.error("Error: --spec is mutually exclusive with --task / --prompt.");
+          process.exitCode = 1;
+          return;
+        }
+
+        await runCommandHandler(normalizedOptions);
+      } catch (err) {
+        console.error(err instanceof Error ? err.message : String(err));
+        process.exitCode = 1;
       }
-
-      if (normalizedOptions.goal !== undefined && inputSpecPath) {
-        throw new Error("positional goal and --spec/--plan are mutually exclusive");
-      }
-
-      if (!inputSpecPath && !inlineTask) {
-        throw new Error("One of --spec, --task, or --prompt (-p) must be provided.");
-      }
-
-      if (inputSpecPath && inlineTask) {
-        throw new Error("--spec is mutually exclusive with --task / --prompt.");
-      }
-
-      await runCommandHandler(normalizedOptions);
     });
 }
