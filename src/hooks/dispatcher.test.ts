@@ -43,23 +43,23 @@ describe("HookDispatcher", () => {
     expect(calls).toEqual(["first", "second"]);
   });
 
-  test("dispatches shell command hooks with template substitution", async () => {
+  test("dispatches shell command hooks using ORCA_* environment variables", async () => {
     const outputPath = path.join(tempDir, "hook-output.txt");
     const dispatcher = new HookDispatcher({
       commandHooks: {
-        onMilestone: `printf '%s|%s|%s' '{msg}' '{runId}' '{taskId}' > "${outputPath}"`
+        onMilestone: `if [ "{runId}" = "$ORCA_RUN_ID" ]; then printf '%s|%s|%s' "$ORCA_MSG" "$ORCA_RUN_ID" "$ORCA_TASK_ID" > "${outputPath}"; fi`
       }
     });
 
     await dispatcher.dispatch(
       makeEvent({
-        message: "hello\nworld it's me",
+        message: "hello $(whoami) && keep-literal",
         taskId: "task-9"
       })
     );
 
     const output = await fs.readFile(outputPath, "utf8");
-    expect(output).toBe("hello world it's me|run-1000-abcd|task-9");
+    expect(output).toBe("hello $(whoami) && keep-literal|run-1000-abcd|task-9");
   });
 
   test("handler error triggers onError", async () => {
@@ -114,5 +114,24 @@ describe("HookDispatcher", () => {
 
     expect(errors).toHaveLength(1);
     expect(errors[0]?.error).toContain("Hook timeout after 25ms");
+  });
+
+  test("command hook failure triggers onError command hook", async () => {
+    const outputPath = path.join(tempDir, "hook-error-output.txt");
+    const dispatcher = new HookDispatcher({
+      commandHooks: {
+        onMilestone: "exit 1",
+        onError: `printf '%s|%s|%s' "$ORCA_MSG" "$ORCA_RUN_ID" "$ORCA_TASK_ID" > "${outputPath}"`
+      }
+    });
+
+    await dispatcher.dispatch(
+      makeEvent({
+        taskId: "task-7"
+      })
+    );
+
+    const output = await fs.readFile(outputPath, "utf8");
+    expect(output).toContain("Hook dispatch failed for onMilestone|run-1000-abcd|task-7");
   });
 });

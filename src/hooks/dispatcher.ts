@@ -16,15 +16,16 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
   ]);
 }
 
-function sanitizeValue(value: string): string {
-  return value.replace(/[\r\n]/g, " ").replace(/'/g, "'\\''");
-}
-
-function applyCommandTemplate(template: string, event: HookEvent): string {
+/**
+ * Shell hook commands now receive dynamic hook values through environment variables.
+ * Backward-compat note: templates that used `{msg}`, `{runId}`, `{taskId}` still work because
+ * they are rewritten to `$ORCA_MSG`, `$ORCA_RUN_ID`, `$ORCA_TASK_ID` before execution.
+ */
+function applyCommandTemplate(template: string): string {
   return template
-    .replaceAll("{msg}", sanitizeValue(event.message))
-    .replaceAll("{runId}", sanitizeValue(event.runId))
-    .replaceAll("{taskId}", sanitizeValue(event.taskId ?? ""));
+    .replaceAll("{msg}", "$ORCA_MSG")
+    .replaceAll("{runId}", "$ORCA_RUN_ID")
+    .replaceAll("{taskId}", "$ORCA_TASK_ID");
 }
 
 export class HookDispatcher {
@@ -58,12 +59,25 @@ export class HookDispatcher {
     const commandTemplate = this.commandHooks[event.hook];
     if (commandTemplate) {
       try {
-        const command = applyCommandTemplate(commandTemplate, event);
-        await exec(command, { timeout: this.timeoutMs, killSignal: "SIGKILL" });
+        await this.runCommandHook(commandTemplate, event);
       } catch (error) {
         await this.emitHookError(event, error);
       }
     }
+  }
+
+  private async runCommandHook(commandTemplate: string, event: HookEvent): Promise<void> {
+    const command = applyCommandTemplate(commandTemplate);
+    await exec(command, {
+      timeout: this.timeoutMs,
+      killSignal: "SIGKILL",
+      env: {
+        ...process.env,
+        ORCA_MSG: event.message,
+        ORCA_RUN_ID: event.runId,
+        ORCA_TASK_ID: event.taskId ?? ""
+      }
+    });
   }
 
   private async emitHookError(sourceEvent: HookEvent, error: unknown): Promise<void> {
@@ -88,6 +102,11 @@ export class HookDispatcher {
 
       for (const handler of onErrorHandlers) {
         await withTimeout(handler(event), this.timeoutMs);
+      }
+
+      const commandTemplate = this.commandHooks.onError;
+      if (commandTemplate) {
+        await this.runCommandHook(commandTemplate, event);
       }
     } finally {
       this.isEmittingHookError = false;

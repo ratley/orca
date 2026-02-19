@@ -141,4 +141,33 @@ describe("task-runner", () => {
     expect(hookEvents.some((event) => event.hook === "onTaskFail" && event.taskId === "t1")).toBe(true);
     expect(hookEvents.some((event) => event.hook === "onError" && event.message.startsWith("run-failed:"))).toBe(true);
   });
+
+  test("persists failed overallStatus when runner throws from outer path", async () => {
+    const cyclicTask = makeTask("t1", ["t1"]);
+    await store.updateRun(runId, {
+      mode: "run",
+      overallStatus: "running",
+      tasks: [cyclicTask]
+    });
+
+    const hookEvents: HookEvent[] = [];
+
+    await expect(
+      runTaskRunner({
+        runId,
+        store,
+        emitHook: async (event) => {
+          hookEvents.push(event);
+        }
+      })
+    ).rejects.toThrow("Task graph has cycle");
+
+    const run = await store.getRun(runId);
+    if (!run) {
+      throw new Error("Run missing after outer failure");
+    }
+
+    expect(run.overallStatus).toBe("failed");
+    expect(hookEvents.some((event) => event.hook === "onError")).toBe(true);
+  });
 });

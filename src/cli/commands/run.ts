@@ -31,6 +31,17 @@ const ALL_HOOKS: HookName[] = [
   "onComplete",
   "onError"
 ];
+const VALID_HOOK_NAMES = new Set<HookName>([
+  "onMilestone",
+  "onTaskComplete",
+  "onTaskFail",
+  "onComplete",
+  "onError"
+]);
+
+function isHookName(value: string): value is HookName {
+  return VALID_HOOK_NAMES.has(value as HookName);
+}
 
 function createStore(): RunStore {
   const runsDir = process.env.ORCA_RUNS_DIR;
@@ -100,9 +111,19 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
 
   if (orcaConfig?.hooks) {
     for (const [hookName, handler] of Object.entries(orcaConfig.hooks)) {
-      if (handler) {
-        dispatcher.on(hookName as HookName, handler);
+      if (!isHookName(hookName)) {
+        console.error(`Warning: ignoring unknown hook name in config: ${hookName}`);
+        continue;
       }
+
+      if (typeof handler !== "function") {
+        console.error(
+          `Warning: ignoring invalid hook handler for ${hookName}; expected function, got ${typeof handler}`
+        );
+        continue;
+      }
+
+      dispatcher.on(hookName, handler);
     }
   }
 

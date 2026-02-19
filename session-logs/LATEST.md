@@ -1,32 +1,31 @@
 ---
-date: 2026-02-19T02:51:00Z
-session: phase-2-permission-fix-and-e2e-validation
-agent: eve
+date: 2026-02-19T00:00:00Z
+session: phase-3-med-high-fix-pass
+agent: codex
 ---
 
 ## Built
-- Live end-to-end validation of `orca run` against a real spec
-- Fixed Claude session permission mode for task execution
+- Implemented all requested Phase 3 medium/high fixes across hooks, runner state persistence, and config validation.
 
 ## Changed
-- `src/agents/claude/session.ts` | switched `executeTask` session to `permissionMode: "bypassPermissions"` with `allowDangerouslySkipPermissions: true` — previous default mode blocked file writes and shell execution required for task completion
+- `src/hooks/dispatcher.ts` | switched command templating to `$ORCA_*` env vars, removed inline value sanitization, executed command hooks with injected env, and enabled `hookCommands.onError` execution in `emitHookError`
+- `src/hooks/adapters/openclaw.ts` | added `timeoutMs` parameter (default `10_000`), SIGKILL timeout enforcement, timeout cleanup, and descriptive timeout rejection
+- `src/core/task-runner.ts` | persisted `overallStatus: "failed"` in outer catch before rethrow, guarded to avoid masking original error
+- `src/cli/commands/run.ts` | added runtime `HookName` key validation and handler type validation with stderr warnings for invalid config hooks
+- `src/core/config-loader.ts` | added shape validation for `hooks` (functions) and `hookCommands` (strings) with descriptive errors
+- `src/hooks/dispatcher.test.ts` | updated shell-hook smoke test for env-var flow and added regression test for `hookCommands.onError`
+- `src/hooks/adapters/openclaw.test.ts` | added full tests for handler: success, non-zero exit, spawn error/throw, timeout kill
+- `src/core/task-runner.test.ts` | added regression test asserting failed status persistence on outer runner failure
 
 ## Verification
-- `orca run --spec /tmp/test-orca-spec.md` (spec: add sleep utility + test) | all 3 tasks completed, overall status: `completed`
-  - task-1 Create sleep utility → done ✅
-  - task-2 Create sleep test file → done ✅
-  - task-3 Run sleep tests → done ✅ (`bun test` executed by Claude, 1 pass)
-- `bun test` | 21 passing, 0 failing
-- `bun run typecheck` | pass
+- `bun test` | 37 passing, 0 failing
 
 ## Decisions
-- `bypassPermissions` + `allowDangerouslySkipPermissions` is the correct mode for autonomous task execution where specs are under operator control — equivalent to `codex --yolo`
-- `acceptEdits` was tried first but blocked shell execution (bun test), making verification tasks impossible
-- `planSpec` session left on default mode (no file writes needed for planning)
+- Kept `{msg}`, `{runId}`, `{taskId}` placeholder support by rewriting to `$ORCA_MSG`, `$ORCA_RUN_ID`, `$ORCA_TASK_ID` for backward compatibility while moving dynamic values into env vars
+- Used process-kill timeout for `openclaw` to prevent indefinite hook stalls
 
 ## Next
-1. Push permission fix to github.com/ratley/orca
-2. Phase 3: hook framework — wire all hook types through centralized dispatcher
+1. Push commit after manual review
 
 ## Blockers
 - None

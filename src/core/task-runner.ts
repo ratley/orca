@@ -298,6 +298,11 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
   } catch (error) {
     const errorMessage = toErrorMessage(error);
     const now = new Date().toISOString();
+    try {
+      await store.updateRun(runId, { overallStatus: "failed" });
+    } catch {
+      // Preserve the original runner failure if state persistence also fails.
+    }
     await emitHook({
       runId: run.runId,
       hook: "onError",

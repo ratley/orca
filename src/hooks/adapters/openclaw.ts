@@ -42,25 +42,63 @@ export function detectOpenclawAvailability(): {
   return { available: false };
 }
 
-export function createOpenclawHookHandler(): HookHandler {
+export function createOpenclawHookHandler(timeoutMs = 10_000): HookHandler {
   return async (event: HookEvent): Promise<void> => {
     await new Promise<void>((resolve, reject) => {
-      const child = spawn(
-        "openclaw",
-        ["system", "event", "--text", event.message, "--mode", "now"],
-        {
-          stdio: "ignore"
-        }
-      );
+      let settled = false;
+      let child: ReturnType<typeof spawn>;
 
-      child.on("error", reject);
-      child.on("exit", (code) => {
-        if (code === 0) {
-          resolve();
+      const settleResolve = (): void => {
+        if (settled) {
           return;
         }
 
-        reject(new Error(`openclaw exited with code ${code ?? "unknown"}`));
+        settled = true;
+        resolve();
+      };
+
+      const settleReject = (reason: unknown): void => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        reject(reason);
+      };
+
+      try {
+        child = spawn(
+          "openclaw",
+          ["system", "event", "--text", event.message, "--mode", "now"],
+          {
+            stdio: "ignore"
+          }
+        );
+      } catch (error) {
+        settleReject(error);
+        return;
+      }
+
+      const timeout = setTimeout(() => {
+        child.kill("SIGKILL");
+        settleReject(
+          new Error(`openclaw timed out after ${timeoutMs}ms while handling hook ${event.hook}`)
+        );
+      }, timeoutMs);
+
+      child.on("error", (error) => {
+        clearTimeout(timeout);
+        settleReject(error);
+      });
+      child.on("exit", (code) => {
+        clearTimeout(timeout);
+
+        if (code === 0) {
+          settleResolve();
+          return;
+        }
+
+        settleReject(new Error(`openclaw exited with code ${code ?? "unknown"}`));
       });
     });
   };
