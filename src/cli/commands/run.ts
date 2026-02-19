@@ -1,6 +1,8 @@
 import { constants as fsConstants } from "node:fs";
-import { access } from "node:fs/promises";
+import { access, unlink, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 
 import type { Command } from "commander";
 
@@ -16,7 +18,8 @@ import type { HookEvent, HookName } from "../../types/index.js";
 import { generateRunId } from "../../utils/ids.js";
 
 export interface RunCommandOptions {
-  spec: string;
+  spec?: string;
+  task?: string;
   config?: string;
   onMilestone?: string;
   onTaskComplete?: string;
@@ -68,145 +71,180 @@ function buildCliCommandHooks(options: RunCommandOptions): Partial<Record<HookNa
 }
 
 export async function runCommandHandler(options: RunCommandOptions): Promise<void> {
-  const specPath = path.resolve(options.spec);
-  await access(specPath, fsConstants.R_OK);
-
-  const orcaConfig = await loadConfig(options.config);
-
-  const runId = generateRunId(specPath);
-  console.log(`Run ID: ${runId}`);
-
-  const store = createStore();
-  await store.createRun(runId, specPath);
-
-  await runPlanner(specPath, store, runId);
-  await store.updateRun(runId, {
-    mode: "run",
-    overallStatus: "running"
-  });
-
-  const cliCommandHooks = buildCliCommandHooks(options);
-  const dispatcher = new HookDispatcher({
-    commandHooks: {
-      ...orcaConfig?.hookCommands,
-      ...cliCommandHooks
-    }
-  });
-
-  const openclawAvailability = detectOpenclawAvailability();
-  if (openclawAvailability.available) {
-    const handler = createOpenclawHookHandler();
-    for (const hookName of ALL_HOOKS) {
-      dispatcher.on(hookName, handler);
-    }
-  } else {
-    if (openclawAvailability.warning) {
-      console.error(openclawAvailability.warning);
-    }
-
-    const handler = createStdoutHookHandler();
-    for (const hookName of ALL_HOOKS) {
-      dispatcher.on(hookName, handler);
-    }
+  if (!options.spec && !options.task) {
+    throw new Error("One of --spec or --task must be provided.");
   }
 
-  if (orcaConfig?.hooks) {
-    for (const [hookName, handler] of Object.entries(orcaConfig.hooks)) {
-      if (!isHookName(hookName)) {
-        console.error(`Warning: ignoring unknown hook name in config: ${hookName}`);
-        continue;
-      }
-
-      if (typeof handler !== "function") {
-        console.error(
-          `Warning: ignoring invalid hook handler for ${hookName}; expected function, got ${typeof handler}`
-        );
-        continue;
-      }
-
-      dispatcher.on(hookName, handler);
-    }
+  if (options.spec && options.task) {
+    throw new Error("Options --spec and --task are mutually exclusive.");
   }
 
-  const emitHook = async (event: HookEvent): Promise<void> => {
-    await dispatcher.dispatch(event);
-  };
+  const usesInlineTask = Boolean(options.task);
+  const specPath = usesInlineTask
+    ? path.join(os.tmpdir(), `orca-task-${Date.now()}-${randomUUID()}.md`)
+    : path.resolve(options.spec ?? "");
 
-  const cwd = process.cwd();
-  const codexSession = await createCodexSession(cwd, orcaConfig ?? undefined);
+  if (usesInlineTask) {
+    await writeFile(specPath, `${options.task}\n`, "utf8");
+  }
 
   try {
-    // Phase 4: Codex consults the task graph before execution begins.
-    const plannedRun = await store.getRun(runId);
-    if (!plannedRun) {
-      throw new Error(`Run not found after planning: ${runId}`);
-    }
+    await access(specPath, fsConstants.R_OK);
 
-    console.log("Phase 4: Codex reviewing task graph...");
-    const consultation = await codexSession.consultTaskGraph(plannedRun.tasks);
-    if (consultation.issues.length > 0) {
-      console.log("Codex consultation issues:");
-      for (const issue of consultation.issues) {
-        console.log(`  - ${issue}`);
+    const orcaConfig = await loadConfig(options.config);
+
+    const runId = generateRunId(specPath);
+    console.log(`Run ID: ${runId}`);
+
+    const store = createStore();
+    await store.createRun(runId, specPath);
+
+    await runPlanner(specPath, store, runId);
+    await store.updateRun(runId, {
+      mode: "run",
+      overallStatus: "running"
+    });
+
+    const cliCommandHooks = buildCliCommandHooks(options);
+    const dispatcher = new HookDispatcher({
+      commandHooks: {
+        ...orcaConfig?.hookCommands,
+        ...cliCommandHooks
+      }
+    });
+
+    const openclawAvailability = detectOpenclawAvailability();
+    if (openclawAvailability.available) {
+      const handler = createOpenclawHookHandler();
+      for (const hookName of ALL_HOOKS) {
+        dispatcher.on(hookName, handler);
+      }
+    } else {
+      if (openclawAvailability.warning) {
+        console.error(openclawAvailability.warning);
+      }
+
+      const handler = createStdoutHookHandler();
+      for (const hookName of ALL_HOOKS) {
+        dispatcher.on(hookName, handler);
       }
     }
 
-    if (!consultation.ok) {
-      console.error("Codex flagged the task graph as not OK. Aborting.");
-      await store.updateRun(runId, { overallStatus: "failed" });
-      return;
+    if (orcaConfig?.hooks) {
+      for (const [hookName, handler] of Object.entries(orcaConfig.hooks)) {
+        if (!isHookName(hookName)) {
+          console.error(`Warning: ignoring unknown hook name in config: ${hookName}`);
+          continue;
+        }
+
+        if (typeof handler !== "function") {
+          console.error(
+            `Warning: ignoring invalid hook handler for ${hookName}; expected function, got ${typeof handler}`
+          );
+          continue;
+        }
+
+        dispatcher.on(hookName, handler);
+      }
     }
 
-    console.log("Codex consultation passed. Starting execution...");
+    const emitHook = async (event: HookEvent): Promise<void> => {
+      await dispatcher.dispatch(event);
+    };
 
-    await runTaskRunner({
-      runId,
-      store,
-      ...(orcaConfig ? { config: orcaConfig } : {}),
-      emitHook,
-      executeTask: (task, runId, _config) => codexSession.executeTask(task, runId),
+    const cwd = process.cwd();
+    const codexSession = await createCodexSession(cwd, orcaConfig ?? undefined);
+
+    try {
+      // Phase 4: Codex consults the task graph before execution begins.
+      const plannedRun = await store.getRun(runId);
+      if (!plannedRun) {
+        throw new Error(`Run not found after planning: ${runId}`);
+      }
+
+      console.log("Phase 4: Codex reviewing task graph...");
+      const consultation = await codexSession.consultTaskGraph(plannedRun.tasks);
+      if (consultation.issues.length > 0) {
+        console.log("Codex consultation issues:");
+        for (const issue of consultation.issues) {
+          console.log(`  - ${issue}`);
+        }
+      }
+
+      if (!consultation.ok) {
+        console.error("Codex flagged the task graph as not OK. Aborting.");
+        await store.updateRun(runId, { overallStatus: "failed" });
+        return;
+      }
+
+      console.log("Codex consultation passed. Starting execution...");
+
+      await runTaskRunner({
+        runId,
+        store,
+        ...(orcaConfig ? { config: orcaConfig } : {}),
+        emitHook,
+        executeTask: (task, runId, _config) => codexSession.executeTask(task, runId),
+      });
+
+      const reviewText = await codexSession.reviewChanges();
+      console.log("Codex post-execution review:");
+      console.log(reviewText);
+    } finally {
+      await codexSession.disconnect();
+    }
+
+    const run = await store.getRun(runId);
+    if (!run) {
+      throw new Error(`Run not found after execution: ${runId}`);
+    }
+
+    const finalStatus = computeFinalStatus(
+      run.overallStatus,
+      run.tasks.length > 0 && run.tasks.every((task) => task.status === "done")
+    );
+
+    await store.updateRun(runId, {
+      overallStatus: finalStatus
     });
 
-    const reviewText = await codexSession.reviewChanges();
-    console.log("Codex post-execution review:");
-    console.log(reviewText);
+    const refreshed = await store.getRun(runId);
+    if (!refreshed) {
+      throw new Error(`Run missing after final status write: ${runId}`);
+    }
+
+    console.log(`Overall status: ${refreshed.overallStatus}`);
+    console.log(`Run dir: ${store.getRunDir(runId)}`);
   } finally {
-    await codexSession.disconnect();
+    if (usesInlineTask) {
+      await unlink(specPath).catch(() => {
+        // Best-effort cleanup for temp spec files.
+      });
+    }
   }
-
-  const run = await store.getRun(runId);
-  if (!run) {
-    throw new Error(`Run not found after execution: ${runId}`);
-  }
-
-  const finalStatus = computeFinalStatus(
-    run.overallStatus,
-    run.tasks.length > 0 && run.tasks.every((task) => task.status === "done")
-  );
-
-  await store.updateRun(runId, {
-    overallStatus: finalStatus
-  });
-
-  const refreshed = await store.getRun(runId);
-  if (!refreshed) {
-    throw new Error(`Run missing after final status write: ${runId}`);
-  }
-
-  console.log(`Overall status: ${refreshed.overallStatus}`);
-  console.log(`Run dir: ${store.getRunDir(runId)}`);
 }
 
 export function registerRunCommand(program: Command): void {
   program
     .command("run")
     .description("Run pre-planning and execution")
-    .requiredOption("--spec <path>", "Path to spec markdown file")
+    .option("--spec <path>", "Path to spec markdown file")
+    .option("--task <text>", "Inline task text (alternative to --spec)")
     .option("--config <path>", "Path to orca config file")
     .option("--on-milestone <cmd>", "Shell hook command for onMilestone")
     .option("--on-task-complete <cmd>", "Shell hook command for onTaskComplete")
     .option("--on-task-fail <cmd>", "Shell hook command for onTaskFail")
     .option("--on-complete <cmd>", "Shell hook command for onComplete")
     .option("--on-error <cmd>", "Shell hook command for onError")
-    .action(async (commandOptions: RunCommandOptions) => runCommandHandler(commandOptions));
+    .action(async (commandOptions: RunCommandOptions) => {
+      if (!commandOptions.spec && !commandOptions.task) {
+        throw new Error("One of --spec or --task must be provided.");
+      }
+
+      if (commandOptions.spec && commandOptions.task) {
+        throw new Error("Options --spec and --task are mutually exclusive.");
+      }
+
+      await runCommandHandler(commandOptions);
+    });
 }

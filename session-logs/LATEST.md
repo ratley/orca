@@ -1,31 +1,26 @@
 ---
-date: 2026-02-19T05:30:00Z
-session: phase4-smoke-test
+date: 2026-02-19T05:56:27Z
+session: cli-task-flag
 agent: eve
 ---
 
 ## Built
-- Smoke test passed: full end-to-end pipeline (Claude plan → Codex review → Codex execute → Codex post-review)
-- Fixed consultation prompt: clearer ok=false semantics (hard blockers only, not minor suggestions)
-- Fixed inferOutcomeFromText: ambiguous responses now default to done (not failed) — failure patterns checked first, false negatives worse than false positives for this use case
+- Added `--task <text>` as an inline alternative to `--spec <path>` for `orca run`
+- Enforced `--spec`/`--task` mutual exclusivity and required-one validation at CLI action level and handler level
+- Implemented temp-spec lifecycle for inline tasks using `os.tmpdir()` + unique filename with cleanup in `finally`
 
 ## Changed
-- `src/agents/codex/session.ts` | Updated consultTaskGraph prompt — explicit "ok: false only for hard blockers"; updated inferOutcomeFromText — ambiguous → done with console.warn instead of failed
+- `src/cli/commands/run.ts` | Added `task?: string` to `RunCommandOptions`; made `spec` optional; added inline-task temp file write/read/cleanup flow; updated command options and action validation
 
 ## Verification
 - `bun test` | 78 passing, 0 failing
-- Smoke test: `orca run --spec smoke.md` → completed (5/5 tasks done, node src/utils.test.js → "All tests passed.")
-- Phase 4 consultation: passed with minor suggestions, ok: true
-- Post-execution Codex review: clean ("no actionable bugs")
 
 ## Decisions
-- inferOutcomeFromText ambiguous path: `done` preferred over `failed` — Codex narrates rather than emitting JSON, so false negatives block downstream tasks (worse outcome)
-- console.warn emitted when inference is used, so it's visible in logs
-- Consultation prompt: "ok: false only if hard blocking issue" — prevents overly conservative aborts on minor suggestions
+- Preserve planner/task-runner/agent behavior; implement entirely in CLI layer by materializing `--task` into a temporary markdown file
+- Keep validation in both commander `.action()` and `runCommandHandler` for direct-handler call safety
 
 ## Next
-- Consider adding `--no-consult` flag to skip Phase 4 for fast iteration
-- Consider transferring codex-client to ratley org
+- Add targeted CLI tests for `--task` path and mutual-exclusion validation
 
 ## Blockers
 - None
