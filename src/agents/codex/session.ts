@@ -132,17 +132,13 @@ function inferOutcomeFromText(raw: string): TaskExecutionResult {
     };
   }
 
-  const hasSuccess = POSITIVE_COMPLETION_PATTERNS.some((p) => p.test(raw));
-  if (hasSuccess) {
-    return { outcome: "done", rawResponse: raw };
+  // No failure indicators — assume done. Codex often narrates rather than emitting JSON,
+  // so false negatives here are more harmful than false positives.
+  if (!POSITIVE_COMPLETION_PATTERNS.some((p) => p.test(raw))) {
+    console.warn("[orca] Warning: Codex response had no clear completion marker; assuming done.");
   }
 
-  // Ambiguous — cannot determine outcome from response text; treat as failed.
-  return {
-    outcome: "failed",
-    rawResponse: raw,
-    error: "Codex did not emit a JSON completion marker and outcome could not be inferred.",
-  };
+  return { outcome: "done", rawResponse: raw };
 }
 
 function parseTaskExecution(raw: string): TaskExecutionResult {
@@ -266,6 +262,11 @@ export async function createCodexSession(
       const prompt = [
         "Review this Orca task graph before execution.",
         "Flag any: missing steps, wrong dependency order, tasks that are underdefined, or potential blockers.",
+        "",
+        "Set ok: false ONLY if there is a hard blocking issue — dependency cycle, circular reference, a task that cannot possibly run as defined, or a critical missing step that would cause the run to fail.",
+        "For minor issues (ambiguous wording, style preferences, nice-to-haves): list them in issues but set ok: true.",
+        "If the graph looks generally reasonable and executable, set ok: true even if you have minor suggestions.",
+        "",
         "Be brief. Output JSON on the last line: { \"issues\": [...], \"ok\": boolean }",
         "",
         "Task graph:",
