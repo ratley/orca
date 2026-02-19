@@ -87,9 +87,9 @@ Core principle: standardize the agent loop (plan, decompose, execute, track, not
 
 ## 4. Key Design Decisions and Rationale
 
-1. Node.js runtime over Bun.
-- Rationale: reliability and portability for CLI tooling across developer machines and CI.
-- Consequence: use Node-native APIs and avoid Bun-specific features.
+1. Bun as runtime.
+- Rationale: native TypeScript, built-in test runner, simpler toolchain.
+- Consequence: favor Bun-native workflows for local execution and testing.
 
 2. Strict TypeScript everywhere.
 - Rationale: orchestration systems become state-heavy quickly; strict types reduce runtime drift.

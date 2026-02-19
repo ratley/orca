@@ -1,7 +1,6 @@
 {
   "name": "orca",
   "version": "0.1.0",
-  "description": "Agent harness — Claude orchestrator, Codex consultation, extensible hooks",
   "private": true,
   "type": "module",
   "bin": {
@@ -9,20 +8,29 @@
   },
   "scripts": {
     "build": "tsc",
-    "dev": "tsx watch src/cli/index.ts",
+    "dev": "bun run src/cli/index.ts",
     "lint": "oxlint src/",
     "typecheck": "tsc --noEmit",
-    "start": "node dist/cli/index.js"
+    "test": "bun test",
+    "start": "bun run src/cli/index.ts",
+    "prepare": "husky"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.1.0",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.47",
     "chalk": "^5.3.0",
-    "commander": "^11.1.0",
-    "zod": "^3.22.4"
+    "commander": "^13.1.0",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@types/node": "^20.10.6",
-    "typescript": "^5.3.3",
-    "tsx": "^4.7.0"
+    "@types/bun": "^1.2.21",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.0",
+    "oxlint": "^0.15.14",
+    "typescript": "^5.8.2"
+  },
+  "lint-staged": {
+    "*.ts": [
+      "oxlint --fix"
+    ]
   }
 }

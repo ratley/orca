@@ -8,7 +8,12 @@ export interface Spec {
   createdAt: string;
 }
 
-export type TaskStatus = "pending" | "in_progress" | "done" | "failed" | "cancelled";
+export type TaskStatus =
+  | "pending"
+  | "in_progress"
+  | "done"
+  | "failed"
+  | "cancelled";
 
 export interface Task {
   id: string;

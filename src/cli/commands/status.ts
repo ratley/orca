@@ -1,11 +1,19 @@
-export interface StatusOptions {
+import type { Command } from "commander";
+
+export interface StatusCommandOptions {
   run?: string;
+  config?: string;
 }
 
-export async function statusCommand(options: StatusOptions) {
-  if (options.run) {
-    console.log(`orca status: not yet implemented (run=${options.run})`);
-  } else {
-    console.log(`orca status: list all runs (not yet implemented)`);
-  }
+export async function statusCommandHandler(_options: StatusCommandOptions): Promise<void> {
+  console.log("not yet implemented");
+}
+
+export function registerStatusCommand(program: Command): void {
+  program
+    .command("status")
+    .description("Show run status or list all runs")
+    .option("--run <run-id>", "Run ID to inspect")
+    .option("--config <path>", "Path to orca config file")
+    .action(async (options: StatusCommandOptions) => statusCommandHandler(options));
 }
