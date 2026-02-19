@@ -1,26 +1,25 @@
 ---
-date: 2026-02-19T06:00:00Z
-session: cli-prompt-alias
+date: 2026-02-19T06:05:00Z
+session: cli-default-command
 agent: eve
 ---
 
 ## Built
-- Added `-p, --prompt <text>` as aliases for `--task` in `orca run`
-- All three flags (`--task`, `--prompt`, `-p`) are equivalent; mutually exclusive with `--spec`
+- Made `run` the default commander subcommand — `orca -p "task"` now works without typing `run`
+- `orca run -p "task"` still works (backwards compat)
 
 ## Changed
-- `src/cli/commands/run.ts` | Added `prompt?: string` to RunCommandOptions; normalize `task ?? prompt` into `inlineTask` in handler and action validator; added `-p, --prompt <text>` commander option
+- `src/cli/commands/run.ts` | `.command("run")` → `.command("run", { isDefault: true })`
 
 ## Verification
-- Unit tests: 37 pass, 0 fail
+- `orca -p "hello"` routed to run pipeline and started correctly (killed mid-run, routing confirmed)
 
 ## Decisions
-- Normalize at handler entry rather than duplicating checks; single `inlineTask` var used throughout
-- Validation messages updated to mention all three flags
+- isDefault: true in commander routes unrecognized first args to the run command
+- Backwards compat preserved — explicit `orca run` still works
 
 ## Next
-- Update codex-client remote to ratley/codex-client (transfer accepted)
-- Update orca package.json dep reference from eve-senara to ratley
+- None — Orca CLI is in a solid state
 
 ## Blockers
 - None

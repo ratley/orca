@@ -229,7 +229,7 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
 
 export function registerRunCommand(program: Command): void {
   program
-    .command("run")
+    .command("run", { isDefault: true })
     .description("Run pre-planning and execution")
     .option("--spec <path>", "Path to spec markdown file")
     .option("--task <text>", "Inline task text (alternative to --spec)")
