@@ -1,17 +1,8 @@
 import { unstable_v2_createSession } from "@anthropic-ai/claude-agent-sdk";
 
-import type { OrcaConfig, Task } from "../../types/index.js";
+import type { OrcaConfig, PlanResult, Task, TaskExecutionResult } from "../../types/index.js";
 
-export interface PlanResult {
-  tasks: Task[];
-  rawResponse: string;
-}
-
-export interface TaskExecutionResult {
-  outcome: "done" | "failed";
-  rawResponse: string;
-  error?: string;
-}
+export type { PlanResult, TaskExecutionResult };
 
 function buildPlanningPrompt(spec: string, systemContext: string): string {
   return [
@@ -76,7 +67,7 @@ function extractAssistantText(message: unknown): string | null {
   return text.length > 0 ? text : null;
 }
 
-function parseTaskArray(raw: string): Task[] {
+export function parseTaskArray(raw: string): Task[] {
   const parsed = JSON.parse(raw) as unknown;
   if (!Array.isArray(parsed)) {
     throw new Error("Claude plan response was not a JSON array");
@@ -90,13 +81,20 @@ function parseTaskArray(raw: string): Task[] {
     dependencies: Array.isArray(task.dependencies)
       ? (task.dependencies as unknown[]).map(String)
       : [],
+    // Apply sensible defaults for required fields the LLM may have omitted.
+    name: typeof task.name === "string" && task.name.length > 0 ? task.name : "Unnamed task",
+    description: typeof task.description === "string" ? task.description : "",
+    acceptance_criteria: Array.isArray(task.acceptance_criteria) ? task.acceptance_criteria : [],
+    status: typeof task.status === "string" && task.status.length > 0 ? task.status : "pending",
+    retries: typeof task.retries === "number" ? task.retries : 0,
+    maxRetries: typeof task.maxRetries === "number" ? task.maxRetries : 3,
   })) as Task[];
 }
 
-function parseTaskExecution(raw: string): TaskExecutionResult {
+export function parseTaskExecution(raw: string): TaskExecutionResult {
   const parsed = JSON.parse(raw) as unknown;
 
-  if (!parsed || typeof parsed !== "object") {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error("Claude task response was not a JSON object");
   }
 
@@ -156,9 +154,9 @@ function getModel(config?: OrcaConfig): string {
   return config?.claude?.model ?? process.env.ORCA_CLAUDE_MODEL ?? "claude-sonnet-4-5";
 }
 
-export async function planSpec(spec: string, systemContext: string): Promise<PlanResult> {
+export async function planSpec(spec: string, systemContext: string, config?: OrcaConfig): Promise<PlanResult> {
   const session = unstable_v2_createSession({
-    model: getModel()
+    model: getModel(config)
   });
 
   try {

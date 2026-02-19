@@ -71,6 +71,14 @@ function coerceConfig(candidate: unknown): OrcaConfig {
     }
   }
 
+  if ("executor" in candidate && candidate.executor !== undefined) {
+    if (candidate.executor !== "claude" && candidate.executor !== "codex") {
+      throw new Error(
+        `Config.executor must be 'claude' or 'codex', got ${String(candidate.executor)}`
+      );
+    }
+  }
+
   return candidate as OrcaConfig;
 }
 

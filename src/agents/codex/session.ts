@@ -1,18 +1,9 @@
 import { CodexClient } from "orca-codex-client";
 import type { CompletedTurn } from "orca-codex-client";
 
-import type { OrcaConfig, Task } from "../../types/index.js";
+import type { OrcaConfig, PlanResult, Task, TaskExecutionResult } from "../../types/index.js";
 
-export interface PlanResult {
-  tasks: Task[];
-  rawResponse: string;
-}
-
-export interface TaskExecutionResult {
-  outcome: "done" | "failed";
-  rawResponse: string;
-  error?: string;
-}
+export type { PlanResult, TaskExecutionResult };
 
 function buildPlanningPrompt(spec: string, systemContext: string): string {
   return [

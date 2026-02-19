@@ -43,7 +43,7 @@ export async function runPlanner(
     skills.length === 0
       ? DEFAULT_SYSTEM_CONTEXT
       : `${DEFAULT_SYSTEM_CONTEXT}\n\n${formatSkillsSection(skills)}`;
-  const result = await planSpecImpl(spec, systemContext);
+  const result = await planSpecImpl(spec, systemContext, config);
 
   validateDAG(result.tasks);
 

@@ -75,6 +75,18 @@ export interface HookEvent {
 
 export type HookHandler = (event: HookEvent) => Promise<void>;
 
+// Shared agent result types (used by both claude and codex session adapters)
+export interface PlanResult {
+  tasks: Task[];
+  rawResponse: string;
+}
+
+export interface TaskExecutionResult {
+  outcome: "done" | "failed";
+  rawResponse: string;
+  error?: string;
+}
+
 export interface OrcaConfig {
   anthropicApiKey?: string;
   openaiApiKey?: string;

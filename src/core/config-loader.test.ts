@@ -53,6 +53,45 @@ describe("config-loader", () => {
     expect(resolved?.sessionLogs).toBe("/tmp/orca-session-logs");
   });
 
+  test("resolveConfigFromPaths throws on invalid executor value", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(cliPath, "export default { executor: 'invalid-executor' };\n", "utf8");
+
+    await expect(
+      resolveConfigFromPaths(
+        path.join(tempDir, "missing-global.js"),
+        path.join(tempDir, "missing-project.js"),
+        cliPath
+      )
+    ).rejects.toThrow("Config.executor must be 'claude' or 'codex', got invalid-executor");
+  });
+
+  test("resolveConfigFromPaths accepts executor 'claude'", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(cliPath, "export default { executor: 'claude' };\n", "utf8");
+
+    const resolved = await resolveConfigFromPaths(
+      path.join(tempDir, "missing-global.js"),
+      path.join(tempDir, "missing-project.js"),
+      cliPath
+    );
+
+    expect(resolved?.executor).toBe("claude");
+  });
+
+  test("resolveConfigFromPaths accepts executor 'codex'", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(cliPath, "export default { executor: 'codex' };\n", "utf8");
+
+    const resolved = await resolveConfigFromPaths(
+      path.join(tempDir, "missing-global.js"),
+      path.join(tempDir, "missing-project.js"),
+      cliPath
+    );
+
+    expect(resolved?.executor).toBe("codex");
+  });
+
   test("resolveConfigFromPaths merges global and project", async () => {
     const globalPath = path.join(tempDir, "global.config.js");
     const projectPath = path.join(tempDir, "project.config.js");
@@ -156,5 +195,15 @@ describe("config-loader", () => {
         onComplete: "echo cli-complete"
       }
     });
+  });
+
+  test("mergeConfigs merges executor with global < project < cli precedence", () => {
+    const globalConfig = { executor: "claude" as const };
+    const projectConfig = { executor: "codex" as const };
+    const cliConfig = { executor: "claude" as const };
+
+    const merged = mergeConfigs(globalConfig, projectConfig, cliConfig);
+
+    expect(merged?.executor).toBe("claude");
   });
 });

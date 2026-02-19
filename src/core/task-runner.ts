@@ -171,12 +171,12 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
     }
   }
 
-  let run = await store.getRun(runId);
-  if (!run) {
-    throw new Error(`Run not found: ${runId}`);
-  }
-
   try {
+    let run = await store.getRun(runId);
+    if (!run) {
+      throw new Error(`Run not found: ${runId}`);
+    }
+
     validateDAG(run.tasks);
 
     await emitHook({

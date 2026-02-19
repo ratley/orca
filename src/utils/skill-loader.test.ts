@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
@@ -109,6 +109,59 @@ describe("skill-loader", () => {
     const loaded = await loadSkillsFromDir(skillsRoot);
     expect(loaded.map((skill) => skill.name)).toEqual(["Alpha", "Beta"]);
     expect(loaded.map((skill) => skill.body)).toEqual(["Alpha body", "Beta body"]);
+  });
+
+  test("loadSkillsFromDir skips symlinked skill directories with warning", async () => {
+    const skillsRoot = path.join(tempDir, "skills-root");
+    const realSkillDir = path.join(skillsRoot, "real");
+    const externalSkillDir = path.join(tempDir, "external-skill");
+    const symlinkPath = path.join(skillsRoot, "linked");
+    await fs.mkdir(realSkillDir, { recursive: true });
+    await fs.mkdir(externalSkillDir, { recursive: true });
+    await fs.writeFile(path.join(realSkillDir, "SKILL.md"), "---\nname: Real\ndescription: R\n---\nreal body", "utf8");
+    await fs.writeFile(
+      path.join(externalSkillDir, "SKILL.md"),
+      "---\nname: Linked\ndescription: L\n---\nlinked body",
+      "utf8"
+    );
+    await fs.symlink(externalSkillDir, symlinkPath, "dir");
+
+    const originalWarn = console.warn;
+    const warnMock = mock(() => {});
+    console.warn = warnMock as unknown as typeof console.warn;
+
+    try {
+      const loaded = await loadSkillsFromDir(skillsRoot);
+      expect(loaded.map((skill) => skill.name)).toEqual(["Real"]);
+      expect(warnMock).toHaveBeenCalledTimes(1);
+      expect(warnMock).toHaveBeenCalledWith(`Skipping symlinked skill entry: ${symlinkPath}`);
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+
+  test("loadSkill returns null when SKILL.md is unreadable", async () => {
+    const skillDir = path.join(tempDir, "unreadable-skill");
+    const skillFilePath = path.join(skillDir, "SKILL.md");
+    await fs.mkdir(skillDir, { recursive: true });
+    await fs.writeFile(skillFilePath, "---\nname: Hidden\ndescription: x\n---\nbody", "utf8");
+    await fs.chmod(skillFilePath, 0o000);
+
+    const originalWarn = console.warn;
+    const warnMock = mock(() => {});
+    console.warn = warnMock as unknown as typeof console.warn;
+
+    try {
+      const loaded = await loadSkill(skillDir);
+      expect(loaded).toBeNull();
+      expect(warnMock).toHaveBeenCalledTimes(1);
+      expect(String((warnMock.mock.calls as unknown[][])[0]?.[0] ?? "")).toContain(
+        `Skipping skill at ${skillDir}: unable to read SKILL.md`
+      );
+    } finally {
+      console.warn = originalWarn;
+      await fs.chmod(skillFilePath, 0o644);
+    }
   });
 
   test("loadSkills deduplicates by name (first wins)", async () => {

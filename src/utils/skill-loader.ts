@@ -89,7 +89,12 @@ export async function loadSkill(skillDirPath: string): Promise<LoadedSkill | nul
   try {
     skillFileContent = await readFile(skillFilePath, "utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+    const errorCode = (error as NodeJS.ErrnoException).code;
+    if (errorCode === "ENOENT") {
+      return null;
+    }
+    if (errorCode === "EACCES" || errorCode === "EPERM") {
+      console.warn(`Skipping skill at ${expandedDirPath}: unable to read SKILL.md (${errorCode})`);
       return null;
     }
     throw error;
@@ -121,7 +126,13 @@ export async function loadSkillsFromDir(skillsDirPath: string): Promise<LoadedSk
   }
 
   const subdirectories = entries
-    .filter((entry) => entry.isDirectory())
+    .filter((entry) => {
+      if (entry.isSymbolicLink()) {
+        console.warn(`Skipping symlinked skill entry: ${path.join(expandedDirPath, entry.name)}`);
+        return false;
+      }
+      return entry.isDirectory();
+    })
     .map((entry) => entry.name)
     .sort((a, b) => a.localeCompare(b));
 
@@ -133,6 +144,8 @@ export async function loadSkillsFromDir(skillsDirPath: string): Promise<LoadedSk
 }
 
 export async function loadSkills(config?: OrcaConfig): Promise<LoadedSkill[]> {
+  // NOTE: config.skills paths are currently resolved relative to process.cwd().
+  // A future improvement can resolve them relative to the config file location.
   const fromConfig = await Promise.all((config?.skills ?? []).map((skillPath) => loadSkill(skillPath)));
   const projectSkills = await loadSkillsFromDir(path.join(process.cwd(), ".orca", "skills"));
   const globalSkills = await loadSkillsFromDir(path.join(os.homedir(), ".orca", "skills"));
