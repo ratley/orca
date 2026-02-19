@@ -1,26 +1,26 @@
 ---
-date: 2026-02-19T05:56:27Z
-session: cli-task-flag
+date: 2026-02-19T06:00:00Z
+session: cli-prompt-alias
 agent: eve
 ---
 
 ## Built
-- Added `--task <text>` as an inline alternative to `--spec <path>` for `orca run`
-- Enforced `--spec`/`--task` mutual exclusivity and required-one validation at CLI action level and handler level
-- Implemented temp-spec lifecycle for inline tasks using `os.tmpdir()` + unique filename with cleanup in `finally`
+- Added `-p, --prompt <text>` as aliases for `--task` in `orca run`
+- All three flags (`--task`, `--prompt`, `-p`) are equivalent; mutually exclusive with `--spec`
 
 ## Changed
-- `src/cli/commands/run.ts` | Added `task?: string` to `RunCommandOptions`; made `spec` optional; added inline-task temp file write/read/cleanup flow; updated command options and action validation
+- `src/cli/commands/run.ts` | Added `prompt?: string` to RunCommandOptions; normalize `task ?? prompt` into `inlineTask` in handler and action validator; added `-p, --prompt <text>` commander option
 
 ## Verification
-- `bun test` | 78 passing, 0 failing
+- Unit tests: 37 pass, 0 fail
 
 ## Decisions
-- Preserve planner/task-runner/agent behavior; implement entirely in CLI layer by materializing `--task` into a temporary markdown file
-- Keep validation in both commander `.action()` and `runCommandHandler` for direct-handler call safety
+- Normalize at handler entry rather than duplicating checks; single `inlineTask` var used throughout
+- Validation messages updated to mention all three flags
 
 ## Next
-- Add targeted CLI tests for `--task` path and mutual-exclusion validation
+- Update codex-client remote to ratley/codex-client (transfer accepted)
+- Update orca package.json dep reference from eve-senara to ratley
 
 ## Blockers
 - None

@@ -20,6 +20,7 @@ import { generateRunId } from "../../utils/ids.js";
 export interface RunCommandOptions {
   spec?: string;
   task?: string;
+  prompt?: string;
   config?: string;
   onMilestone?: string;
   onTaskComplete?: string;
@@ -71,21 +72,23 @@ function buildCliCommandHooks(options: RunCommandOptions): Partial<Record<HookNa
 }
 
 export async function runCommandHandler(options: RunCommandOptions): Promise<void> {
-  if (!options.spec && !options.task) {
-    throw new Error("One of --spec or --task must be provided.");
+  const inlineTask = options.task ?? options.prompt;
+
+  if (!options.spec && !inlineTask) {
+    throw new Error("One of --spec, --task, or --prompt (-p) must be provided.");
   }
 
-  if (options.spec && options.task) {
-    throw new Error("Options --spec and --task are mutually exclusive.");
+  if (options.spec && inlineTask) {
+    throw new Error("--spec is mutually exclusive with --task / --prompt.");
   }
 
-  const usesInlineTask = Boolean(options.task);
+  const usesInlineTask = Boolean(inlineTask);
   const specPath = usesInlineTask
     ? path.join(os.tmpdir(), `orca-task-${Date.now()}-${randomUUID()}.md`)
     : path.resolve(options.spec ?? "");
 
   if (usesInlineTask) {
-    await writeFile(specPath, `${options.task}\n`, "utf8");
+    await writeFile(specPath, `${inlineTask}\n`, "utf8");
   }
 
   try {
@@ -230,6 +233,7 @@ export function registerRunCommand(program: Command): void {
     .description("Run pre-planning and execution")
     .option("--spec <path>", "Path to spec markdown file")
     .option("--task <text>", "Inline task text (alternative to --spec)")
+    .option("-p, --prompt <text>", "Inline task text (alias for --task)")
     .option("--config <path>", "Path to orca config file")
     .option("--on-milestone <cmd>", "Shell hook command for onMilestone")
     .option("--on-task-complete <cmd>", "Shell hook command for onTaskComplete")
@@ -237,12 +241,14 @@ export function registerRunCommand(program: Command): void {
     .option("--on-complete <cmd>", "Shell hook command for onComplete")
     .option("--on-error <cmd>", "Shell hook command for onError")
     .action(async (commandOptions: RunCommandOptions) => {
-      if (!commandOptions.spec && !commandOptions.task) {
-        throw new Error("One of --spec or --task must be provided.");
+      const inlineTask = commandOptions.task ?? commandOptions.prompt;
+
+      if (!commandOptions.spec && !inlineTask) {
+        throw new Error("One of --spec, --task, or --prompt (-p) must be provided.");
       }
 
-      if (commandOptions.spec && commandOptions.task) {
-        throw new Error("Options --spec and --task are mutually exclusive.");
+      if (commandOptions.spec && inlineTask) {
+        throw new Error("--spec is mutually exclusive with --task / --prompt.");
       }
 
       await runCommandHandler(commandOptions);
