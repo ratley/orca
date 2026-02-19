@@ -1,7 +1,6 @@
 {
   "name": "orcastrator",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "bin": {
     "orca": "./dist/cli/index.js"
@@ -18,7 +17,7 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.47",
     "chalk": "^5.3.0",
-    "orca-codex-client": "file:../codex-client",
+    "orca-codex-client": "^0.1.0",
     "commander": "^13.1.0",
     "zod": "^3.24.1"
   },
@@ -33,5 +32,25 @@
     "*.ts": [
       "oxlint --fix"
     ]
-  }
+  },
+  "files": [
+    "dist/**/*.js",
+    "!dist/**/*.test.js",
+    "README.md"
+  ],
+  "description": "Coordinated agent run harness",
+  "author": "ratley",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ratley/orca.git"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "codex",
+    "claude",
+    "orchestration",
+    "cli"
+  ]
 }

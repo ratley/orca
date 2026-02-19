@@ -8,7 +8,7 @@
         "@anthropic-ai/claude-agent-sdk": "^0.2.47",
         "chalk": "^5.3.0",
         "commander": "^13.1.0",
-        "orca-codex-client": "file:../codex-client",
+        "orca-codex-client": "^0.1.0",
         "zod": "^3.24.1",
       },
       "devDependencies": {
@@ -125,7 +125,7 @@
 
     "onetime": ["onetime@7.0.0", "", { "dependencies": { "mimic-function": "^5.0.0" } }, "sha512-VXJjc87FScF88uafS3JllDgvAm+c/Slfz06lorj2uAY34rlUu0Nt+v8wreiImcrgAjjIHp1rXpTDlLOGw29WwQ=="],
 
-    "orca-codex-client": ["orca-codex-client@file:../codex-client", { "devDependencies": { "@types/bun": "latest", "typescript": "^5" }, "peerDependencies": { "typescript": "^5" } }],
+    "orca-codex-client": ["orca-codex-client@0.1.0", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-1z4UAoVL47u2KbPU8XDgBX+TLR2SjyBEwTcFMReunpvStlGEfMeCmLT6SO+12qfyGm7oYwnNdXvwvcjhAqjkbg=="],
 
     "oxlint": ["oxlint@0.15.15", "", { "optionalDependencies": { "@oxlint/darwin-arm64": "0.15.15", "@oxlint/darwin-x64": "0.15.15", "@oxlint/linux-arm64-gnu": "0.15.15", "@oxlint/linux-arm64-musl": "0.15.15", "@oxlint/linux-x64-gnu": "0.15.15", "@oxlint/linux-x64-musl": "0.15.15", "@oxlint/win32-arm64": "0.15.15", "@oxlint/win32-x64": "0.15.15" }, "bin": { "oxlint": "bin/oxlint", "oxc_language_server": "bin/oxc_language_server" } }, "sha512-oQNc1mAHrrbKiXyKJMGs9VCZfwGfLy7YiQKa4qupi71X/u4xyWqOh36YKXqWOXnmm2y7vfWFpGZlhJPAa9tMqA=="],
 
