@@ -4,6 +4,7 @@ import { Command } from "commander";
 
 import { registerCancelCommand } from "./commands/cancel.js";
 import { registerListCommand } from "./commands/list.js";
+import { registerPrCommand } from "./commands/pr/index.js";
 import { registerPlanCommand } from "./commands/plan.js";
 import { registerPrFinalizeCommand } from "./commands/pr-finalize.js";
 import { registerResumeCommand } from "./commands/resume.js";
@@ -21,6 +22,7 @@ registerStatusCommand(program);
 registerListCommand(program);
 registerResumeCommand(program);
 registerCancelCommand(program);
+registerPrCommand(program);
 registerPrFinalizeCommand(program);
 registerSetupCommand(program);
 

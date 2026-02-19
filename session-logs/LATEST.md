@@ -1,35 +1,29 @@
 ---
-date: 2026-02-19T06:48:00Z
-session: setup-command + npm name
+date: 2026-02-19T07:00:00Z
+session: pr-namespace
 agent: codex + eve
 ---
 
 ## Built
-- Full `orca setup` command with interactive and scripted modes
-- npm package name locked in: `orcastrator` (bin command stays `orca`)
-- Support for API key configuration (Anthropic, OpenAI)
-- gh CLI detection and optional installation
-- Git repo validation
-- Config persistence to ~/.orca/config.js or ./orca.config.js
-- Unit tests for pure helper functions
+- Implemented `orca pr` namespace with subcommands: `draft`, `create`, `finalize`, `status`
+- Added shared GitHub CLI helper at `src/utils/gh.ts` using `Bun.spawn`
+- Kept legacy `pr-finalize` command registration as deprecated alias
 
 ## Changed
-- `src/types/index.ts` | Added `anthropicApiKey` and `openaiApiKey` optional fields to OrcaConfig
-- `src/cli/index.ts` | Registered setupCommand
-- `src/cli/commands/setup.ts` | New command (240 lines)
-- `src/cli/commands/setup.test.ts` | New test file (helper function tests)
-- `package.json` | name changed to orcastrator
+- `src/cli/index.ts` | Registered `registerPrCommand` while keeping `registerPrFinalizeCommand`
+- `src/cli/commands/pr/index.ts` | New `pr` command group wiring
+- `src/cli/commands/pr/draft.ts` | `orca pr draft --run <run-id>` implementation
+- `src/cli/commands/pr/create.ts` | `orca pr create --run <run-id>` implementation
+- `src/cli/commands/pr/finalize.ts` | `orca pr finalize --run <run-id>` implementation
+- `src/cli/commands/pr/status.ts` | `orca pr status --run <run-id>` implementation
+- `src/cli/commands/pr/shared.ts` | Shared run loading, PR title/body, and gh missing handling
+- `src/utils/gh.ts` | `checkGhCli()` and `runGh(args)`
 
 ## Verification
-- All 78 existing tests pass
-- New setup tests pass (resolveApiKey, detectPackageManager, buildConfigModule)
-- typecheck clean
+- `bun test` -> 96 pass, 0 fail
 
 ## Next
-- `orca help` command (agent-friendly output)
-- `orca pr` namespace (draft/create/finalize/status subcommands)
-- Interactive run selector
-- Quick wins: --last flag, --plan alias
+- Add focused unit tests for new `pr` command handlers with mocked `runGh` responses
 
 ## Blockers
 - None
