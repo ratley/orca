@@ -1,9 +1,20 @@
 import type { Command } from "commander";
 
 import { checkGhCli, runGh } from "../../../utils/gh.js";
-import { type PrCommandOptions, createStore, loadRunOrExit, printGhMissingAndExit } from "./shared.js";
+import {
+  type PrCommandOptions,
+  createStore,
+  loadRunOrExit,
+  printGhMissingAndExit,
+  resolveRunIdOrExit
+} from "./shared.js";
 
-export async function prFinalizeCommandHandler(options: PrCommandOptions): Promise<void> {
+export async function prPublishCommandHandler(options: PrCommandOptions): Promise<void> {
+  const runId = await resolveRunIdOrExit(options, "publish");
+  if (!runId) {
+    return;
+  }
+
   const run = await loadRunOrExit(options);
   if (!run) {
     return;
@@ -28,7 +39,7 @@ export async function prFinalizeCommandHandler(options: PrCommandOptions): Promi
   }
 
   const store = createStore();
-  await store.updateRun(options.run, {
+  await store.updateRun(runId, {
     pr: {
       ...run.pr,
       readyForFinalize: true,
@@ -39,11 +50,11 @@ export async function prFinalizeCommandHandler(options: PrCommandOptions): Promi
   console.log(`PR marked ready for review: ${run.pr.url}`);
 }
 
-export function registerPrFinalizeCommand(program: Command): void {
+export function registerPrPublishCommand(program: Command): void {
   program
-    .command("finalize")
-    .description("Promote a draft PR to ready for review")
-    .requiredOption("--run <run-id>", "Run ID to finalize PR for")
+    .command("publish")
+    .description("Publish a draft PR (mark ready for review)")
+    .option("--run <run-id>", "Run ID to publish PR for")
     .option("--config <path>", "Path to orca config file")
-    .action(async (options: PrCommandOptions) => prFinalizeCommandHandler(options));
+    .action(async (options: PrCommandOptions) => prPublishCommandHandler(options));
 }

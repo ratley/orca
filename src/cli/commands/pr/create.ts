@@ -7,7 +7,8 @@ import {
   buildPrTitle,
   createStore,
   loadRunOrExit,
-  printGhMissingAndExit
+  printGhMissingAndExit,
+  resolveRunIdOrExit
 } from "./shared.js";
 
 function parsePrUrl(stdout: string): string | null {
@@ -19,6 +20,11 @@ function parsePrUrl(stdout: string): string | null {
 }
 
 export async function prCreateCommandHandler(options: PrCommandOptions): Promise<void> {
+  const runId = await resolveRunIdOrExit(options, "create");
+  if (!runId) {
+    return;
+  }
+
   const run = await loadRunOrExit(options);
   if (!run) {
     return;
@@ -47,7 +53,7 @@ export async function prCreateCommandHandler(options: PrCommandOptions): Promise
   }
 
   const store = createStore();
-  await store.updateRun(options.run, {
+  await store.updateRun(runId, {
     pr: {
       ...run.pr,
       url,
@@ -64,7 +70,7 @@ export function registerPrCreateCommand(program: Command): void {
   program
     .command("create")
     .description("Create a pull request for a run")
-    .requiredOption("--run <run-id>", "Run ID to create PR for")
+    .option("--run <run-id>", "Run ID to create PR for")
     .option("--config <path>", "Path to orca config file")
     .action(async (options: PrCommandOptions) => prCreateCommandHandler(options));
 }

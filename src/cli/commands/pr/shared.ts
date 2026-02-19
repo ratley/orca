@@ -2,9 +2,10 @@ import path from "node:path";
 
 import { RunStore } from "../../../state/store.js";
 import type { RunStatus } from "../../../types/index.js";
+import { selectRun } from "../../../utils/select-run.js";
 
 export interface PrCommandOptions {
-  run: string;
+  run?: string;
   config?: string;
 }
 
@@ -41,6 +42,12 @@ export function buildPrBody(run: RunStatus): string {
 }
 
 export async function loadRunOrExit(options: PrCommandOptions): Promise<RunStatus | null> {
+  if (!options.run) {
+    console.error("Run ID is required.");
+    process.exitCode = 1;
+    return null;
+  }
+
   const store = createStore();
   const run = await store.getRun(options.run);
 
@@ -56,4 +63,28 @@ export async function loadRunOrExit(options: PrCommandOptions): Promise<RunStatu
 export function printGhMissingAndExit(): void {
   console.error("gh CLI not found. Run `orca setup` to install it.");
   process.exitCode = 1;
+}
+
+export async function resolveRunIdOrExit(
+  options: PrCommandOptions,
+  commandName: "draft" | "create" | "publish" | "status"
+): Promise<string | null> {
+  if (options.run) {
+    return options.run;
+  }
+
+  if (!process.stdout.isTTY) {
+    console.error(`missing --run <run-id>. Usage: orca pr ${commandName} --run <id>`);
+    process.exitCode = 1;
+    return null;
+  }
+
+  const runId = await selectRun(createStore());
+  if (!runId) {
+    process.exitCode = 1;
+    return null;
+  }
+
+  options.run = runId;
+  return runId;
 }

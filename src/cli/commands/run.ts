@@ -19,6 +19,7 @@ import { generateRunId } from "../../utils/ids.js";
 
 export interface RunCommandOptions {
   spec?: string;
+  plan?: string;
   task?: string;
   prompt?: string;
   config?: string;
@@ -73,19 +74,20 @@ function buildCliCommandHooks(options: RunCommandOptions): Partial<Record<HookNa
 
 export async function runCommandHandler(options: RunCommandOptions): Promise<void> {
   const inlineTask = options.task ?? options.prompt;
+  const inputSpecPath = options.spec ?? options.plan;
 
-  if (!options.spec && !inlineTask) {
+  if (!inputSpecPath && !inlineTask) {
     throw new Error("One of --spec, --task, or --prompt (-p) must be provided.");
   }
 
-  if (options.spec && inlineTask) {
+  if (inputSpecPath && inlineTask) {
     throw new Error("--spec is mutually exclusive with --task / --prompt.");
   }
 
   const usesInlineTask = Boolean(inlineTask);
   const specPath = usesInlineTask
     ? path.join(os.tmpdir(), `orca-task-${Date.now()}-${randomUUID()}.md`)
-    : path.resolve(options.spec ?? "");
+    : path.resolve(inputSpecPath ?? "");
 
   if (usesInlineTask) {
     await writeFile(specPath, `${inlineTask}\n`, "utf8");
@@ -232,6 +234,7 @@ export function registerRunCommand(program: Command): void {
     .command("run", { isDefault: true })
     .description("Run pre-planning and execution")
     .option("--spec <path>", "Path to spec markdown file")
+    .option("--plan <path>", "Alias for --spec — path to a plan/spec file")
     .option("--task <text>", "Inline task text (alternative to --spec)")
     .option("-p, --prompt <text>", "Inline task text (alias for --task)")
     .option("--config <path>", "Path to orca config file")
@@ -242,12 +245,13 @@ export function registerRunCommand(program: Command): void {
     .option("--on-error <cmd>", "Shell hook command for onError")
     .action(async (commandOptions: RunCommandOptions) => {
       const inlineTask = commandOptions.task ?? commandOptions.prompt;
+      const inputSpecPath = commandOptions.spec ?? commandOptions.plan;
 
-      if (!commandOptions.spec && !inlineTask) {
+      if (!inputSpecPath && !inlineTask) {
         throw new Error("One of --spec, --task, or --prompt (-p) must be provided.");
       }
 
-      if (commandOptions.spec && inlineTask) {
+      if (inputSpecPath && inlineTask) {
         throw new Error("--spec is mutually exclusive with --task / --prompt.");
       }
 

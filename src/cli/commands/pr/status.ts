@@ -1,7 +1,7 @@
 import type { Command } from "commander";
 
 import { checkGhCli, runGh } from "../../../utils/gh.js";
-import { type PrCommandOptions, loadRunOrExit, printGhMissingAndExit } from "./shared.js";
+import { type PrCommandOptions, loadRunOrExit, printGhMissingAndExit, resolveRunIdOrExit } from "./shared.js";
 
 interface GhPrStatusCheck {
   name?: string;
@@ -29,6 +29,10 @@ function checkName(check: GhPrStatusCheck): string {
 }
 
 export async function prStatusCommandHandler(options: PrCommandOptions): Promise<void> {
+  if (!(await resolveRunIdOrExit(options, "status"))) {
+    return;
+  }
+
   const run = await loadRunOrExit(options);
   if (!run) {
     return;
@@ -81,7 +85,7 @@ export function registerPrStatusCommand(program: Command): void {
   program
     .command("status")
     .description("Show pull request status for a run")
-    .requiredOption("--run <run-id>", "Run ID to inspect PR for")
+    .option("--run <run-id>", "Run ID to inspect PR for")
     .option("--config <path>", "Path to orca config file")
     .action(async (options: PrCommandOptions) => prStatusCommandHandler(options));
 }
