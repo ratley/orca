@@ -36,7 +36,13 @@ export interface RunStatus {
   specPath: string;
   createdAt: string;
   updatedAt: string;
-  overallStatus: "planning" | "running" | "completed" | "failed" | "cancelled";
+  overallStatus:
+    | "planning"
+    | "running"
+    | "waiting_for_answer"
+    | "completed"
+    | "failed"
+    | "cancelled";
   tasks: Task[];
   milestones: string[];
   errors: Array<{ at: string; message: string; taskId?: string }>;
@@ -73,6 +79,7 @@ export interface OrcaConfig {
   anthropicApiKey?: string;
   openaiApiKey?: string;
   runsDir?: string;
+  sessionLogs?: string;
   maxRetries?: number;
   claude?: {
     model?: string;

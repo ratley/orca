@@ -43,7 +43,14 @@ export const RunStatusSchema = z.object({
   specPath: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),
-  overallStatus: z.enum(["planning", "running", "completed", "failed", "cancelled"]),
+  overallStatus: z.enum([
+    "planning",
+    "running",
+    "waiting_for_answer",
+    "completed",
+    "failed",
+    "cancelled"
+  ]),
   tasks: z.array(TaskSchema),
   milestones: z.array(z.string()),
   errors: z.array(ErrorEntrySchema),

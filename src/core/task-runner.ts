@@ -1,6 +1,9 @@
+import path from "node:path";
+import { promises as fs } from "node:fs";
+
 import { executeTask } from "../agents/claude/session.js";
 import { RunStore } from "../state/store.js";
-import type { HookEvent, OrcaConfig, RunId, Task } from "../types/index.js";
+import type { HookEvent, OrcaConfig, RunId, RunStatus, Task } from "../types/index.js";
 import { getRunnable, validateDAG } from "./dependency-graph.js";
 import { shouldRetry } from "./retry-policy.js";
 
@@ -65,6 +68,52 @@ export interface TaskRunnerOptions {
   executeTask?: ExecuteTaskFn;
 }
 
+function buildSessionSummary(run: RunStatus): string {
+  const taskRows =
+    run.tasks.length === 0
+      ? "| (none) | - | - | - | - |\n"
+      : run.tasks
+          .map((task) => {
+            return `| ${task.id} | ${task.name} | ${task.status} | ${task.startedAt ?? "-"} | ${task.finishedAt ?? "-"} |`;
+          })
+          .join("\n");
+
+  return [
+    `# Run ${run.runId}`,
+    "",
+    `- Run ID: \`${run.runId}\``,
+    `- Spec Path: \`${run.specPath}\``,
+    `- Status: \`${run.overallStatus}\``,
+    `- Created At: \`${run.createdAt}\``,
+    `- Updated At: \`${run.updatedAt}\``,
+    "",
+    "## Tasks",
+    "",
+    "| ID | Name | Status | Started At | Finished At |",
+    "| --- | --- | --- | --- | --- |",
+    taskRows,
+    ""
+  ].join("\n");
+}
+
+async function writeSessionSummary(store: RunStore, runId: string, sessionLogsDir?: string): Promise<void> {
+  if (!sessionLogsDir) {
+    return;
+  }
+
+  try {
+    const run = await store.getRun(runId);
+    if (!run) {
+      throw new Error(`Run not found while writing session summary: ${runId}`);
+    }
+
+    await fs.mkdir(sessionLogsDir, { recursive: true });
+    await fs.writeFile(path.join(sessionLogsDir, `${runId}.md`), buildSessionSummary(run), "utf8");
+  } catch (error) {
+    console.error(`Warning: failed to write session summary for ${runId}: ${toErrorMessage(error)}`);
+  }
+}
+
 export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
   const emitHook = options.emitHook ?? defaultEmitHook;
   const executeTaskFn = options.executeTask ?? executeTaskImpl;
@@ -100,6 +149,7 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
           timestamp: new Date().toISOString(),
           metadata: { overallStatus: "cancelled" }
         });
+        await writeSessionSummary(store, runId, config?.sessionLogs);
         return;
       }
 
@@ -127,6 +177,7 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
             timestamp: completedAt,
             metadata: { overallStatus: "completed" }
           });
+          await writeSessionSummary(store, runId, config?.sessionLogs);
           return;
         }
 
@@ -149,6 +200,7 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
             error: failureMessage,
             metadata: { overallStatus: "failed" }
           });
+          await writeSessionSummary(store, runId, config?.sessionLogs);
           return;
         }
 
@@ -161,6 +213,7 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
             timestamp: new Date().toISOString(),
             metadata: { overallStatus: "cancelled" }
           });
+          await writeSessionSummary(store, runId, config?.sessionLogs);
           return;
         }
 
@@ -313,6 +366,7 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
       error: errorMessage,
       metadata: { overallStatus: "failed" }
     });
+    await writeSessionSummary(store, runId, config?.sessionLogs);
     throw error;
   }
 }

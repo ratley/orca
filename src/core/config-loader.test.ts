@@ -37,7 +37,11 @@ describe("config-loader", () => {
 
   test("resolveConfigFromPaths loads explicit cli path", async () => {
     const cliPath = path.join(tempDir, "cli.config.js");
-    await fs.writeFile(cliPath, "export default { runsDir: 'from-cli' };\n", "utf8");
+    await fs.writeFile(
+      cliPath,
+      "export default { runsDir: 'from-cli', sessionLogs: '/tmp/orca-session-logs' };\n",
+      "utf8"
+    );
 
     const resolved = await resolveConfigFromPaths(
       path.join(tempDir, "missing-global.js"),
@@ -46,6 +50,7 @@ describe("config-loader", () => {
     );
 
     expect(resolved?.runsDir).toBe("from-cli");
+    expect(resolved?.sessionLogs).toBe("/tmp/orca-session-logs");
   });
 
   test("resolveConfigFromPaths merges global and project", async () => {
@@ -59,7 +64,7 @@ describe("config-loader", () => {
     );
     await fs.writeFile(
       projectPath,
-      "export default { runsDir: 'project-runs', claude: { useV2Preview: true }, codex: { model: 'gpt-project' }, pr: { requireConfirmation: false }, hookCommands: { onMilestone: 'echo project-milestone' } };\n",
+      "export default { runsDir: 'project-runs', sessionLogs: '/tmp/project-session-logs', claude: { useV2Preview: true }, codex: { model: 'gpt-project' }, pr: { requireConfirmation: false }, hookCommands: { onMilestone: 'echo project-milestone' } };\n",
       "utf8"
     );
 
@@ -67,6 +72,7 @@ describe("config-loader", () => {
 
     expect(resolved).toEqual({
       runsDir: "project-runs",
+      sessionLogs: "/tmp/project-session-logs",
       maxRetries: 2,
       claude: {
         model: "claude-global",
@@ -91,6 +97,7 @@ describe("config-loader", () => {
     const globalConfig = {
       runsDir: "global",
       maxRetries: 1,
+      sessionLogs: "global-logs",
       anthropicApiKey: "global-key",
       claude: { model: "claude-global" },
       codex: { enabled: false },
@@ -101,6 +108,7 @@ describe("config-loader", () => {
     const projectConfig = {
       runsDir: "project",
       maxRetries: 2,
+      sessionLogs: "project-logs",
       claude: { useV2Preview: true },
       codex: { model: "gpt-project" },
       pr: { requireConfirmation: true },
@@ -110,6 +118,7 @@ describe("config-loader", () => {
     const cliConfig = {
       runsDir: "cli",
       maxRetries: 3,
+      sessionLogs: "cli-logs",
       openaiApiKey: "cli-openai",
       claude: { model: "claude-cli" },
       codex: { enabled: true },
@@ -121,6 +130,7 @@ describe("config-loader", () => {
 
     expect(merged).toEqual({
       runsDir: "cli",
+      sessionLogs: "cli-logs",
       maxRetries: 3,
       anthropicApiKey: "global-key",
       openaiApiKey: "cli-openai",

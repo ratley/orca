@@ -2,6 +2,7 @@
 
 import { Command } from "commander";
 
+import { registerAnswerCommand } from "./commands/answer.js";
 import { registerCancelCommand } from "./commands/cancel.js";
 import { registerHelpCommand } from "./commands/help.js";
 import { registerListCommand } from "./commands/list.js";
@@ -15,9 +16,10 @@ import { registerStatusCommand } from "./commands/status.js";
 
 const program = new Command();
 
-program.name("orca").description("Orca CLI: coordinated agent run harness").version("0.1.0");
+program.name("orca").description("Orca CLI: coordinated agent run harness").version("0.2.0");
 
 registerRunCommand(program);
+registerAnswerCommand(program);
 registerPlanCommand(program);
 registerStatusCommand(program);
 registerListCommand(program);

@@ -22,6 +22,7 @@ export interface RunCommandOptions {
   plan?: string;
   task?: string;
   prompt?: string;
+  goal?: string;
   config?: string;
   onMilestone?: string;
   onTaskComplete?: string;
@@ -73,8 +74,16 @@ function buildCliCommandHooks(options: RunCommandOptions): Partial<Record<HookNa
 }
 
 export async function runCommandHandler(options: RunCommandOptions): Promise<void> {
-  const inlineTask = options.task ?? options.prompt;
+  const inlineTask = options.task ?? options.prompt ?? options.goal;
   const inputSpecPath = options.spec ?? options.plan;
+
+  if (options.goal !== undefined && (options.task || options.prompt)) {
+    throw new Error("positional goal and --task/--prompt are mutually exclusive");
+  }
+
+  if (options.goal !== undefined && inputSpecPath) {
+    throw new Error("positional goal and --spec/--plan are mutually exclusive");
+  }
 
   if (!inputSpecPath && !inlineTask) {
     throw new Error("One of --spec, --task, or --prompt (-p) must be provided.");
@@ -231,7 +240,7 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
 
 export function registerRunCommand(program: Command): void {
   program
-    .command("run", { isDefault: true })
+    .command("run [goal]", { isDefault: true })
     .description("Run pre-planning and execution")
     .option("--spec <path>", "Path to spec markdown file")
     .option("--plan <path>", "Alias for --spec — path to a plan/spec file")
@@ -243,9 +252,21 @@ export function registerRunCommand(program: Command): void {
     .option("--on-task-fail <cmd>", "Shell hook command for onTaskFail")
     .option("--on-complete <cmd>", "Shell hook command for onComplete")
     .option("--on-error <cmd>", "Shell hook command for onError")
-    .action(async (commandOptions: RunCommandOptions) => {
-      const inlineTask = commandOptions.task ?? commandOptions.prompt;
-      const inputSpecPath = commandOptions.spec ?? commandOptions.plan;
+    .action(async (goal: string | undefined, commandOptions: RunCommandOptions) => {
+      const normalizedOptions: RunCommandOptions = {
+        ...commandOptions,
+        ...(goal !== undefined ? { goal } : {})
+      };
+      const inlineTask = normalizedOptions.task ?? normalizedOptions.prompt ?? normalizedOptions.goal;
+      const inputSpecPath = normalizedOptions.spec ?? normalizedOptions.plan;
+
+      if (normalizedOptions.goal !== undefined && (normalizedOptions.task || normalizedOptions.prompt)) {
+        throw new Error("positional goal and --task/--prompt are mutually exclusive");
+      }
+
+      if (normalizedOptions.goal !== undefined && inputSpecPath) {
+        throw new Error("positional goal and --spec/--plan are mutually exclusive");
+      }
 
       if (!inputSpecPath && !inlineTask) {
         throw new Error("One of --spec, --task, or --prompt (-p) must be provided.");
@@ -255,6 +276,6 @@ export function registerRunCommand(program: Command): void {
         throw new Error("--spec is mutually exclusive with --task / --prompt.");
       }
 
-      await runCommandHandler(commandOptions);
+      await runCommandHandler(normalizedOptions);
     });
 }

@@ -170,4 +170,61 @@ describe("task-runner", () => {
     expect(run.overallStatus).toBe("failed");
     expect(hookEvents.some((event) => event.hook === "onError")).toBe(true);
   });
+
+  test("writes session summary markdown when config.sessionLogs is set", async () => {
+    const tasks = [makeTask("t1")];
+    const sessionLogsDir = path.join(tempDir, "session-logs");
+    await store.updateRun(runId, {
+      mode: "run",
+      overallStatus: "running",
+      tasks
+    });
+
+    setExecuteTaskForTests(async () => ({
+      outcome: "done",
+      rawResponse: '{"outcome":"done"}'
+    }));
+
+    await runTaskRunner({
+      runId,
+      store,
+      config: { sessionLogs: sessionLogsDir },
+      emitHook: async () => {}
+    });
+
+    const summaryPath = path.join(sessionLogsDir, `${runId}.md`);
+    const summary = await fs.readFile(summaryPath, "utf8");
+
+    expect(summary).toContain(`# Run ${runId}`);
+    expect(summary).toContain("- Spec Path: `/tmp/spec.md`");
+    expect(summary).toContain("- Status: `completed`");
+    expect(summary).toContain("| t1 | t1 | done |");
+  });
+
+  test("does not fail run when session summary write fails", async () => {
+    const tasks = [makeTask("t1")];
+    const sessionLogsPath = path.join(tempDir, "session-logs-file");
+    await fs.writeFile(sessionLogsPath, "not-a-directory\n", "utf8");
+    await store.updateRun(runId, {
+      mode: "run",
+      overallStatus: "running",
+      tasks
+    });
+
+    setExecuteTaskForTests(async () => ({
+      outcome: "done",
+      rawResponse: '{"outcome":"done"}'
+    }));
+
+    await runTaskRunner({
+      runId,
+      store,
+      config: { sessionLogs: sessionLogsPath },
+      emitHook: async () => {}
+    });
+
+    const run = await store.getRun(runId);
+    expect(run?.overallStatus).toBe("completed");
+    expect(run?.tasks[0]?.status).toBe("done");
+  });
 });

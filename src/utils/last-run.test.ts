@@ -40,4 +40,22 @@ describe("getLastRun", () => {
 
     expect(run?.runId).toBe("second-1001-abcd");
   });
+
+  test("uses createdAt (not updatedAt) to determine recency", async () => {
+    await store.createRun("older-1000-abcd", "/tmp/spec-a.md");
+    await store.createRun("newer-1001-abcd", "/tmp/spec-b.md");
+
+    await store.updateRun("older-1000-abcd", {
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-12-31T00:00:00.000Z"
+    });
+    await store.updateRun("newer-1001-abcd", {
+      createdAt: "2026-01-02T00:00:00.000Z",
+      updatedAt: "2026-01-02T00:00:00.000Z"
+    });
+
+    const run = await getLastRun(store);
+
+    expect(run?.runId).toBe("newer-1001-abcd");
+  });
 });

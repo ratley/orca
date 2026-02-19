@@ -25,7 +25,7 @@ function printStyledHelpPage(): void {
   console.log("");
 
   printSection("RUNNING", [
-    { command: 'orca -p "add auth to the app"', description: "run with inline goal" },
+    { command: 'orca "add auth to the app"', description: "run with inline goal" },
     { command: "orca --plan ./specs/feature.md", description: "run from plan file" },
     { command: "orca plan --spec ./specs/feature.md", description: "plan only, no execution" }
   ]);

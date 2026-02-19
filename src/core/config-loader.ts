@@ -77,8 +77,8 @@ export async function loadConfig(configPath?: string): Promise<OrcaConfig | unde
 
 const TOP_LEVEL_SCALARS: Array<keyof Pick<
   OrcaConfig,
-  "runsDir" | "maxRetries" | "anthropicApiKey" | "openaiApiKey"
->> = ["runsDir", "maxRetries", "anthropicApiKey", "openaiApiKey"];
+  "runsDir" | "sessionLogs" | "maxRetries" | "anthropicApiKey" | "openaiApiKey"
+>> = ["runsDir", "sessionLogs", "maxRetries", "anthropicApiKey", "openaiApiKey"];
 
 export function mergeConfigs(...configs: Array<OrcaConfig | undefined>): OrcaConfig | undefined {
   const presentConfigs = configs.filter((config): config is OrcaConfig => config !== undefined);
@@ -91,7 +91,7 @@ export function mergeConfigs(...configs: Array<OrcaConfig | undefined>): OrcaCon
   for (const config of presentConfigs) {
     for (const key of TOP_LEVEL_SCALARS) {
       if (key in config) {
-        merged[key] = config[key];
+        (merged as Record<string, unknown>)[key] = (config as Record<string, unknown>)[key];
       }
     }
 
