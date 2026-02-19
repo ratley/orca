@@ -70,6 +70,8 @@ export interface HookEvent {
 export type HookHandler = (event: HookEvent) => Promise<void>;
 
 export interface OrcaConfig {
+  anthropicApiKey?: string;
+  openaiApiKey?: string;
   runsDir?: string;
   maxRetries?: number;
   claude?: {
