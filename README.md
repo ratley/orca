@@ -2,12 +2,12 @@
 
 Orca is a TypeScript CLI harness for coordinated agent planning and execution. It takes a goal or spec file, uses Claude to decompose it into a task graph, runs a pre-execution review pass with Codex, then executes each task via a persistent Codex thread — keeping full context across the entire run.
 
-**Pipeline:** Claude plans → Codex reviews task graph → Codex executes (persistent thread) → Codex post-run review
+**Pipeline:** Claude plans → Codex strengthens the plan → Codex executes (persistent thread) → Codex post-run review
 
 ## Install
 
 ```bash
-bun install
+npm install -g orcastrator
 ```
 
 ## Usage
@@ -20,10 +20,11 @@ orca --prompt "refactor the auth module to use JWTs"
 orca --task "write unit tests for the payments service"
 ```
 
-### Spec file
+### Spec or plan file
 
 ```bash
 orca run --spec ./specs/myfeature.md
+orca run --plan ./specs/myfeature.md   # --plan is an alias for --spec
 ```
 
 `run` is optional — the above is equivalent to:
@@ -41,7 +42,13 @@ orca status                             # list all runs with status
 orca list                               # list all runs
 orca resume --run <run-id>             # resume an incomplete run
 orca cancel --run <run-id>             # cancel an active run
-orca pr-finalize --run <run-id>        # finalize a prepared pull request
+
+# Pull request workflow
+orca pr                                 # interactive — pick run + action
+orca pr draft --run <run-id>           # create a draft PR
+orca pr create --run <run-id>          # create a ready-for-review PR
+orca pr publish --run <run-id>         # publish draft → ready for review
+orca pr status --run <run-id>          # check PR state and CI status
 ```
 
 ### Hooks
@@ -69,18 +76,21 @@ Run IDs follow the format:
 <spec-slug>-<timestamp-ms>-<4char-hex>
 ```
 
-## Dev
-
-```bash
-bun test              # run tests
-bun run src/cli/index.ts -p "your goal here"   # run without building
-```
-
 ## Architecture
 
 | Step | Model | What |
 |------|-------|------|
 | Planning | Claude | Spec → task graph (dependency-aware DAG) |
-| Phase 4 review | Codex | Reviews task graph before execution; aborts on hard blockers |
+| Pre-execution review | Codex | Strengthens the plan — fills gaps, solidifies tasks |
 | Execution | Codex | Persistent thread runs each task (full context across tasks) |
 | Post-run review | Codex | Reviews all changes after execution completes |
+
+## Development
+
+Orca uses [orca-codex-client](https://github.com/ratley/codex-client) under the hood to manage persistent Codex sessions.
+
+```bash
+bun install           # install deps
+bun test              # run tests
+bun run src/cli/index.ts -p "your goal here"   # run without building
+```
