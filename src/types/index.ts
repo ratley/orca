@@ -82,6 +82,7 @@ export interface OrcaConfig {
   sessionLogs?: string;
   skills?: string[];
   maxRetries?: number;
+  executor?: "claude" | "codex";
   claude?: {
     model?: string;
     useV2Preview?: boolean;
