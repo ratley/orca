@@ -40,9 +40,11 @@ function buildTaskExecutionPrompt(
       (criterion, index) => `${index + 1}. ${criterion}`,
     ),
     "Execute this task. You have full shell access — run commands, read/write files, and do whatever is needed.",
-    "When done, output ONLY JSON on the last line:",
-    '{"outcome":"done"|"failed","error"?:"string"}',
-    "If you cannot complete the task, return outcome=failed with a short error reason.",
+    "IMPORTANT: When done, you MUST output the following JSON on its own line as the very last line of your response (no trailing text after it):",
+    '{"outcome":"done"}',
+    "Or if the task failed:",
+    '{"outcome":"failed","error":"short reason"}',
+    "Do not wrap it in markdown fences. Do not add any text after the JSON line. The JSON line is required.",
   ].join("\n\n");
 }
 
@@ -105,6 +107,21 @@ const POSITIVE_COMPLETION_PATTERNS = [
   /\bwritten\b/i,
   /\bcreated\b/i,
   /\bfinished\b/i,
+  // Additional patterns to catch natural-language Codex narration
+  /\bapplied\b/i,
+  /\bimplemented\b/i,
+  /\badded\b/i,
+  /\bupdated\b/i,
+  /\bmodified\b/i,
+  /\binstalled\b/i,
+  /\bfixed\b/i,
+  /\brefactored\b/i,
+  /\bchanges?\s+(?:have\s+been\s+)?made\b/i,
+  /\bthe\s+task\s+(?:has\s+been|is)\b/i,
+  /\bi\s+have\b/i,
+  /\ball\s+(?:tasks?|steps?|criteria)\b/i,
+  /\btest(?:s|ing)?\s+pass/i,
+  /\bno\s+(?:errors?|issues?|failures?)\b/i,
 ];
 
 const FAILURE_PATTERNS = [

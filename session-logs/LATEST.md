@@ -1,21 +1,19 @@
 ---
-date: 2026-02-19T14:58:00Z
-session: review-fixes
+date: 2026-02-19T18:50:00Z
+session: codex-completion-fix
 agent: eve
 ---
-## Built
-- Executor config validation in coerceConfig
-- Skill-loader: symlink guard, EACCES/EPERM resilience
-- Task-runner: Codex session leak fix (try/finally scope)
-- Claude session: parseTaskArray field validation + defaults
-- planSpec config parameter threading
-- Shared PlanResult/TaskExecutionResult types
-- 19 new claude session unit tests + skill-loader tests
+## Fixed
+- Codex completion detection: added 12 POSITIVE_COMPLETION_PATTERNS for natural-language narration
+- Strengthened buildTaskExecutionPrompt JSON mandate (MUST / last line / no fences)
+- Strategy: Option C (patterns + prompt) — eliminates false-negative warnings
+
 ## Changed
-- src/core/config-loader.ts + test
-- src/utils/skill-loader.ts + test
-- src/core/task-runner.ts
-- src/agents/claude/session.ts + NEW session.test.ts
-- src/agents/codex/session.ts
-- src/core/planner.ts
-- src/types/index.ts
+- src/agents/codex/session.ts — POSITIVE_COMPLETION_PATTERNS + buildTaskExecutionPrompt
+
+## Config
+- Created ~/.orca/config.js with global hookCommands (onComplete, onError, onTaskFail, onMilestone)
+
+## Tests
+- 222 pass, 0 fail (bun test)
+- Build: tsc clean (bun run build)
