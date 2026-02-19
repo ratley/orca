@@ -6,10 +6,8 @@
 - Future: `orca skills list` command to show what's loaded
 
 ## Codex-as-Executor
-- task-runner currently imports executeTask from claude/session.ts — all task execution uses Claude
-- Codex has a full executeTask in codex/session.ts (persistent thread!) that's never called
-- Fix: add `executor: "claude" | "codex"` to OrcaConfig, default to "codex" for coding tasks
-- Why: Claude = 8 API calls/run → rate limits. Codex runs local, no rate limit.
+- ✅ Shipped in v0.2.7 — Codex is now default executor; persistent session per run; Claude fallback on init failure
+- config: executor?: "claude" | "codex" in OrcaConfig (default: "codex")
 
 ## Multi-Agent
 - ✅ Shipped: opt-in via `codex: { multiAgent: true }` in orca.config.js — writes to `~/.codex/config.toml`

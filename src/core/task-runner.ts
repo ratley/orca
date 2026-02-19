@@ -1,7 +1,8 @@
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
-import { executeTask } from "../agents/claude/session.js";
+import * as claudeAgent from "../agents/claude/session.js";
+import { createCodexSession } from "../agents/codex/session.js";
 import { RunStore } from "../state/store.js";
 import type { HookEvent, OrcaConfig, RunId, RunStatus, Task } from "../types/index.js";
 import { loadSkills, type LoadedSkill } from "../utils/skill-loader.js";
@@ -10,12 +11,18 @@ import { shouldRetry } from "./retry-policy.js";
 
 export type EmitHook = (event: HookEvent) => Promise<void>;
 
-type ExecuteTaskFn = typeof executeTask;
+export type ExecuteTaskFn = (
+  task: Task,
+  runId: string,
+  config?: OrcaConfig,
+  systemContext?: string
+) => Promise<claudeAgent.TaskExecutionResult>;
 
-let executeTaskImpl: ExecuteTaskFn = executeTask;
+// Non-null only when set by tests — null means "use real executor logic"
+let testExecuteTaskOverride: ExecuteTaskFn | null = null;
 
 export function setExecuteTaskForTests(fn: ExecuteTaskFn | null): void {
-  executeTaskImpl = fn ?? executeTask;
+  testExecuteTaskOverride = fn;
 }
 
 function toErrorMessage(error: unknown): string {
@@ -66,6 +73,7 @@ export interface TaskRunnerOptions {
   store: RunStore;
   config?: OrcaConfig;
   emitHook?: EmitHook;
+  /** Override executor — used by tests only. In production, use config.executor. */
   executeTask?: ExecuteTaskFn;
 }
 
@@ -131,10 +139,37 @@ async function writeSessionSummary(store: RunStore, runId: string, sessionLogsDi
 
 export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
   const emitHook = options.emitHook ?? defaultEmitHook;
-  const executeTaskFn = options.executeTask ?? executeTaskImpl;
   const { runId, store, config } = options;
   const skills = await loadSkills(config);
   const taskSystemContext = skills.length === 0 ? undefined : formatSkillsSection(skills);
+
+  // Test mocks bypass all executor logic entirely — no real sessions created.
+  const mockFn: ExecuteTaskFn | null = options.executeTask ?? testExecuteTaskOverride;
+
+  // Build real executor (Codex persistent session or Claude stateless fallback).
+  // Only runs in production — skipped completely when a mock is active.
+  let codexSession: Awaited<ReturnType<typeof createCodexSession>> | undefined;
+  let executeTaskFn: ExecuteTaskFn;
+
+  if (mockFn) {
+    executeTaskFn = mockFn;
+  } else {
+    const executor = config?.executor ?? "codex";
+    if (executor === "codex") {
+      try {
+        codexSession = await createCodexSession(process.cwd(), config);
+        executeTaskFn = (task, taskRunId, _cfg, systemContext) =>
+          codexSession!.executeTask(task, taskRunId, systemContext);
+      } catch (sessionError) {
+        console.warn(
+          `[orca] Codex session init failed, falling back to Claude: ${toErrorMessage(sessionError)}`
+        );
+        executeTaskFn = claudeAgent.executeTask;
+      }
+    } else {
+      executeTaskFn = claudeAgent.executeTask;
+    }
+  }
 
   let run = await store.getRun(runId);
   if (!run) {
@@ -385,5 +420,13 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
     });
     await writeSessionSummary(store, runId, config?.sessionLogs);
     throw error;
+  } finally {
+    if (codexSession) {
+      try {
+        await codexSession.disconnect();
+      } catch {
+        // Best-effort cleanup — don't mask the real error.
+      }
+    }
   }
 }
