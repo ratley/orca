@@ -1,10 +1,16 @@
 import { unstable_v2_createSession } from "@anthropic-ai/claude-agent-sdk";
 
-import type { Task } from "../../types/index.js";
+import type { OrcaConfig, Task } from "../../types/index.js";
 
 export interface PlanResult {
   tasks: Task[];
   rawResponse: string;
+}
+
+export interface TaskExecutionResult {
+  outcome: "done" | "failed";
+  rawResponse: string;
+  error?: string;
 }
 
 function buildPlanningPrompt(spec: string, systemContext: string): string {
@@ -19,6 +25,24 @@ function buildPlanningPrompt(spec: string, systemContext: string): string {
     "Return ONLY valid JSON. No markdown fences. No explanation.",
     "Spec:",
     spec
+  ].join("\n\n");
+}
+
+function buildTaskExecutionPrompt(task: Task, runId: string, cwd: string): string {
+  return [
+    "You are Orca's task execution assistant.",
+    `Run ID: ${runId}`,
+    `Repository CWD: ${cwd}`,
+    `Task ID: ${task.id}`,
+    `Task Name: ${task.name}`,
+    "Task Description:",
+    task.description,
+    "Acceptance Criteria:",
+    ...task.acceptance_criteria.map((criterion, index) => `${index + 1}. ${criterion}`),
+    "Execute this task and return ONLY JSON.",
+    "JSON schema:",
+    "{\"outcome\":\"done\"|\"failed\",\"error\"?:\"string\"}",
+    "If you cannot complete the task, return outcome=failed with a short error reason."
   ].join("\n\n");
 }
 
@@ -55,52 +79,105 @@ function parseTaskArray(raw: string): Task[] {
   return parsed as Task[];
 }
 
-export async function planSpec(spec: string, systemContext: string): Promise<PlanResult> {
-  const session = unstable_v2_createSession({
-    model: process.env.ORCA_CLAUDE_MODEL ?? "claude-sonnet-4-5"
-  });
+function parseTaskExecution(raw: string): TaskExecutionResult {
+  const parsed = JSON.parse(raw) as unknown;
 
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Claude task response was not a JSON object");
+  }
+
+  const candidate = parsed as { outcome?: unknown; error?: unknown };
+
+  if (candidate.outcome !== "done" && candidate.outcome !== "failed") {
+    throw new Error("Claude task response missing valid outcome");
+  }
+
+  if (candidate.error !== undefined && typeof candidate.error !== "string") {
+    throw new Error("Claude task response error must be a string");
+  }
+
+  return {
+    outcome: candidate.outcome,
+    rawResponse: raw,
+    ...(typeof candidate.error === "string" ? { error: candidate.error } : {})
+  };
+}
+
+async function collectSessionResult(session: ReturnType<typeof unstable_v2_createSession>): Promise<string> {
   const assistantMessages: string[] = [];
   let resultText: string | null = null;
 
+  for await (const message of session.stream()) {
+    const assistantText = extractAssistantText(message);
+    if (assistantText) {
+      assistantMessages.push(assistantText);
+    }
+
+    if (
+      message.type === "result" &&
+      message.subtype === "success" &&
+      typeof message.result === "string"
+    ) {
+      resultText = message.result;
+    }
+
+    if (message.type === "result" && message.subtype !== "success") {
+      const details = "errors" in message ? message.errors.join("; ") : "unknown error";
+      throw new Error(`Claude session failed (${message.subtype}): ${details}`);
+    }
+  }
+
+  const rawResponse = assistantMessages.length > 0
+    ? assistantMessages[assistantMessages.length - 1]
+    : resultText;
+
+  if (!rawResponse) {
+    throw new Error("Claude response was empty");
+  }
+
+  return rawResponse;
+}
+
+function getModel(config?: OrcaConfig): string {
+  return config?.claude?.model ?? process.env.ORCA_CLAUDE_MODEL ?? "claude-sonnet-4-5";
+}
+
+export async function planSpec(spec: string, systemContext: string): Promise<PlanResult> {
+  const session = unstable_v2_createSession({
+    model: getModel()
+  });
+
   try {
-    const streamPromise = (async (): Promise<void> => {
-      for await (const message of session.stream()) {
-        const assistantText = extractAssistantText(message);
-        if (assistantText) {
-          assistantMessages.push(assistantText);
-        }
-
-        if (
-          message.type === "result" &&
-          message.subtype === "success" &&
-          typeof message.result === "string"
-        ) {
-          resultText = message.result;
-        }
-
-        if (message.type === "result" && message.subtype !== "success") {
-          const details = "errors" in message ? message.errors.join("; ") : "unknown error";
-          throw new Error(`Claude planning failed (${message.subtype}): ${details}`);
-        }
-      }
-    })();
+    const streamPromise = collectSessionResult(session);
 
     await session.send(buildPlanningPrompt(spec, systemContext));
-    await streamPromise;
-
-    const rawResponse = assistantMessages.length > 0
-      ? assistantMessages[assistantMessages.length - 1]
-      : resultText;
-
-    if (!rawResponse) {
-      throw new Error("Claude planning response was empty");
-    }
+    const rawResponse = await streamPromise;
 
     return {
       tasks: parseTaskArray(rawResponse),
       rawResponse
     };
+  } finally {
+    session.close();
+  }
+}
+
+export async function executeTask(
+  task: Task,
+  runId: string,
+  config?: OrcaConfig
+): Promise<TaskExecutionResult> {
+  const session = unstable_v2_createSession({
+    model: getModel(config)
+  });
+
+  try {
+    const streamPromise = collectSessionResult(session);
+
+    await session.send(buildTaskExecutionPrompt(task, runId, process.cwd()));
+    const rawResponse = await streamPromise;
+
+    return parseTaskExecution(rawResponse);
   } finally {
     session.close();
   }
