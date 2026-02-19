@@ -1,30 +1,19 @@
 ---
-date: 2026-02-19T00:00:00Z
-session: pre-release-review
+date: 2026-02-19T11:38:00Z
+session: multi-agent-default
 agent: eve
 ---
 
 ## Built
-- release prep updates for code + docs
+- Codex multi-agent enabled by default via project-scoped `.codex/config.toml`
 
 ## Changed
-- `src/cli/commands/answer.ts` | fixed answer payload path to use active run store directory (`<runsDir>/<run-id>/answer.txt`)
-- `src/cli/commands/answer.test.ts` | updated assertions to validate answer file under configured `runsDir`
-- `src/core/task-runner.ts` | made session summary writes best-effort so logging failures do not fail/flip run execution
-- `src/core/task-runner.test.ts` | added regression test for invalid `sessionLogs` path
-- `README.md` | reorganized by usage flow; merged goal usage into primary flow; added full bottom reference section (flags/hooks/run-id/config)
-- `package.json` | version bump `0.1.1` → `0.2.0`
+- `src/types/index.ts` | added `multiAgent?: boolean` to `OrcaConfig.codex`
+- `src/core/codex-config.ts` | new — `ensureCodexMultiAgent()` writes/updates `.codex/config.toml` with `multi_agent = true` before spawning codex app-server
+- `src/core/codex-config.test.ts` | new — 8 tests covering create/append/already-set/skip/default behaviors
+- `src/cli/commands/run.ts` | calls `ensureCodexMultiAgent()` before `createCodexSession()`; logs action taken
+- `TODO.md` | new — skills system, multi-agent, housekeeping items
 
 ## Tests
-- `bun test` → `117 pass`, `0 fail`
-
-## Decisions
-- kept fixes limited to correctness/regression risk; no style-only edits
-- treated `sessionLogs` as non-critical output so write failures are warnings, not run failures
-
-## Next
-1. align CLI version output in `src/cli/index.ts` with package versioning strategy
-2. consider loading config in `resume`/`plan` paths for `runsDir` consistency
-
-## Blockers
-- none
+- `bun test src/core/codex-config.test.ts` → `8 pass`, `0 fail`
+- `bun test` (full suite) → `144 pass`, `2 fail` (pre-existing config-loader failures, unrelated)

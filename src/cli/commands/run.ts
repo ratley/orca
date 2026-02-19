@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import type { Command } from "commander";
 
 import { createCodexSession } from "../../agents/codex/session.js";
+import { ensureCodexMultiAgent } from "../../core/codex-config.js";
 import { resolveConfig } from "../../core/config-loader.js";
 import { runPlanner } from "../../core/planner.js";
 import { runTaskRunner } from "../../core/task-runner.js";
@@ -169,6 +170,16 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
     };
 
     const cwd = process.cwd();
+
+    const multiAgentResult = await ensureCodexMultiAgent(cwd, orcaConfig ?? undefined);
+    if (multiAgentResult.action === "created") {
+      console.log(`Multi-agent: enabled (created ${multiAgentResult.path})`);
+    } else if (multiAgentResult.action === "appended") {
+      console.log(`Multi-agent: enabled (appended to ${multiAgentResult.path})`);
+    } else if (multiAgentResult.action === "already-set") {
+      console.log(`Multi-agent: using existing setting in ${multiAgentResult.path}`);
+    }
+
     const codexSession = await createCodexSession(cwd, orcaConfig ?? undefined);
 
     try {

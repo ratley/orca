@@ -91,6 +91,7 @@ export interface OrcaConfig {
     model?: string;
     command?: string;
     timeoutMs?: number;
+    multiAgent?: boolean;
   };
   hooks?: Partial<Record<HookName, HookHandler>>;
   hookCommands?: Partial<Record<HookName, string>>;
