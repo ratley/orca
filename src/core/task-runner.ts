@@ -1,6 +1,6 @@
 import { executeTask } from "../agents/claude/session.js";
 import { RunStore } from "../state/store.js";
-import type { HookEvent, OrcaConfig, Task } from "../types/index.js";
+import type { HookEvent, OrcaConfig, RunId, Task } from "../types/index.js";
 import { getRunnable, validateDAG } from "./dependency-graph.js";
 import { shouldRetry } from "./retry-policy.js";
 
@@ -306,7 +306,7 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
       // Preserve the original runner failure if state persistence also fails.
     }
     await emitHook({
-      runId: run.runId,
+      runId: runId as RunId,
       hook: "onError",
       message: `run-failed: ${errorMessage}`,
       timestamp: now,

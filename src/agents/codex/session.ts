@@ -61,7 +61,7 @@ function extractAgentText(result: CompletedTurn): string {
   const agentItems = result.items.filter((item) => item.type === "agentMessage");
   if (agentItems.length > 0) {
     const last = agentItems[agentItems.length - 1];
-    if ("text" in last && typeof last.text === "string") {
+    if (last !== undefined && "text" in last && typeof last.text === "string") {
       return last.text;
     }
   }
@@ -79,7 +79,7 @@ function extractJson(text: string): string {
   // Try the last line (common pattern: explanation then JSON)
   const lines = text.trim().split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i].trim();
+    const line = lines[i]?.trim() ?? "";
     if (line.startsWith("{") || line.startsWith("[")) {
       try {
         JSON.parse(line);

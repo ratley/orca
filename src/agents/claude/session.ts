@@ -170,7 +170,6 @@ export async function executeTask(
   const session = unstable_v2_createSession({
     model: getModel(config),
     permissionMode: "bypassPermissions",
-    allowDangerouslySkipPermissions: true,
   });
 
   try {
