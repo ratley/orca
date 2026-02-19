@@ -171,13 +171,9 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
 
     const cwd = process.cwd();
 
-    const multiAgentResult = await ensureCodexMultiAgent(cwd, orcaConfig ?? undefined);
-    if (multiAgentResult.action === "created") {
-      console.log(`Multi-agent: enabled (created ${multiAgentResult.path})`);
-    } else if (multiAgentResult.action === "appended") {
-      console.log(`Multi-agent: enabled (appended to ${multiAgentResult.path})`);
-    } else if (multiAgentResult.action === "already-set") {
-      console.log(`Multi-agent: using existing setting in ${multiAgentResult.path}`);
+    const multiAgentResult = await ensureCodexMultiAgent(orcaConfig ?? undefined);
+    if (multiAgentResult.action === "created" || multiAgentResult.action === "appended") {
+      console.log(`Multi-agent: enabled (updated ${multiAgentResult.path})`);
     }
 
     const codexSession = await createCodexSession(cwd, orcaConfig ?? undefined);

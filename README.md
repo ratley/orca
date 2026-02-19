@@ -82,9 +82,29 @@ export default {
     onTaskComplete: "echo task done: $ORCA_TASK_NAME",
     onComplete: "echo run complete",
     onError: "echo run failed"
+  },
+  codex: {
+    model: "gpt-5.3-codex",       // override the codex model
+    multiAgent: true,              // enable codex multi-agent (see below)
   }
 };
 ```
+
+### Multi-agent mode
+
+Codex supports experimental [multi-agent workflows](https://developers.openai.com/codex/multi-agent) where it can spawn parallel sub-agents for complex tasks.
+
+To enable it in orca, set `codex.multiAgent: true` in your config:
+
+```js
+export default {
+  codex: { multiAgent: true }
+};
+```
+
+When enabled, orca adds `multi_agent = true` to your global `~/.codex/config.toml`. If you already have multi-agent enabled in your Codex config, it will work automatically without setting anything in orca.
+
+> **Note:** Multi-agent is off by default because enabling it modifies your global Codex configuration. It is currently an experimental Codex feature.
 
 ## Reference
 

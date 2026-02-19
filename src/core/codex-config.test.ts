@@ -6,13 +6,13 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { ensureCodexMultiAgent } from "./codex-config.js";
 
 let tmpDir: string;
+let tmpConfigFile: string;
 
 beforeEach(async () => {
-  tmpDir = await import("node:fs/promises").then(async (fs) => {
-    const dir = path.join(os.tmpdir(), `orca-codex-config-test-${Date.now()}`);
-    await fs.mkdir(dir, { recursive: true });
-    return dir;
-  });
+  const fs = await import("node:fs/promises");
+  tmpDir = path.join(os.tmpdir(), `orca-codex-config-test-${Date.now()}`);
+  await fs.mkdir(tmpDir, { recursive: true });
+  tmpConfigFile = path.join(tmpDir, "config.toml");
 });
 
 afterEach(async () => {
@@ -20,94 +20,69 @@ afterEach(async () => {
 });
 
 describe("ensureCodexMultiAgent", () => {
-  it("creates .codex/config.toml when none exists", async () => {
-    const result = await ensureCodexMultiAgent(tmpDir);
+  it("skips by default (multiAgent not set)", async () => {
+    const result = await ensureCodexMultiAgent(undefined, tmpConfigFile);
+    expect(result.action).toBe("skipped");
+  });
+
+  it("skips when codex block is empty", async () => {
+    const result = await ensureCodexMultiAgent({ codex: {} }, tmpConfigFile);
+    expect(result.action).toBe("skipped");
+  });
+
+  it("skips when multiAgent is explicitly false", async () => {
+    const result = await ensureCodexMultiAgent({ codex: { multiAgent: false } }, tmpConfigFile);
+    expect(result.action).toBe("skipped");
+
+    const fs = await import("node:fs/promises");
+    await expect(fs.access(tmpConfigFile)).rejects.toThrow();
+  });
+
+  it("creates config file when multiAgent is true and no file exists", async () => {
+    const result = await ensureCodexMultiAgent({ codex: { multiAgent: true } }, tmpConfigFile);
     expect(result.action).toBe("created");
 
     const content = await readFile(result.path, "utf8");
     expect(content).toContain("multi_agent = true");
   });
 
-  it("returns already-set when multi_agent is already in the file", async () => {
-    const fs = await import("node:fs/promises");
-    const configDir = path.join(tmpDir, ".codex");
-    await fs.mkdir(configDir, { recursive: true });
-    await fs.writeFile(
-      path.join(configDir, "config.toml"),
-      "[features]\nmulti_agent = false\n",
-      "utf8",
-    );
+  it("created file contains orca comment", async () => {
+    await ensureCodexMultiAgent({ codex: { multiAgent: true } }, tmpConfigFile);
+    const content = await readFile(tmpConfigFile, "utf8");
+    expect(content).toContain("Added by orca");
+  });
 
-    const result = await ensureCodexMultiAgent(tmpDir);
+  it("returns already-set when multi_agent already exists in file", async () => {
+    const fs = await import("node:fs/promises");
+    await fs.writeFile(tmpConfigFile, "[features]\nmulti_agent = false\n", "utf8");
+
+    const result = await ensureCodexMultiAgent({ codex: { multiAgent: true } }, tmpConfigFile);
     expect(result.action).toBe("already-set");
 
-    // Should not have overwritten the user's setting
-    const content = await readFile(result.path, "utf8");
+    // Should not overwrite user's setting
+    const content = await readFile(tmpConfigFile, "utf8");
     expect(content).toContain("multi_agent = false");
     expect(content).not.toContain("multi_agent = true");
   });
 
   it("appends feature block when file exists but has no multi_agent", async () => {
     const fs = await import("node:fs/promises");
-    const configDir = path.join(tmpDir, ".codex");
-    await fs.mkdir(configDir, { recursive: true });
-    await fs.writeFile(
-      path.join(configDir, "config.toml"),
-      "[mcp_servers.context7]\ncommand = \"npx\"\n",
-      "utf8",
-    );
+    await fs.writeFile(tmpConfigFile, "[mcp_servers.context7]\ncommand = \"npx\"\n", "utf8");
 
-    const result = await ensureCodexMultiAgent(tmpDir);
+    const result = await ensureCodexMultiAgent({ codex: { multiAgent: true } }, tmpConfigFile);
     expect(result.action).toBe("appended");
 
-    const content = await readFile(result.path, "utf8");
+    const content = await readFile(tmpConfigFile, "utf8");
     expect(content).toContain("[mcp_servers.context7]");
     expect(content).toContain("multi_agent = true");
   });
 
-  it("skips when multiAgent is explicitly false in config", async () => {
-    const result = await ensureCodexMultiAgent(tmpDir, { codex: { multiAgent: false } });
-    expect(result.action).toBe("skipped");
-
-    // Should not have created any file
+  it("appended block is separated from existing content with no trailing newline", async () => {
     const fs = await import("node:fs/promises");
-    await expect(
-      fs.access(path.join(tmpDir, ".codex", "config.toml")),
-    ).rejects.toThrow();
-  });
+    await fs.writeFile(tmpConfigFile, "[section]\nkey = \"value\"", "utf8");
 
-  it("is on by default (no config passed)", async () => {
-    const result = await ensureCodexMultiAgent(tmpDir, undefined);
-    expect(result.action).toBe("created");
-  });
-
-  it("is on by default (empty codex config block)", async () => {
-    const result = await ensureCodexMultiAgent(tmpDir, { codex: {} });
-    expect(result.action).toBe("created");
-  });
-
-  it("created file contains orca management comment", async () => {
-    const result = await ensureCodexMultiAgent(tmpDir);
-    const content = await readFile(result.path, "utf8");
-    expect(content).toContain("Managed by orca");
-  });
-
-  it("appended block is separated from existing content", async () => {
-    const fs = await import("node:fs/promises");
-    const configDir = path.join(tmpDir, ".codex");
-    await fs.mkdir(configDir, { recursive: true });
-    // File with no trailing newline
-    await fs.writeFile(
-      path.join(configDir, "config.toml"),
-      "[section]\nkey = \"value\"",
-      "utf8",
-    );
-
-    const result = await ensureCodexMultiAgent(tmpDir);
-    expect(result.action).toBe("appended");
-
-    const content = await readFile(result.path, "utf8");
-    // Should have separation before the appended block
+    await ensureCodexMultiAgent({ codex: { multiAgent: true } }, tmpConfigFile);
+    const content = await readFile(tmpConfigFile, "utf8");
     expect(content).toContain("\n\n");
     expect(content).toContain("multi_agent = true");
   });

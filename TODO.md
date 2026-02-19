@@ -8,8 +8,8 @@
 - Document: `.orca/skills/<name>/SKILL.md` convention
 
 ## Multi-Agent
-- See research notes — potential to enable `features.multi_agent = true` by default via project-scoped `.codex/config.toml` generation
-- Decide: orca-managed config.toml, or user opt-in via `orca.config.js`
+- ✅ Shipped: opt-in via `codex: { multiAgent: true }` in orca.config.js — writes to `~/.codex/config.toml`
+- Smoke test once Bradley has a real project to run it against (watch for "spawning sub-agents" in codex output)
 
 ## Housekeeping
 - Update GOALS.md Phase 4 entry (done, not NEXT)
