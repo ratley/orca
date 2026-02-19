@@ -1,34 +1,29 @@
 ---
-date: 2026-02-19T09:10:00Z
-session: run-last-flag
-agent: codex
+date: 2026-02-19T09:56:00Z
+session: readme-cleanup
+agent: eve
 ---
 
 ## Built
-- Added `--last` support to all run-scoped CLI commands and PR subcommands.
-- Added reusable `getLastRun(store)` utility for resolving the newest run by `createdAt`.
+- nothing new — docs only
 
 ## Changed
-- `src/utils/last-run.ts` | New helper to return newest run or `null`.
-- `src/utils/last-run.test.ts` | Added tests for empty store and newest-run selection.
-- `src/cli/commands/pr/shared.ts` | Added `last?: boolean`; `resolveRunIdOrExit` now prioritizes `--last`.
-- `src/cli/commands/pr/draft.ts` | Added `.option('--last', 'Use the most recent run')`.
-- `src/cli/commands/pr/create.ts` | Added `.option('--last', 'Use the most recent run')`.
-- `src/cli/commands/pr/publish.ts` | Added `.option('--last', 'Use the most recent run')`.
-- `src/cli/commands/pr/status.ts` | Added `.option('--last', 'Use the most recent run')`.
-- `src/cli/commands/status.ts` | Added `last?: boolean`, `--last` option, and handler resolution logic.
-- `src/cli/commands/resume.ts` | Added `last?: boolean`, `--last` option, and handler resolution logic.
-- `src/cli/commands/cancel.ts` | Added `last?: boolean`, `--last` option, and handler resolution logic.
+- README.md | full rewrite — cleaner structure, removed pipeline blurb, codex-client link at top, config section added, no redundant flags in examples
 
 ## Tests
-- `bun test` | 104 pass, 0 fail.
+- no tests needed (docs change)
 
 ## Decisions
-- Kept `pr/index.ts` no-subcommand interactive behavior unchanged; `--last` remains subcommand-scoped.
-- Printed `No runs found.` and exited with code 1 when `--last` is used with no runs.
+- removed "Pipeline" line from description — too technical/marketing-y
+- codex-client link under main description
+- config auto-discovery documented with example
 
 ## Next
-1. Add command-level tests for `--last` paths in `status`, `resume`, and `cancel` handlers.
+1. positional arg support: `orca "goal"` without -p flag (discuss with Bradley)
+2. orca answer command
+3. model flags (--codex-only / --claude-only)
+4. session logs config key
+5. autonomous post-run review
 
 ## Blockers
 - none
