@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import type { Command } from "commander";
 
 import { createCodexSession } from "../../agents/codex/session.js";
-import { loadConfig } from "../../core/config-loader.js";
+import { resolveConfig } from "../../core/config-loader.js";
 import { runPlanner } from "../../core/planner.js";
 import { runTaskRunner } from "../../core/task-runner.js";
 import { createOpenclawHookHandler, detectOpenclawAvailability } from "../../hooks/adapters/openclaw.js";
@@ -96,7 +96,7 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
   try {
     await access(specPath, fsConstants.R_OK);
 
-    const orcaConfig = await loadConfig(options.config);
+    const orcaConfig = await resolveConfig(options.config);
 
     const runId = generateRunId(specPath);
     console.log(`Run ID: ${runId}`);

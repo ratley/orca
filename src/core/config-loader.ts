@@ -1,5 +1,6 @@
 import { constants as fsConstants } from "node:fs";
 import { access } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -72,4 +73,93 @@ export async function loadConfig(configPath?: string): Promise<OrcaConfig | unde
   const configCandidate = "default" in importedModule ? importedModule.default : importedModule;
 
   return coerceConfig(configCandidate);
+}
+
+const TOP_LEVEL_SCALARS: Array<keyof Pick<
+  OrcaConfig,
+  "runsDir" | "maxRetries" | "anthropicApiKey" | "openaiApiKey"
+>> = ["runsDir", "maxRetries", "anthropicApiKey", "openaiApiKey"];
+
+export function mergeConfigs(...configs: Array<OrcaConfig | undefined>): OrcaConfig | undefined {
+  const presentConfigs = configs.filter((config): config is OrcaConfig => config !== undefined);
+  if (presentConfigs.length === 0) {
+    return undefined;
+  }
+
+  const merged: OrcaConfig = {};
+
+  for (const config of presentConfigs) {
+    for (const key of TOP_LEVEL_SCALARS) {
+      if (key in config) {
+        merged[key] = config[key];
+      }
+    }
+
+    if (merged.claude !== undefined || config.claude !== undefined) {
+      merged.claude = { ...merged.claude, ...config.claude };
+    }
+
+    if (merged.codex !== undefined || config.codex !== undefined) {
+      merged.codex = { ...merged.codex, ...config.codex };
+    }
+
+    if (merged.pr !== undefined || config.pr !== undefined) {
+      merged.pr = { ...merged.pr, ...config.pr };
+    }
+
+    if (merged.hooks !== undefined || config.hooks !== undefined) {
+      merged.hooks = { ...merged.hooks, ...config.hooks };
+    }
+
+    if (merged.hookCommands !== undefined || config.hookCommands !== undefined) {
+      merged.hookCommands = { ...merged.hookCommands, ...config.hookCommands };
+    }
+  }
+
+  return merged;
+}
+
+async function loadOptionalConfig(configPath: string): Promise<OrcaConfig | undefined> {
+  const resolvedPath = path.resolve(configPath);
+
+  try {
+    await access(resolvedPath, fsConstants.R_OK);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
+
+  return loadConfig(resolvedPath);
+}
+
+export async function resolveConfigFromPaths(
+  globalConfigPath: string,
+  projectConfigPath: string,
+  cliConfigPath?: string
+): Promise<OrcaConfig | undefined> {
+  const globalConfig = await loadOptionalConfig(globalConfigPath);
+  const projectConfig = await loadOptionalConfig(projectConfigPath);
+  const cliConfig = await loadConfig(cliConfigPath);
+
+  return mergeConfigs(globalConfig, projectConfig, cliConfig);
+}
+
+export async function resolveConfig(cliConfigPath?: string): Promise<OrcaConfig | undefined> {
+  const globalConfigPath = path.join(os.homedir(), ".orca", "config.js");
+  const projectJsConfigPath = path.join(process.cwd(), "orca.config.js");
+  const projectTsConfigPath = path.join(process.cwd(), "orca.config.ts");
+
+  let projectConfigPath = projectJsConfigPath;
+  try {
+    await access(projectJsConfigPath, fsConstants.R_OK);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+    projectConfigPath = projectTsConfigPath;
+  }
+
+  return resolveConfigFromPaths(globalConfigPath, projectConfigPath, cliConfigPath);
 }
