@@ -168,7 +168,9 @@ export async function executeTask(
   config?: OrcaConfig
 ): Promise<TaskExecutionResult> {
   const session = unstable_v2_createSession({
-    model: getModel(config)
+    model: getModel(config),
+    permissionMode: "bypassPermissions",
+    allowDangerouslySkipPermissions: true,
   });
 
   try {

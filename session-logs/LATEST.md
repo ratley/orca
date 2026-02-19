@@ -1,46 +1,32 @@
 ---
-date: 2026-02-19T02:03:00Z
-session: phase-2-execution-engine
-agent: codex
+date: 2026-02-19T02:51:00Z
+session: phase-2-permission-fix-and-e2e-validation
+agent: eve
 ---
 
 ## Built
-- Phase 2 execution engine: dependency graph utilities, retry policy, sequential task runner, Claude task execution adapter, and fully wired run/list/status/resume/cancel CLI commands.
+- Live end-to-end validation of `orca run` against a real spec
+- Fixed Claude session permission mode for task execution
 
 ## Changed
-- `src/core/dependency-graph.ts` | added DAG validation (`validateDAG`) and runnable-task selection (`getRunnable`)
-- `src/core/retry-policy.ts` | added transient/permanent error classification with max-retry enforcement (`shouldRetry`)
-- `src/core/task-runner.ts` | implemented sequential execution loop with state transitions, retry handling, persistence via `RunStore.updateRun`, and hook emission (`onMilestone`, `onTaskComplete`, `onTaskFail`)
-- `src/agents/claude/session.ts` | added Claude task execution API (`executeTask`) with JSON response parsing and prompt construction for task context/acceptance criteria
-- `src/core/planner.ts` | replaced local graph validation with shared `validateDAG`
-- `src/cli/commands/run.ts` | replaced stub with full run lifecycle: run ID first-line output, planner invocation, task-runner execution, run status finalization, ORCA_RUNS_DIR support
-- `src/cli/commands/list.ts` | replaced stub with tabular run listing and empty-state output
-- `src/cli/commands/status.ts` | replaced stub with summary view (no args) and detailed run/task table view (`--run`), including known-run error messaging
-- `src/cli/commands/resume.ts` | replaced stub with resume flow, required `--run` validation messaging, in-progress task recovery, and task-runner re-entry
-- `src/cli/commands/cancel.ts` | replaced stub with cancel flow, required `--run` validation messaging, in-progress task cancellation, and persisted run cancellation
-- `src/core/dependency-graph.test.ts` | added tests for runnable selection and DAG validation failure modes (duplicate IDs, missing deps, cycles)
-- `src/core/retry-policy.test.ts` | added tests for transient retry, permanent failure, and retry exhaustion
-- `src/core/task-runner.test.ts` | added tests for sequential completion, retry-then-success, and fail-fast permanent errors with persisted state assertions
+- `src/agents/claude/session.ts` | switched `executeTask` session to `permissionMode: "bypassPermissions"` with `allowDangerouslySkipPermissions: true` — previous default mode blocked file writes and shell execution required for task completion
 
 ## Verification
-- `bun test` | pass (21 passing, 0 failing)
+- `orca run --spec /tmp/test-orca-spec.md` (spec: add sleep utility + test) | all 3 tasks completed, overall status: `completed`
+  - task-1 Create sleep utility → done ✅
+  - task-2 Create sleep test file → done ✅
+  - task-3 Run sleep tests → done ✅ (`bun test` executed by Claude, 1 pass)
+- `bun test` | 21 passing, 0 failing
 - `bun run typecheck` | pass
-- `bun run lint` | pass
-- `ORCA_RUNS_DIR=$(mktemp -d)/runs bun run src/cli/index.ts list` | pass, prints `No runs found.` for empty store
-- `ORCA_RUNS_DIR=$(mktemp -d)/runs bun run src/cli/index.ts run --spec specs/sample.md | head -n 1` | pass, first line prints `Run ID: <run-id>`
-- `bun run src/cli/index.ts status --run demo-1000-abcd` (with seeded run) | pass, prints detailed metadata and task table
-- `bun run src/cli/index.ts resume` (without `--run`) | pass, clear missing-flag error with active run list and exit code 1
-- `bun run src/cli/index.ts cancel` (without `--run`) | pass, clear missing-flag error with active run list and exit code 1
 
 ## Decisions
-- Kept execution v1 strictly sequential (`runnable[0]` processing) to align with phase scope and defer parallel workers to v2.
-- Treated schema/validation/type/cancellation-style errors as permanent in retry policy; network/timeout/rate-limit signals are retried until `maxRetries`.
-- Default task-runner hook behavior is stdout JSON emission; run command optionally layers milestone shell command execution through existing hook dispatcher.
+- `bypassPermissions` + `allowDangerouslySkipPermissions` is the correct mode for autonomous task execution where specs are under operator control — equivalent to `codex --yolo`
+- `acceptEdits` was tried first but blocked shell execution (bun test), making verification tasks impossible
+- `planSpec` session left on default mode (no file writes needed for planning)
 
 ## Next
-1. Phase 3 hook framework integration: replace ad-hoc emit function plumbing with centralized dispatcher wiring for all hook types.
-2. Add integration coverage for `run` and `resume` command paths with mocked Claude task execution.
-3. Add run-store/config resolution layer for `--config` support and shared command-level option handling.
+1. Push permission fix to github.com/ratley/orca
+2. Phase 3: hook framework — wire all hook types through centralized dispatcher
 
 ## Blockers
-- End-to-end `orca run` completion depends on live Claude SDK credentials/session availability; local verification confirmed required first-line output contract.
+- None
