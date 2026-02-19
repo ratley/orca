@@ -73,6 +73,7 @@ describe("task-runner", () => {
     expect(hookEvents.some((event) => event.hook === "onTaskComplete" && event.taskId === "t2")).toBe(true);
     expect(hookEvents.some((event) => event.hook === "onMilestone" && event.message === "execution-started")).toBe(true);
     expect(hookEvents.some((event) => event.hook === "onMilestone" && event.message === "execution-completed")).toBe(true);
+    expect(hookEvents.some((event) => event.hook === "onComplete" && event.message === "run-completed")).toBe(true);
   });
 
   test("retries transient task failure and then succeeds", async () => {
@@ -138,5 +139,6 @@ describe("task-runner", () => {
     expect(run.tasks[0]?.status).toBe("failed");
     expect(run.tasks[0]?.retries).toBe(0);
     expect(hookEvents.some((event) => event.hook === "onTaskFail" && event.taskId === "t1")).toBe(true);
+    expect(hookEvents.some((event) => event.hook === "onError" && event.message.startsWith("run-failed:"))).toBe(true);
   });
 });

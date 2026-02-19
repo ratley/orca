@@ -73,66 +73,24 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
     throw new Error(`Run not found: ${runId}`);
   }
 
-  validateDAG(run.tasks);
+  try {
+    validateDAG(run.tasks);
 
-  await emitHook({
-    runId: run.runId,
-    hook: "onMilestone",
-    message: "execution-started",
-    timestamp: new Date().toISOString(),
-    metadata: { overallStatus: "running" }
-  });
+    await emitHook({
+      runId: run.runId,
+      hook: "onMilestone",
+      message: "execution-started",
+      timestamp: new Date().toISOString(),
+      metadata: { overallStatus: "running" }
+    });
 
-  while (true) {
-    run = await store.getRun(runId);
-    if (!run) {
-      throw new Error(`Run not found: ${runId}`);
-    }
-
-    if (run.overallStatus === "cancelled") {
-      await emitHook({
-        runId: run.runId,
-        hook: "onMilestone",
-        message: "execution-cancelled",
-        timestamp: new Date().toISOString(),
-        metadata: { overallStatus: "cancelled" }
-      });
-      return;
-    }
-
-    const runnable = getRunnable(run.tasks);
-
-    if (runnable.length === 0) {
-      const hasFailedTask = run.tasks.some((task) => task.status === "failed");
-      const hasCancelledTask = run.tasks.some((task) => task.status === "cancelled");
-      const allDone = run.tasks.every((task) => task.status === "done");
-
-      if (allDone) {
-        await store.updateRun(runId, { overallStatus: "completed" });
-        await emitHook({
-          runId: run.runId,
-          hook: "onMilestone",
-          message: "execution-completed",
-          timestamp: new Date().toISOString(),
-          metadata: { overallStatus: "completed" }
-        });
-        return;
+    while (true) {
+      run = await store.getRun(runId);
+      if (!run) {
+        throw new Error(`Run not found: ${runId}`);
       }
 
-      if (hasFailedTask) {
-        await store.updateRun(runId, { overallStatus: "failed" });
-        await emitHook({
-          runId: run.runId,
-          hook: "onMilestone",
-          message: "execution-failed",
-          timestamp: new Date().toISOString(),
-          metadata: { overallStatus: "failed" }
-        });
-        return;
-      }
-
-      if (hasCancelledTask) {
-        await store.updateRun(runId, { overallStatus: "cancelled" });
+      if (run.overallStatus === "cancelled") {
         await emitHook({
           runId: run.runId,
           hook: "onMilestone",
@@ -143,137 +101,211 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
         return;
       }
 
-      if (hasPendingTasks(run.tasks)) {
-        throw new Error("No runnable tasks found while tasks remain pending");
+      const runnable = getRunnable(run.tasks);
+
+      if (runnable.length === 0) {
+        const hasFailedTask = run.tasks.some((task) => task.status === "failed");
+        const hasCancelledTask = run.tasks.some((task) => task.status === "cancelled");
+        const allDone = run.tasks.every((task) => task.status === "done");
+
+        if (allDone) {
+          await store.updateRun(runId, { overallStatus: "completed" });
+          const completedAt = new Date().toISOString();
+          await emitHook({
+            runId: run.runId,
+            hook: "onMilestone",
+            message: "execution-completed",
+            timestamp: completedAt,
+            metadata: { overallStatus: "completed" }
+          });
+          await emitHook({
+            runId: run.runId,
+            hook: "onComplete",
+            message: "run-completed",
+            timestamp: completedAt,
+            metadata: { overallStatus: "completed" }
+          });
+          return;
+        }
+
+        if (hasFailedTask) {
+          await store.updateRun(runId, { overallStatus: "failed" });
+          const failedAt = new Date().toISOString();
+          const failureMessage = run.errors[run.errors.length - 1]?.message ?? "execution-failed";
+          await emitHook({
+            runId: run.runId,
+            hook: "onMilestone",
+            message: "execution-failed",
+            timestamp: failedAt,
+            metadata: { overallStatus: "failed" }
+          });
+          await emitHook({
+            runId: run.runId,
+            hook: "onError",
+            message: `run-failed: ${failureMessage}`,
+            timestamp: failedAt,
+            error: failureMessage,
+            metadata: { overallStatus: "failed" }
+          });
+          return;
+        }
+
+        if (hasCancelledTask) {
+          await store.updateRun(runId, { overallStatus: "cancelled" });
+          await emitHook({
+            runId: run.runId,
+            hook: "onMilestone",
+            message: "execution-cancelled",
+            timestamp: new Date().toISOString(),
+            metadata: { overallStatus: "cancelled" }
+          });
+          return;
+        }
+
+        if (hasPendingTasks(run.tasks)) {
+          throw new Error("No runnable tasks found while tasks remain pending");
+        }
+
+        return;
       }
 
-      return;
-    }
-
-    const task = runnable[0];
-    if (!task) {
-      throw new Error("Task selection failed");
-    }
-
-    const now = new Date().toISOString();
-    const inProgressTasks = run.tasks.map((candidate) => {
-      if (candidate.id !== task.id) {
-        return candidate;
+      const task = runnable[0];
+      if (!task) {
+        throw new Error("Task selection failed");
       }
 
-      return {
-        ...stripOptionalFields(candidate, ["finishedAt", "lastError"]),
-        status: "in_progress" as const,
-        startedAt: candidate.startedAt ?? now
-      };
-    });
+      const now = new Date().toISOString();
+      const inProgressTasks = run.tasks.map((candidate) => {
+        if (candidate.id !== task.id) {
+          return candidate;
+        }
 
-    await store.updateRun(runId, {
-      mode: "run",
-      overallStatus: "running",
-      tasks: inProgressTasks
-    });
-
-    try {
-      const result = await executeTaskImpl(task, runId, config);
-
-      if (result.outcome === "done") {
-        const doneTasks = inProgressTasks.map((candidate) => {
-          if (candidate.id !== task.id) {
-            return candidate;
-          }
-
-          return {
-            ...stripOptionalFields(candidate, ["lastError"]),
-            status: "done" as const,
-            finishedAt: new Date().toISOString()
-          };
-        });
-
-        await store.updateRun(runId, { tasks: doneTasks });
-
-        await emitHook({
-          runId: run.runId,
-          hook: "onTaskComplete",
-          message: `Task completed: ${task.name}`,
-          timestamp: new Date().toISOString(),
-          taskId: task.id,
-          taskName: task.name
-        });
-
-        continue;
-      }
-
-      throw new Error(result.error ?? "Task execution failed");
-    } catch (error) {
-      const errorMessage = toErrorMessage(error);
-      const currentTask = inProgressTasks.find((candidate) => candidate.id === task.id);
-
-      if (!currentTask) {
-        throw new Error(`Task missing during error handling: ${task.id}`);
-      }
-
-      if (shouldRetry(currentTask, error)) {
-        const retryTasks = inProgressTasks.map((candidate) => {
-          if (candidate.id !== task.id) {
-            return candidate;
-          }
-
-          return {
-            ...stripOptionalFields(candidate, ["finishedAt"]),
-            status: "pending" as const,
-            retries: currentTask.retries + 1,
-            lastError: errorMessage
-          };
-        });
-
-        await store.updateRun(runId, {
-          tasks: retryTasks,
-          milestones: [...run.milestones, `retry:${task.id}:${currentTask.retries + 1}`]
-        });
-
-        await emitHook({
-          runId: run.runId,
-          hook: "onMilestone",
-          message: `retrying-task:${task.id}`,
-          timestamp: new Date().toISOString(),
-          taskId: task.id,
-          taskName: task.name,
-          metadata: { retries: currentTask.retries + 1 }
-        });
-
-        continue;
-      }
-
-      const failedAt = new Date().toISOString();
-      const failedTasks = applyTaskUpdate(inProgressTasks, task.id, {
-        status: "failed",
-        finishedAt: failedAt,
-        lastError: errorMessage
+        return {
+          ...stripOptionalFields(candidate, ["finishedAt", "lastError"]),
+          status: "in_progress" as const,
+          startedAt: candidate.startedAt ?? now
+        };
       });
 
       await store.updateRun(runId, {
-        tasks: failedTasks,
-        overallStatus: "failed",
-        errors: [
-          ...run.errors,
-          {
-            at: failedAt,
-            message: errorMessage,
-            taskId: task.id
-          }
-        ]
+        mode: "run",
+        overallStatus: "running",
+        tasks: inProgressTasks
       });
 
-      await emitHook({
-        runId: run.runId,
-        hook: "onTaskFail",
-        message: `Task failed: ${task.name}`,
-        timestamp: failedAt,
-        taskId: task.id,
-        taskName: task.name,
-        error: errorMessage
-      });
+      try {
+        const result = await executeTaskImpl(task, runId, config);
+
+        if (result.outcome === "done") {
+          const doneTasks = inProgressTasks.map((candidate) => {
+            if (candidate.id !== task.id) {
+              return candidate;
+            }
+
+            return {
+              ...stripOptionalFields(candidate, ["lastError"]),
+              status: "done" as const,
+              finishedAt: new Date().toISOString()
+            };
+          });
+
+          await store.updateRun(runId, { tasks: doneTasks });
+
+          await emitHook({
+            runId: run.runId,
+            hook: "onTaskComplete",
+            message: `Task completed: ${task.name}`,
+            timestamp: new Date().toISOString(),
+            taskId: task.id,
+            taskName: task.name
+          });
+
+          continue;
+        }
+
+        throw new Error(result.error ?? "Task execution failed");
+      } catch (error) {
+        const errorMessage = toErrorMessage(error);
+        const currentTask = inProgressTasks.find((candidate) => candidate.id === task.id);
+
+        if (!currentTask) {
+          throw new Error(`Task missing during error handling: ${task.id}`);
+        }
+
+        if (shouldRetry(currentTask, error)) {
+          const retryTasks = inProgressTasks.map((candidate) => {
+            if (candidate.id !== task.id) {
+              return candidate;
+            }
+
+            return {
+              ...stripOptionalFields(candidate, ["finishedAt"]),
+              status: "pending" as const,
+              retries: currentTask.retries + 1,
+              lastError: errorMessage
+            };
+          });
+
+          await store.updateRun(runId, {
+            tasks: retryTasks,
+            milestones: [...run.milestones, `retry:${task.id}:${currentTask.retries + 1}`]
+          });
+
+          await emitHook({
+            runId: run.runId,
+            hook: "onMilestone",
+            message: `retrying-task:${task.id}`,
+            timestamp: new Date().toISOString(),
+            taskId: task.id,
+            taskName: task.name,
+            metadata: { retries: currentTask.retries + 1 }
+          });
+
+          continue;
+        }
+
+        const failedAt = new Date().toISOString();
+        const failedTasks = applyTaskUpdate(inProgressTasks, task.id, {
+          status: "failed",
+          finishedAt: failedAt,
+          lastError: errorMessage
+        });
+
+        await store.updateRun(runId, {
+          tasks: failedTasks,
+          overallStatus: "failed",
+          errors: [
+            ...run.errors,
+            {
+              at: failedAt,
+              message: errorMessage,
+              taskId: task.id
+            }
+          ]
+        });
+
+        await emitHook({
+          runId: run.runId,
+          hook: "onTaskFail",
+          message: `Task failed: ${task.name}`,
+          timestamp: failedAt,
+          taskId: task.id,
+          taskName: task.name,
+          error: errorMessage
+        });
+      }
     }
+  } catch (error) {
+    const errorMessage = toErrorMessage(error);
+    const now = new Date().toISOString();
+    await emitHook({
+      runId: run.runId,
+      hook: "onError",
+      message: `run-failed: ${errorMessage}`,
+      timestamp: now,
+      error: errorMessage,
+      metadata: { overallStatus: "failed" }
+    });
+    throw error;
   }
 }

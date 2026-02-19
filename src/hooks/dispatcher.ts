@@ -59,7 +59,7 @@ export class HookDispatcher {
     if (commandTemplate) {
       try {
         const command = applyCommandTemplate(commandTemplate, event);
-        await withTimeout(exec(command), this.timeoutMs);
+        await exec(command, { timeout: this.timeoutMs, killSignal: "SIGKILL" });
       } catch (error) {
         await this.emitHookError(event, error);
       }
