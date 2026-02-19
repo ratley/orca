@@ -2,10 +2,12 @@ import path from "node:path";
 
 import { RunStore } from "../../../state/store.js";
 import type { RunStatus } from "../../../types/index.js";
+import { getLastRun } from "../../../utils/last-run.js";
 import { selectRun } from "../../../utils/select-run.js";
 
 export interface PrCommandOptions {
   run?: string;
+  last?: boolean;
   config?: string;
 }
 
@@ -69,6 +71,19 @@ export async function resolveRunIdOrExit(
   options: PrCommandOptions,
   commandName: "draft" | "create" | "publish" | "status"
 ): Promise<string | null> {
+  if (options.last) {
+    const store = createStore();
+    const lastRun = await getLastRun(store);
+    if (!lastRun) {
+      console.error("No runs found.");
+      process.exitCode = 1;
+      return null;
+    }
+
+    options.run = lastRun.runId;
+    return lastRun.runId;
+  }
+
   if (options.run) {
     return options.run;
   }

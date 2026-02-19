@@ -1,29 +1,34 @@
 ---
-date: 2026-02-19T07:00:00Z
-session: pr-namespace
-agent: codex + eve
+date: 2026-02-19T09:10:00Z
+session: run-last-flag
+agent: codex
 ---
 
 ## Built
-- Implemented `orca pr` namespace with subcommands: `draft`, `create`, `finalize`, `status`
-- Added shared GitHub CLI helper at `src/utils/gh.ts` using `Bun.spawn`
-- Kept legacy `pr-finalize` command registration as deprecated alias
+- Added `--last` support to all run-scoped CLI commands and PR subcommands.
+- Added reusable `getLastRun(store)` utility for resolving the newest run by `createdAt`.
 
 ## Changed
-- `src/cli/index.ts` | Registered `registerPrCommand` while keeping `registerPrFinalizeCommand`
-- `src/cli/commands/pr/index.ts` | New `pr` command group wiring
-- `src/cli/commands/pr/draft.ts` | `orca pr draft --run <run-id>` implementation
-- `src/cli/commands/pr/create.ts` | `orca pr create --run <run-id>` implementation
-- `src/cli/commands/pr/finalize.ts` | `orca pr finalize --run <run-id>` implementation
-- `src/cli/commands/pr/status.ts` | `orca pr status --run <run-id>` implementation
-- `src/cli/commands/pr/shared.ts` | Shared run loading, PR title/body, and gh missing handling
-- `src/utils/gh.ts` | `checkGhCli()` and `runGh(args)`
+- `src/utils/last-run.ts` | New helper to return newest run or `null`.
+- `src/utils/last-run.test.ts` | Added tests for empty store and newest-run selection.
+- `src/cli/commands/pr/shared.ts` | Added `last?: boolean`; `resolveRunIdOrExit` now prioritizes `--last`.
+- `src/cli/commands/pr/draft.ts` | Added `.option('--last', 'Use the most recent run')`.
+- `src/cli/commands/pr/create.ts` | Added `.option('--last', 'Use the most recent run')`.
+- `src/cli/commands/pr/publish.ts` | Added `.option('--last', 'Use the most recent run')`.
+- `src/cli/commands/pr/status.ts` | Added `.option('--last', 'Use the most recent run')`.
+- `src/cli/commands/status.ts` | Added `last?: boolean`, `--last` option, and handler resolution logic.
+- `src/cli/commands/resume.ts` | Added `last?: boolean`, `--last` option, and handler resolution logic.
+- `src/cli/commands/cancel.ts` | Added `last?: boolean`, `--last` option, and handler resolution logic.
 
-## Verification
-- `bun test` -> 96 pass, 0 fail
+## Tests
+- `bun test` | 104 pass, 0 fail.
+
+## Decisions
+- Kept `pr/index.ts` no-subcommand interactive behavior unchanged; `--last` remains subcommand-scoped.
+- Printed `No runs found.` and exited with code 1 when `--last` is used with no runs.
 
 ## Next
-- Add focused unit tests for new `pr` command handlers with mocked `runGh` responses
+1. Add command-level tests for `--last` paths in `status`, `resume`, and `cancel` handlers.
 
 ## Blockers
-- None
+- none

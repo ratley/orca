@@ -2,10 +2,12 @@ import type { Command } from "commander";
 
 import { RunStore } from "../../state/store.js";
 import type { RunStatus, Task } from "../../types/index.js";
+import { getLastRun } from "../../utils/last-run.js";
 import { formatRunSummaryTable, listRuns } from "./list.js";
 
 export interface StatusCommandOptions {
   run?: string;
+  last?: boolean;
   config?: string;
 }
 
@@ -73,6 +75,18 @@ async function printDetailedRun(run: RunStatus): Promise<void> {
 }
 
 export async function statusCommandHandler(options: StatusCommandOptions): Promise<void> {
+  if (options.last) {
+    const store = createStore();
+    const lastRun = await getLastRun(store);
+    if (!lastRun) {
+      console.error("No runs found.");
+      process.exitCode = 1;
+      return;
+    }
+
+    options.run = lastRun.runId;
+  }
+
   if (!options.run) {
     const runs = await listRuns();
     if (runs.length === 0) {
@@ -102,6 +116,7 @@ export function registerStatusCommand(program: Command): void {
     .command("status")
     .description("Show run status or list all runs")
     .option("--run <run-id>", "Run ID to inspect")
+    .option("--last", "Use the most recent run")
     .option("--config <path>", "Path to orca config file")
     .action(async (options: StatusCommandOptions) => statusCommandHandler(options));
 }

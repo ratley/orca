@@ -86,6 +86,7 @@ export function registerPrStatusCommand(program: Command): void {
     .command("status")
     .description("Show pull request status for a run")
     .option("--run <run-id>", "Run ID to inspect PR for")
+    .option("--last", "Use the most recent run")
     .option("--config <path>", "Path to orca config file")
     .action(async (options: PrCommandOptions) => prStatusCommandHandler(options));
 }

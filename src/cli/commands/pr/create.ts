@@ -71,6 +71,7 @@ export function registerPrCreateCommand(program: Command): void {
     .command("create")
     .description("Create a pull request for a run")
     .option("--run <run-id>", "Run ID to create PR for")
+    .option("--last", "Use the most recent run")
     .option("--config <path>", "Path to orca config file")
     .action(async (options: PrCommandOptions) => prCreateCommandHandler(options));
 }

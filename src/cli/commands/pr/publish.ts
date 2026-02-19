@@ -55,6 +55,7 @@ export function registerPrPublishCommand(program: Command): void {
     .command("publish")
     .description("Publish a draft PR (mark ready for review)")
     .option("--run <run-id>", "Run ID to publish PR for")
+    .option("--last", "Use the most recent run")
     .option("--config <path>", "Path to orca config file")
     .action(async (options: PrCommandOptions) => prPublishCommandHandler(options));
 }

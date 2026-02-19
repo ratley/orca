@@ -3,9 +3,11 @@ import type { Command } from "commander";
 import { runTaskRunner } from "../../core/task-runner.js";
 import { RunStore } from "../../state/store.js";
 import type { RunStatus } from "../../types/index.js";
+import { getLastRun } from "../../utils/last-run.js";
 
 export interface ResumeCommandOptions {
   run?: string;
+  last?: boolean;
   config?: string;
 }
 
@@ -28,6 +30,18 @@ function getActiveRuns(runs: RunStatus[]): RunStatus[] {
 
 export async function resumeCommandHandler(options: ResumeCommandOptions): Promise<void> {
   const store = createStore();
+
+  if (options.last) {
+    const lastRun = await getLastRun(store);
+    if (!lastRun) {
+      console.error("No runs found.");
+      process.exitCode = 1;
+      return;
+    }
+
+    options.run = lastRun.runId;
+  }
+
   const knownRuns = await store.listRuns();
 
   if (!options.run) {
@@ -85,6 +99,7 @@ export function registerResumeCommand(program: Command): void {
     .command("resume")
     .description("Resume an incomplete run")
     .option("--run <run-id>", "Run ID to resume")
+    .option("--last", "Use the most recent run")
     .option("--config <path>", "Path to orca config file")
     .action(async (options: ResumeCommandOptions) => resumeCommandHandler(options));
 }

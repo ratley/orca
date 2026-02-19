@@ -2,9 +2,11 @@ import type { Command } from "commander";
 
 import { RunStore } from "../../state/store.js";
 import type { RunStatus } from "../../types/index.js";
+import { getLastRun } from "../../utils/last-run.js";
 
 export interface CancelCommandOptions {
   run?: string;
+  last?: boolean;
   config?: string;
 }
 
@@ -27,6 +29,18 @@ function getActiveRuns(runs: RunStatus[]): RunStatus[] {
 
 export async function cancelCommandHandler(options: CancelCommandOptions): Promise<void> {
   const store = createStore();
+
+  if (options.last) {
+    const lastRun = await getLastRun(store);
+    if (!lastRun) {
+      console.error("No runs found.");
+      process.exitCode = 1;
+      return;
+    }
+
+    options.run = lastRun.runId;
+  }
+
   const knownRuns = await store.listRuns();
 
   if (!options.run) {
@@ -77,6 +91,7 @@ export function registerCancelCommand(program: Command): void {
     .command("cancel")
     .description("Cancel an active run")
     .option("--run <run-id>", "Run ID to cancel")
+    .option("--last", "Use the most recent run")
     .option("--config <path>", "Path to orca config file")
     .action(async (options: CancelCommandOptions) => cancelCommandHandler(options));
 }
