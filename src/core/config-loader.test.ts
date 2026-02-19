@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
-import { mergeConfigs, resolveConfig, resolveConfigFromPaths } from "./config-loader.js";
+import { mergeConfigs, resolveConfigFromPaths } from "./config-loader.js";
 
 describe("config-loader", () => {
   let tempDir: string;
@@ -26,11 +26,11 @@ describe("config-loader", () => {
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
-  test("resolveConfig returns undefined when no configs exist", async () => {
-    process.chdir(tempDir);
-    process.env.HOME = tempDir;
-
-    const resolved = await resolveConfig();
+  test("resolveConfigFromPaths returns undefined when no configs exist", async () => {
+    const resolved = await resolveConfigFromPaths(
+      path.join(tempDir, "missing-global.js"),
+      path.join(tempDir, "missing-project.js")
+    );
 
     expect(resolved).toBeUndefined();
   });
@@ -59,12 +59,12 @@ describe("config-loader", () => {
 
     await fs.writeFile(
       globalPath,
-      "export default { runsDir: 'global-runs', maxRetries: 2, claude: { model: 'claude-global' }, codex: { enabled: false, model: 'gpt-global' }, pr: { enabled: true, requireConfirmation: true }, hookCommands: { onError: 'echo global-error' } };\n",
+      "export default { runsDir: 'global-runs', maxRetries: 2, skills: ['/skills/global', '/skills/shared'], claude: { model: 'claude-global' }, codex: { enabled: false, model: 'gpt-global' }, pr: { enabled: true, requireConfirmation: true }, hookCommands: { onError: 'echo global-error' } };\n",
       "utf8"
     );
     await fs.writeFile(
       projectPath,
-      "export default { runsDir: 'project-runs', sessionLogs: '/tmp/project-session-logs', claude: { useV2Preview: true }, codex: { model: 'gpt-project' }, pr: { requireConfirmation: false }, hookCommands: { onMilestone: 'echo project-milestone' } };\n",
+      "export default { runsDir: 'project-runs', sessionLogs: '/tmp/project-session-logs', skills: ['/skills/project', '/skills/shared'], claude: { useV2Preview: true }, codex: { model: 'gpt-project' }, pr: { requireConfirmation: false }, hookCommands: { onMilestone: 'echo project-milestone' } };\n",
       "utf8"
     );
 
@@ -74,6 +74,7 @@ describe("config-loader", () => {
       runsDir: "project-runs",
       sessionLogs: "/tmp/project-session-logs",
       maxRetries: 2,
+      skills: ["/skills/global", "/skills/shared", "/skills/project"],
       claude: {
         model: "claude-global",
         useV2Preview: true
@@ -99,6 +100,7 @@ describe("config-loader", () => {
       maxRetries: 1,
       sessionLogs: "global-logs",
       anthropicApiKey: "global-key",
+      skills: ["global-skill", "shared-skill"],
       claude: { model: "claude-global" },
       codex: { enabled: false },
       pr: { enabled: true },
@@ -109,6 +111,7 @@ describe("config-loader", () => {
       runsDir: "project",
       maxRetries: 2,
       sessionLogs: "project-logs",
+      skills: ["project-skill", "shared-skill"],
       claude: { useV2Preview: true },
       codex: { model: "gpt-project" },
       pr: { requireConfirmation: true },
@@ -120,6 +123,7 @@ describe("config-loader", () => {
       maxRetries: 3,
       sessionLogs: "cli-logs",
       openaiApiKey: "cli-openai",
+      skills: ["cli-skill", "project-skill"],
       claude: { model: "claude-cli" },
       codex: { enabled: true },
       pr: { requireConfirmation: false },
@@ -134,6 +138,7 @@ describe("config-loader", () => {
       maxRetries: 3,
       anthropicApiKey: "global-key",
       openaiApiKey: "cli-openai",
+      skills: ["global-skill", "shared-skill", "project-skill", "cli-skill"],
       claude: {
         model: "claude-cli",
         useV2Preview: true

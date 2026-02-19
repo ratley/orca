@@ -27,6 +27,20 @@ function coerceConfig(candidate: unknown): OrcaConfig {
     throw new Error("Config module must export an object");
   }
 
+  if ("skills" in candidate && candidate.skills !== undefined) {
+    if (!Array.isArray(candidate.skills)) {
+      throw new Error(`Config.skills must be an array, got ${describeType(candidate.skills)}`);
+    }
+
+    for (const skillPath of candidate.skills) {
+      if (typeof skillPath !== "string") {
+        throw new Error(
+          `Config.skills entries must be strings, got ${describeType(skillPath)}`
+        );
+      }
+    }
+  }
+
   if ("hooks" in candidate && candidate.hooks !== undefined) {
     if (!isObject(candidate.hooks)) {
       throw new Error(`Config.hooks must be an object, got ${describeType(candidate.hooks)}`);
@@ -113,6 +127,10 @@ export function mergeConfigs(...configs: Array<OrcaConfig | undefined>): OrcaCon
 
     if (merged.hookCommands !== undefined || config.hookCommands !== undefined) {
       merged.hookCommands = { ...merged.hookCommands, ...config.hookCommands };
+    }
+
+    if (config.skills !== undefined) {
+      merged.skills = [...new Set([...(merged.skills ?? []), ...config.skills])];
     }
   }
 

@@ -1,26 +1,27 @@
 ---
-date: 2026-02-19T13:01:00Z
-session: multi-agent-opt-in
+date: 2026-02-19T14:25:00Z
+session: skills-system
 agent: eve
 ---
 
 ## Built
-- Codex multi-agent support — opt-in via `codex.multiAgent: true` in orca.config.js
-- Smoke tested and confirmed working: three parallel sub-agents spawned, waited, consolidated
+- Skills system — load SKILL.md context from `.orca/skills/`, `~/.orca/skills/`, and `config.skills[]`
+- Skills are injected into planner system context and task-runner system context for every run
+- Fix: parseTaskArray now coerces numeric task IDs and dependency refs to strings (LLMs sometimes emit numbers)
 
 ## Changed
-- `src/types/index.ts` | added `multiAgent?: boolean` to `OrcaConfig.codex`
-- `src/core/codex-config.ts` | new — `ensureCodexMultiAgent()` writes `~/.codex/config.toml` with `multi_agent = true` under `[features]`; default off, opt-in only
-- `src/core/codex-config.test.ts` | new — 8 tests all passing
-- `src/cli/commands/run.ts` | calls `ensureCodexMultiAgent()` before `createCodexSession()`
-- `README.md` | multi-agent option documented with opt-in instructions
-- `TODO.md` | skills system and housekeeping items
+- `src/types/index.ts` | added `skills?: string[]` to OrcaConfig
+- `src/core/config-loader.ts` | validate and array-merge skills across config layers (dedup by value)
+- `src/utils/skill-loader.ts` | new — parseSkillFile, loadSkill, loadSkillsFromDir, loadSkills
+  YAML frontmatter support (name, description); infers name from dir when absent; ~ expansion; dedup by name (first wins)
+- `src/utils/skill-loader.test.ts` | new — 8 tests all passing
+- `src/core/planner.ts` | runPlanner now accepts config; loads skills and appends to system context
+- `src/core/planner.test.ts` | added: skills injection test
+- `src/core/task-runner.ts` | loads skills at run start; passes skill context string to executeTask
+- `src/agents/claude/session.ts` | coerce numeric IDs/deps in parseTaskArray; executeTask now accepts optional systemContext
+- `src/agents/codex/session.ts` | minor: consistent systemContext param threading
 
 ## Notes
-- Default is off — modifying global ~/.codex/config.toml is a significant side effect
-- Project-scoped .codex/config.toml rejected by codex in headless mode (trusted projects restriction)
-- Global config key must be under [features], not root level
-
-## Tests
-- `bun test src/core/codex-config.test.ts` → `8 pass`, `0 fail`
-- `bun test` (full suite) → `144 pass`, `2 fail` (pre-existing, unrelated)
+- Used orca itself to implement this feature (meta) — ran `orca --spec /tmp/orca-skills-spec.md` inside ~/code/orca
+- 172 tests passing, 0 failures
+- Skill discovery order: config.skills > .orca/skills/ > ~/.orca/skills/ (first name wins dedup)

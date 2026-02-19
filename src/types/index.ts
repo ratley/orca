@@ -80,6 +80,7 @@ export interface OrcaConfig {
   openaiApiKey?: string;
   runsDir?: string;
   sessionLogs?: string;
+  skills?: string[];
   maxRetries?: number;
   claude?: {
     model?: string;

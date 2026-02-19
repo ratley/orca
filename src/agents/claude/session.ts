@@ -28,8 +28,14 @@ function buildPlanningPrompt(spec: string, systemContext: string): string {
   ].join("\n\n");
 }
 
-function buildTaskExecutionPrompt(task: Task, runId: string, cwd: string): string {
+function buildTaskExecutionPrompt(
+  task: Task,
+  runId: string,
+  cwd: string,
+  systemContext?: string
+): string {
   return [
+    ...(systemContext ? [systemContext] : []),
     "You are Orca's task execution assistant.",
     `Run ID: ${runId}`,
     `Repository CWD: ${cwd}`,
@@ -76,7 +82,15 @@ function parseTaskArray(raw: string): Task[] {
     throw new Error("Claude plan response was not a JSON array");
   }
 
-  return parsed as Task[];
+  // Coerce numeric task IDs and dependency refs to strings.
+  // LLMs sometimes emit numeric IDs (1, 2, 3) even when we ask for strings.
+  return (parsed as Array<Record<string, unknown>>).map((task) => ({
+    ...task,
+    id: String(task.id),
+    dependencies: Array.isArray(task.dependencies)
+      ? (task.dependencies as unknown[]).map(String)
+      : [],
+  })) as Task[];
 }
 
 function parseTaskExecution(raw: string): TaskExecutionResult {
@@ -165,7 +179,8 @@ export async function planSpec(spec: string, systemContext: string): Promise<Pla
 export async function executeTask(
   task: Task,
   runId: string,
-  config?: OrcaConfig
+  config?: OrcaConfig,
+  systemContext?: string
 ): Promise<TaskExecutionResult> {
   const session = unstable_v2_createSession({
     model: getModel(config),
@@ -175,7 +190,7 @@ export async function executeTask(
   try {
     const streamPromise = collectSessionResult(session);
 
-    await session.send(buildTaskExecutionPrompt(task, runId, process.cwd()));
+    await session.send(buildTaskExecutionPrompt(task, runId, process.cwd(), systemContext));
     const rawResponse = await streamPromise;
 
     return parseTaskExecution(rawResponse);

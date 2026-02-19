@@ -1,7 +1,9 @@
 import { promises as fs } from "node:fs";
 
 import { planSpec } from "../agents/claude/session.js";
+import type { OrcaConfig } from "../types/index.js";
 import { logger } from "../utils/logger.js";
+import { loadSkills, type LoadedSkill } from "../utils/skill-loader.js";
 import { RunStore } from "../state/store.js";
 import { validateDAG } from "./dependency-graph.js";
 
@@ -15,9 +17,33 @@ export function setPlanSpecForTests(fn: PlanSpecFn | null): void {
   planSpecImpl = fn ?? planSpec;
 }
 
-export async function runPlanner(specPath: string, store: RunStore, runId: string): Promise<void> {
+function formatSkillsSection(skills: LoadedSkill[]): string {
+  const formattedSkills = skills.map((skill) =>
+    [
+      `### ${skill.name}`,
+      "",
+      `Description: ${skill.description}`,
+      "",
+      skill.body
+    ].join("\n")
+  );
+
+  return ["## Available Skills", "", ...formattedSkills].join("\n");
+}
+
+export async function runPlanner(
+  specPath: string,
+  store: RunStore,
+  runId: string,
+  config?: OrcaConfig
+): Promise<void> {
   const spec = await fs.readFile(specPath, "utf8");
-  const result = await planSpecImpl(spec, DEFAULT_SYSTEM_CONTEXT);
+  const skills = await loadSkills(config);
+  const systemContext =
+    skills.length === 0
+      ? DEFAULT_SYSTEM_CONTEXT
+      : `${DEFAULT_SYSTEM_CONTEXT}\n\n${formatSkillsSection(skills)}`;
+  const result = await planSpecImpl(spec, systemContext);
 
   validateDAG(result.tasks);
 

@@ -1,6 +1,6 @@
 {
   "name": "orcastrator",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "type": "module",
   "bin": {
     "orca": "dist/cli/index.js"

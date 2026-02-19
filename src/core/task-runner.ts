@@ -4,6 +4,7 @@ import { promises as fs } from "node:fs";
 import { executeTask } from "../agents/claude/session.js";
 import { RunStore } from "../state/store.js";
 import type { HookEvent, OrcaConfig, RunId, RunStatus, Task } from "../types/index.js";
+import { loadSkills, type LoadedSkill } from "../utils/skill-loader.js";
 import { getRunnable, validateDAG } from "./dependency-graph.js";
 import { shouldRetry } from "./retry-policy.js";
 
@@ -68,6 +69,20 @@ export interface TaskRunnerOptions {
   executeTask?: ExecuteTaskFn;
 }
 
+function formatSkillsSection(skills: LoadedSkill[]): string {
+  const formattedSkills = skills.map((skill) =>
+    [
+      `### ${skill.name}`,
+      "",
+      `Description: ${skill.description}`,
+      "",
+      skill.body
+    ].join("\n")
+  );
+
+  return ["## Available Skills", "", ...formattedSkills].join("\n");
+}
+
 function buildSessionSummary(run: RunStatus): string {
   const taskRows =
     run.tasks.length === 0
@@ -118,6 +133,8 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
   const emitHook = options.emitHook ?? defaultEmitHook;
   const executeTaskFn = options.executeTask ?? executeTaskImpl;
   const { runId, store, config } = options;
+  const skills = await loadSkills(config);
+  const taskSystemContext = skills.length === 0 ? undefined : formatSkillsSection(skills);
 
   let run = await store.getRun(runId);
   if (!run) {
@@ -249,7 +266,7 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
       });
 
       try {
-        const result = await executeTaskFn(task, runId, config);
+        const result = await executeTaskFn(task, runId, config, taskSystemContext);
 
         if (result.outcome === "done") {
           const doneTasks = inProgressTasks.map((candidate) => {

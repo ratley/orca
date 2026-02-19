@@ -3,6 +3,7 @@ import { access } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import path from "node:path";
 
+import { resolveConfig } from "../../core/config-loader.js";
 import { runPlanner } from "../../core/planner.js";
 import { RunStore } from "../../state/store.js";
 import { generateRunId } from "../../utils/ids.js";
@@ -17,13 +18,14 @@ export interface PlanCommandOptions {
 export async function planCommand(options: { spec: string; config?: string }): Promise<void> {
   const specPath = path.resolve(options.spec);
   await access(specPath, fsConstants.R_OK);
+  const orcaConfig = await resolveConfig(options.config);
 
   const runId = generateRunId(specPath);
   console.log(`Run ID: ${runId}`);
 
   const store = new RunStore();
   await store.createRun(runId, specPath);
-  await runPlanner(specPath, store, runId);
+  await runPlanner(specPath, store, runId, orcaConfig);
 
   const run = await store.getRun(runId);
   if (!run) {

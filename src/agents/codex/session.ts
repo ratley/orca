@@ -33,8 +33,10 @@ function buildTaskExecutionPrompt(
   task: Task,
   runId: string,
   cwd: string,
+  systemContext?: string,
 ): string {
   return [
+    ...(systemContext ? [systemContext] : []),
     "You are Orca's task execution assistant.",
     `Run ID: ${runId}`,
     `Repository CWD: ${cwd}`,
@@ -199,7 +201,7 @@ export async function createCodexSession(
   config?: OrcaConfig,
 ): Promise<{
   planSpec: (spec: string, systemContext: string) => Promise<PlanResult>;
-  executeTask: (task: Task, runId: string) => Promise<TaskExecutionResult>;
+  executeTask: (task: Task, runId: string, systemContext?: string) => Promise<TaskExecutionResult>;
   consultTaskGraph: (tasks: Task[]) => Promise<ConsultationResult>;
   reviewChanges: (threadId?: string) => Promise<string>;
   disconnect: () => Promise<void>;
@@ -241,13 +243,14 @@ export async function createCodexSession(
     async executeTask(
       task: Task,
       runId: string,
+      systemContext?: string,
     ): Promise<TaskExecutionResult> {
       const result = await client.runTurn({
         threadId,
         input: [
           {
             type: "text",
-            text: buildTaskExecutionPrompt(task, runId, cwd),
+            text: buildTaskExecutionPrompt(task, runId, cwd, systemContext),
           },
         ],
       });
@@ -334,11 +337,12 @@ export async function executeTask(
   task: Task,
   runId: string,
   config?: OrcaConfig,
+  systemContext?: string,
 ): Promise<TaskExecutionResult> {
   const session = await createCodexSession(process.cwd(), config);
 
   try {
-    return await session.executeTask(task, runId);
+    return await session.executeTask(task, runId, systemContext);
   } finally {
     await session.disconnect();
   }

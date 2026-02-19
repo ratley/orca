@@ -102,4 +102,43 @@ describe("runPlanner task graph validation", () => {
 
     await expect(runPlanner(specPath, store, runId)).rejects.toThrow("cycle");
   });
+
+  test("injects loaded skills into planning system context", async () => {
+    const skillDir = path.join(tempDir, "skill-a");
+    await fs.mkdir(skillDir, { recursive: true });
+    await fs.writeFile(
+      path.join(skillDir, "SKILL.md"),
+      ["---", "name: Planning Skill", "description: Helps planning", "---", "## Skill Body", "Use this."].join(
+        "\n"
+      ),
+      "utf8"
+    );
+
+    const tasks: Task[] = [
+      {
+        id: "t1",
+        name: "Task 1",
+        description: "desc",
+        dependencies: [],
+        acceptance_criteria: ["a"],
+        status: "pending",
+        retries: 0,
+        maxRetries: 3
+      }
+    ];
+
+    let capturedSystemContext = "";
+    setPlanSpecForTests(async (_spec, systemContext) => {
+      capturedSystemContext = systemContext;
+      return { tasks, rawResponse: JSON.stringify(tasks) };
+    });
+
+    await runPlanner(specPath, store, runId, { skills: [skillDir] });
+
+    expect(capturedSystemContext).toContain("## Available Skills");
+    expect(capturedSystemContext).toContain("Planning Skill");
+    expect(capturedSystemContext).toContain("Helps planning");
+    expect(capturedSystemContext).toContain("## Skill Body");
+    expect(capturedSystemContext).toContain("Use this.");
+  });
 });

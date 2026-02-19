@@ -116,7 +116,7 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
     const store = createStore();
     await store.createRun(runId, specPath);
 
-    await runPlanner(specPath, store, runId);
+    await runPlanner(specPath, store, runId, orcaConfig);
     await store.updateRun(runId, {
       mode: "run",
       overallStatus: "running"
@@ -207,7 +207,8 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
         store,
         ...(orcaConfig ? { config: orcaConfig } : {}),
         emitHook,
-        executeTask: (task, runId, _config) => codexSession.executeTask(task, runId),
+        executeTask: (task, runId, _config, systemContext) =>
+          codexSession.executeTask(task, runId, systemContext),
       });
 
       const reviewText = await codexSession.reviewChanges();
