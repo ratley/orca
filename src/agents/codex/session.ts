@@ -265,6 +265,23 @@ export async function createCodexSession(
 
       const rawResponse = extractAgentText(result);
 
+      // Primary signal: use the SDK's structured turn status.
+      const status = result.turn.status;
+      if (status === "completed") {
+        return { outcome: "done", rawResponse };
+      }
+      if (status === "failed") {
+        return {
+          outcome: "failed",
+          error: result.turn.error?.message ?? "Turn failed",
+          rawResponse,
+        };
+      }
+      if (status === "interrupted") {
+        return { outcome: "failed", error: "Turn was interrupted", rawResponse };
+      }
+
+      // Fallback: status is unexpected/missing — parse text as before.
       return parseTaskExecution(rawResponse);
     },
 
