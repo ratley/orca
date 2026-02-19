@@ -3,6 +3,7 @@
 import { Command } from "commander";
 
 import { registerCancelCommand } from "./commands/cancel.js";
+import { registerHelpCommand } from "./commands/help.js";
 import { registerListCommand } from "./commands/list.js";
 import { registerPrCommand } from "./commands/pr/index.js";
 import { registerPlanCommand } from "./commands/plan.js";
@@ -25,5 +26,6 @@ registerCancelCommand(program);
 registerPrCommand(program);
 registerPrFinalizeCommand(program);
 registerSetupCommand(program);
+registerHelpCommand(program);
 
 await program.parseAsync(process.argv);
