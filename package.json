@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "type": "module",
   "bin": {
-    "orca": "./dist/cli/index.js"
+    "orca": "dist/cli/index.js"
   },
   "scripts": {
     "build": "tsc",
@@ -45,7 +45,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ratley/orca.git"
+    "url": "git+https://github.com/ratley/orca.git"
   },
   "keywords": [
     "ai",
