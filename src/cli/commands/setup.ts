@@ -326,17 +326,11 @@ export async function setupCommandHandler(options: SetupCommandOptions): Promise
     }
 
     if (anthropicApiKey) {
-      const detail = checkMode ? "set" : "found";
-      results.push({ name: "ANTHROPIC_API_KEY", status: "pass", detail });
-      if (!checkMode) {
-        console.log(chalk.green("✓ Anthropic API key found"));
-      }
+      results.push({ name: "ANTHROPIC_API_KEY", status: "pass", detail: checkMode ? "set" : "found" });
+      if (!checkMode) console.log(chalk.green("✓ Anthropic API key found"));
     } else {
-      const detail = checkMode ? "missing" : "not set";
-      results.push({ name: "ANTHROPIC_API_KEY", status: "fail", detail });
-      if (!checkMode) {
-        console.log(chalk.red("✗ ANTHROPIC_API_KEY not set"));
-      }
+      results.push({ name: "ANTHROPIC_API_KEY", status: "warn", detail: checkMode ? "not configured" : "not set" });
+      if (!checkMode) console.log(chalk.yellow("! ANTHROPIC_API_KEY not set"));
     }
 
     if (!checkMode && rl) {
@@ -344,17 +338,11 @@ export async function setupCommandHandler(options: SetupCommandOptions): Promise
     }
 
     if (openaiApiKey) {
-      const detail = checkMode ? "set" : "found";
-      results.push({ name: "OPENAI_API_KEY", status: "pass", detail });
-      if (!checkMode) {
-        console.log(chalk.green("✓ OpenAI API key found"));
-      }
+      results.push({ name: "OPENAI_API_KEY", status: "pass", detail: checkMode ? "set" : "found" });
+      if (!checkMode) console.log(chalk.green("✓ OpenAI API key found"));
     } else {
-      const detail = checkMode ? "missing" : "not set";
-      results.push({ name: "OPENAI_API_KEY", status: "fail", detail });
-      if (!checkMode) {
-        console.log(chalk.red("✗ OPENAI_API_KEY not set"));
-      }
+      results.push({ name: "OPENAI_API_KEY", status: "warn", detail: checkMode ? "not configured" : "not set" });
+      if (!checkMode) console.log(chalk.yellow("! OPENAI_API_KEY not set"));
     }
 
     const ghAvailable = commandExists("gh");
@@ -439,10 +427,10 @@ export async function setupCommandHandler(options: SetupCommandOptions): Promise
       const requiredPass = Boolean(anthropicApiKey) && Boolean(openaiApiKey);
       if (!requiredPass) {
         console.log(
-          chalk.yellow("\nMissing required keys. Run `orca setup` to configure interactively,")
+          chalk.dim("\nSome API keys aren't configured yet. Run `orca setup` to add them interactively,")
         );
         console.log(
-          chalk.yellow("or pass them directly: orca setup --anthropic-key <key> --openai-key <key>")
+          chalk.dim("or pass them directly: orca setup --anthropic-key <key> --openai-key <key>")
         );
       }
       process.exitCode = requiredPass ? 0 : 1;
