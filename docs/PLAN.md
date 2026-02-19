@@ -127,12 +127,6 @@ orca/
     PLAN.md
   specs/
     .gitkeep
-  runs/
-    <run-id>/
-      status.json
-      tasks.json
-      events.log
-      artifacts/
   src/
     cli/
       index.ts
@@ -190,9 +184,21 @@ orca/
   oxlintrc.json
 ```
 
+Global run store (outside project tree, configurable):
+```text
+~/.orca/runs/                   # default, override via ORCA_RUNS_DIR or orca.config.ts
+  <spec-slug>-<timestamp-ms>-<4char-hex>/
+    status.json
+    tasks.json
+    events.log
+    artifacts/
+```
+
 ## 6. Core Data Types (TypeScript)
 
 ```ts
+export type RunId = `${string}-${number}-${string}`; // <spec-slug>-<timestamp-ms>-<4char-hex>
+
 export interface Spec {
   id: string; // derived from file name or hash
   path: string;
@@ -201,7 +207,12 @@ export interface Spec {
   createdAt: string; // ISO timestamp
 }
 
-export type TaskStatus = "pending" | "in_progress" | "done" | "failed";
+export type TaskStatus =
+  | "pending"
+  | "in_progress"
+  | "done"
+  | "failed"
+  | "cancelled";
 
 export interface Task {
   id: string;
@@ -219,12 +230,12 @@ export interface Task {
 
 export interface RunStatus {
   schemaVersion: number;
-  runId: string;
+  runId: RunId;
   mode: "plan" | "run";
   specPath: string;
   createdAt: string;
   updatedAt: string;
-  overallStatus: "planning" | "running" | "completed" | "failed";
+  overallStatus: "planning" | "running" | "completed" | "failed" | "cancelled";
   tasks: Task[];
   milestones: string[];
   errors: Array<{ at: string; message: string; taskId?: string }>;
@@ -245,7 +256,7 @@ export type HookName =
   | "onError";
 
 export interface HookEvent {
-  runId: string;
+  runId: RunId;
   hook: HookName;
   message: string;
   timestamp: string;
@@ -258,6 +269,7 @@ export interface HookEvent {
 export type HookHandler = (event: HookEvent) => Promise<void>;
 
 export interface OrcaConfig {
+  runsDir?: string; // default ~/.orca/runs, env ORCA_RUNS_DIR takes precedence
   maxRetries?: number;
   claude?: {
     model?: string;
@@ -298,7 +310,11 @@ export interface OrcaConfig {
 2. Otherwise:
 - log structured event to stdout.
 
-Detection strategy should be explicit and configurable (e.g., env presence + binary availability check), with graceful fallback to stdout.
+OpenClaw detection contract:
+- Check binary presence in PATH (`which openclaw` on Unix, `where openclaw` on Windows).
+- Check auth/config presence: `OPENCLAW_GATEWAY_TOKEN` is set OR `~/.openclaw/openclaw.json` exists.
+- Both checks must pass to enable OpenClaw adapter.
+- If only one check passes, emit a warning and fall back to stdout.
 
 ### Reliability Rules
 - Hook failures never mutate task outcomes.
@@ -337,7 +353,7 @@ Detection strategy should be explicit and configurable (e.g., env presence + bin
 4. Orca merges feedback into a revised plan prompt for Claude.
 5. Claude emits final task graph.
 6. Validate graph integrity (unique IDs, no missing deps, no cycles).
-7. Persist plan (`runs/<id>/tasks.json`, `status.json`) and emit milestone hook.
+7. Persist plan (`<runs-dir>/<run-id>/tasks.json`, `status.json`) and emit milestone hook.
 
 Execution starts only after step 7 succeeds.
 
@@ -355,7 +371,7 @@ Execution starts only after step 7 succeeds.
 
 ### Status Persistence
 - Update `status.json` at every transition:
-- `pending -> in_progress -> done|failed`
+- `pending -> in_progress -> done|failed|cancelled`
 - include timestamps, retries, and last error.
 
 Use atomic write strategy (`write temp + rename`) to protect against partial writes.
@@ -368,6 +384,8 @@ orca run --spec ./specs/myfeature.md [--config ./orca.config.ts]
 ```
 - Runs pre-planning then execution.
 - Creates run directory and live status file.
+- First output line is always `Run ID: <run-id>` for concurrent run management.
+- Run ID format is deterministic + collision-resistant: `<spec-slug>-<timestamp-ms>-<4char-hex>` (e.g. `onboarding-1708300800000-a3f2`).
 
 ### `orca plan`
 ```bash
@@ -380,17 +398,43 @@ orca plan --spec ./specs/myfeature.md [--config ./orca.config.ts]
 ```bash
 orca status [--run <run-id>]
 ```
-- Reads `status.json` and prints run summary + task table.
-- Defaults to latest run when `--run` is omitted.
+- With no args, lists all runs in run store (same summary view as `orca list`).
+- With `--run <run-id>`, prints detailed status + task table for that specific run.
+
+### `orca list`
+```bash
+orca list
+```
+- Lists all runs in run store with run ID, spec, status, and started time.
+- Primary run discovery command before `status --run`, `resume`, `cancel`, and `pr finalize`.
+
+### `orca resume`
+```bash
+orca resume --run <run-id>
+```
+- Resumes a stopped/incomplete run by re-reading `tasks.json`.
+- Skips completed tasks and continues from the first incomplete task.
+
+### `orca cancel`
+```bash
+orca cancel --run <run-id>
+```
+- Terminates a currently running process cleanly.
+- Marks run/task state as `cancelled` and persists status.
 
 ### `orca pr finalize`
 ```bash
-orca pr finalize [--run <run-id>]
+orca pr finalize --run <run-id>
 ```
 - Reads drafted PR title/body from run artifacts.
 - Shows draft and asks for confirmation.
+- Refuses unless run `overallStatus` is `completed`.
 - On confirm, executes `gh pr create ...`.
 - Never pushes changes automatically.
+
+Run-targeting requirement for concurrent safety:
+- All commands that operate on a specific run require `--run <run-id>` (no implicit "latest" selection).
+- If omitted, command must fail with a clear error and list active runs.
 
 ### Hook Flags (examples)
 ```bash
@@ -404,7 +448,7 @@ orca run --spec ./specs/myfeature.md \
 - Claude drafts title + description from run context.
 2. Orca emits milestone: `PR draft ready`.
 3. User/agent reviews draft text.
-4. `orca pr finalize` confirmation gate.
+4. `orca pr finalize --run <run-id>` confirmation gate (only when run `overallStatus` is `completed`).
 5. On confirm, Orca calls `gh` and stores PR URL in `status.json`.
 
 Safety constraints:
@@ -432,13 +476,12 @@ Safety constraints:
 
 ## 15. Open Questions
 
-1. What exact OpenClaw detection contract should be used (env var names and precedence)?
-2. Should hook failures support configurable hard-fail mode for compliance-sensitive teams?
-3. Should task execution support parallel workers in v1, or defer to v2 after sequential stability?
-4. How should Claude session transcripts be retained/redacted for privacy?
-5. What retry classification rules are default (HTTP/network vs model refusal vs invalid JSON)?
-6. Should `orca status` include machine-readable `--json` output in v1?
-7. What is the long-term abstraction for non-Claude orchestrators?
+1. Should hook failures support configurable hard-fail mode for compliance-sensitive teams?
+2. Should task execution support parallel workers in v1, or defer to v2 after sequential stability?
+3. How should Claude session transcripts be retained/redacted for privacy?
+4. What retry classification rules are default (HTTP/network vs model refusal vs invalid JSON)?
+5. Should `orca status` include machine-readable `--json` output in v1?
+6. What is the long-term abstraction for non-Claude orchestrators?
 
 ## 16. Implementation Phases
 
@@ -451,13 +494,17 @@ Safety constraints:
 - Implement spec loader and planner pipeline.
 - Integrate Claude SDK adapter (v2 preview methods).
 - Generate and validate task JSON graph.
+- Generate deterministic/collision-resistant run IDs (`<spec-slug>-<timestamp-ms>-<4char-hex>`).
 - Persist run artifacts (`tasks.json`, `status.json`).
 - Implement `orca plan` command.
 
 ### Phase 2: Execution Engine
 - Build dependency-aware task runner.
 - Add retry policy and state transitions.
-- Implement `orca run` and `orca status`.
+- Implement `orca run`, `orca list`, and `orca status`.
+- Print `Run ID: <run-id>` as first `orca run` output line.
+- Enforce required `--run <run-id>` for run-scoped commands and clear "missing --run" errors with active-run listing.
+- Add `orca resume --run <run-id>` and `orca cancel --run <run-id>` flow.
 - Add robust atomic status writes.
 
 ### Phase 3: Hook Framework
@@ -474,11 +521,13 @@ Safety constraints:
 ### Phase 5: PR Draft and Finalize
 - Add on-complete draft generation.
 - Implement confirmation UX and `gh` integration.
-- Wire `orca pr finalize` and status persistence.
+- Wire `orca pr finalize --run <run-id>` and status persistence.
+- Refuse finalize unless run `overallStatus` is `completed`.
 
 ### Phase 6: Hardening and Extensibility
 - Schema versioning + migrations.
 - More integration tests (failure injection, retry behavior, hook failures).
+- Add global run store resolution (`ORCA_RUNS_DIR` env override, `orca.config.ts` fallback, default `~/.orca/runs`).
 - Optional JSON outputs and future orchestrator abstraction.
 
 ## 17. Build Order Recommendation
@@ -490,4 +539,3 @@ Start with `plan` before `run`:
 
 Immediate first milestone:
 - `orca plan --spec ...` producing validated `tasks.json` + `status.json` with hook emission.
-
