@@ -1,36 +1,37 @@
 ---
-date: 2026-02-19T00:28:00Z
-session: initial-scaffold
+date: 2026-02-19T00:43:49Z
+session: phase-1-planning-backbone
 agent: codex
 ---
 
 ## Built
-- project scaffold, TypeScript types, CLI stub commands, package.json, tsconfig, Bun setup
+- Phase 1 planning backbone: RunStore persistence, Claude planning adapter, planner pipeline, and real `orca plan` command.
 
 ## Changed
-- package.json | bootstrap scripts/deps | Phase 0 tooling baseline
-- tsconfig.json | strict TS config + Bun module settings | Bun runtime + typecheck workflow
-- src/types/index.ts | core run/task/hook shared types | typed orchestration model
-- src/cli/index.ts | CLI entrypoint scaffold | command dispatch foundation
-- src/cli/commands/run.ts | run command stub | execution flow placeholder
-- src/cli/commands/plan.ts | plan command stub | planning flow placeholder
-- src/cli/commands/list.ts | list command stub | run listing placeholder
-- src/cli/commands/resume.ts | resume command stub | resumable runs placeholder
-- src/cli/commands/cancel.ts | cancel command stub | cancellation placeholder
-- src/cli/commands/pr-finalize.ts | PR finalize command stub | controlled finalize flow placeholder
-- src/cli/commands/status.ts | status command stub | run visibility placeholder
+- `src/state/schema.ts` | aligned Zod schemas with `src/types/index.ts`; exported inferred schema types
+- `src/state/store.ts` | implemented full `RunStore` API (`createRun`, `getRun`, `updateRun`, `writeTasks`, `listRuns`, `getRunDir`) with atomic JSON writes
+- `src/agents/claude/session.ts` | added Claude Agent SDK v2 planning wrapper (`planSpec`) with streamed response collection and JSON parsing
+- `src/core/planner.ts` | added planning pipeline (`runPlanner`) and task graph validation (duplicate IDs, missing deps, cycle detection)
+- `src/utils/logger.ts` | simplified logger to phase-specified `info/success/warn/error` output style
+- `src/cli/commands/plan.ts` | replaced stub with working plan flow: spec validation, run creation, planner execution, summary output
+- `specs/sample.md` | added sample health-check spec for end-to-end plan command testing
+- `src/state/store.test.ts` | added RunStore tests for create/get/update/list behavior with temp-dir isolation
+- `src/core/planner.test.ts` | added planner validation tests with mocked planner function outputs
 
-## Tests
-- none yet
+## Verification
+- `bun run typecheck` | pass
+- `bun test` | pass (11 passing, 0 failing)
+- `bun run src/cli/index.ts plan --spec specs/sample.md` | pass, produced run ID and completed plan generation
 
 ## Decisions
-- Bun runtime - native TS, no transpile, fast test runner
-- mtime for session log enforcement
+- `RunStore.createRun` initializes run `mode` as `plan` for Phase 1 command flow.
+- Planner task validation is centralized in `src/core/planner.ts` before any tasks are written.
+- Claude plan prompt requests full task shape (`status`, `retries`, `maxRetries`) to remain compatible with strict `Task` type and RunStore schema validation.
 
 ## Next
-1. implement src/state/store.ts (RunStore)
-2. implement src/hooks/dispatcher.ts
-3. implement orca plan command end-to-end
+1. Implement Phase 2 execution engine (`task-runner`, dependency-aware scheduling, retries).
+2. Add run lifecycle command coverage for `status`, `list`, and resume/cancel integration with persisted state.
+3. Wire hook dispatcher into planner/execution milestones (`onMilestone`, `onError`, task-level hooks).
 
 ## Blockers
 - none

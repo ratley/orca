@@ -2,8 +2,8 @@ import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
-import { RunStatusSchema } from "./schema.js";
-import type { RunId, RunStatus, Spec } from "../types/index.js";
+import { RunStatusSchema, TaskSchema } from "./schema.js";
+import type { RunId, RunStatus, Task } from "../types/index.js";
 
 export class RunStore {
   private readonly runsDir: string;
@@ -12,13 +12,14 @@ export class RunStore {
     this.runsDir = runsDir;
   }
 
-  async createRun(runId: RunId, spec: Spec): Promise<RunStatus> {
+  async createRun(runId: string, specPath: string): Promise<RunStatus> {
+    const runDir = this.getRunDir(runId);
     const now = new Date().toISOString();
     const runStatus: RunStatus = {
       schemaVersion: 1,
-      runId,
-      mode: "run",
-      specPath: spec.path,
+      runId: runId as RunId,
+      mode: "plan",
+      specPath,
       createdAt: now,
       updatedAt: now,
       overallStatus: "planning",
@@ -27,11 +28,13 @@ export class RunStore {
       errors: []
     };
 
-    await this.writeStatus(runId, runStatus);
+    await fs.mkdir(runDir, { recursive: true });
+    await this.writeJsonAtomic(path.join(runDir, "status.json"), runStatus);
+
     return runStatus;
   }
 
-  async getRun(runId: RunId): Promise<RunStatus | null> {
+  async getRun(runId: string): Promise<RunStatus | null> {
     const statusPath = this.getStatusPath(runId);
 
     try {
@@ -46,20 +49,29 @@ export class RunStore {
     }
   }
 
-  async updateRun(runId: RunId, patch: Partial<RunStatus>): Promise<RunStatus> {
+  async updateRun(runId: string, patch: Partial<RunStatus>): Promise<RunStatus> {
     const existing = await this.getRun(runId);
     if (!existing) {
       throw new Error(`Run not found: ${runId}`);
     }
 
-    const next: RunStatus = {
+    const next = RunStatusSchema.parse({
       ...existing,
       ...patch,
       updatedAt: new Date().toISOString()
-    };
+    }) as RunStatus;
 
-    await this.writeStatus(runId, next);
+    await this.writeJsonAtomic(this.getStatusPath(runId), next);
     return next;
+  }
+
+  async writeTasks(runId: string, tasks: Task[]): Promise<void> {
+    const runDir = this.getRunDir(runId);
+    const tasksPath = path.join(runDir, "tasks.json");
+    const validatedTasks = TaskSchema.array().parse(tasks);
+
+    await fs.mkdir(runDir, { recursive: true });
+    await this.writeJsonAtomic(tasksPath, validatedTasks);
   }
 
   async listRuns(): Promise<RunStatus[]> {
@@ -72,8 +84,7 @@ export class RunStore {
         continue;
       }
 
-      const runId = entry.name as RunId;
-      const run = await this.getRun(runId);
+      const run = await this.getRun(entry.name);
       if (run) {
         runs.push(run);
       }
@@ -83,19 +94,19 @@ export class RunStore {
     return runs;
   }
 
-  private getStatusPath(runId: RunId): string {
-    return path.join(this.runsDir, runId, "status.json");
+  getRunDir(runId: string): string {
+    return path.join(this.runsDir, runId);
   }
 
-  private async writeStatus(runId: RunId, status: RunStatus): Promise<void> {
-    const runDir = path.join(this.runsDir, runId);
-    const statusPath = this.getStatusPath(runId);
-    const tempPath = `${statusPath}.${process.pid}.${Date.now()}.tmp`;
+  private getStatusPath(runId: string): string {
+    return path.join(this.getRunDir(runId), "status.json");
+  }
 
-    await fs.mkdir(runDir, { recursive: true });
+  private async writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
+    const tmpPath = `${filePath}.tmp`;
+    const payload = `${JSON.stringify(data, null, 2)}\n`;
 
-    const payload = `${JSON.stringify(status, null, 2)}\n`;
-    await fs.writeFile(tempPath, payload, "utf8");
-    await fs.rename(tempPath, statusPath);
+    await fs.writeFile(tmpPath, payload, "utf8");
+    await fs.rename(tmpPath, filePath);
   }
 }

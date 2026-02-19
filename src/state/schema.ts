@@ -38,7 +38,7 @@ const PrStatusSchema = z.object({
 
 export const RunStatusSchema = z.object({
   schemaVersion: z.number().int().nonnegative(),
-  runId: z.string().regex(/^.+-\d+-[0-9a-f]{4}$/),
+  runId: z.string(),
   mode: z.enum(["plan", "run"]),
   specPath: z.string(),
   createdAt: z.string(),
@@ -49,3 +49,6 @@ export const RunStatusSchema = z.object({
   errors: z.array(ErrorEntrySchema),
   pr: PrStatusSchema.optional()
 });
+
+export type TaskSchemaType = z.infer<typeof TaskSchema>;
+export type RunStatusSchemaType = z.infer<typeof RunStatusSchema>;

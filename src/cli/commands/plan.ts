@@ -1,4 +1,11 @@
 import type { Command } from "commander";
+import { access } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import path from "node:path";
+
+import { runPlanner } from "../../core/planner.js";
+import { RunStore } from "../../state/store.js";
+import { generateRunId } from "../../utils/ids.js";
 
 export interface PlanCommandOptions {
   spec: string;
@@ -7,8 +14,34 @@ export interface PlanCommandOptions {
   onError?: string;
 }
 
-export async function planCommandHandler(_options: PlanCommandOptions): Promise<void> {
-  console.log("not yet implemented");
+export async function planCommand(options: { spec: string; config?: string }): Promise<void> {
+  const specPath = path.resolve(options.spec);
+  await access(specPath, fsConstants.R_OK);
+
+  const runId = generateRunId(specPath);
+  console.log(`Run ID: ${runId}`);
+
+  const store = new RunStore();
+  await store.createRun(runId, specPath);
+  await runPlanner(specPath, store, runId);
+
+  const run = await store.getRun(runId);
+  if (!run) {
+    throw new Error(`Run not found after planning: ${runId}`);
+  }
+
+  console.log("Tasks:");
+  for (const task of run.tasks) {
+    console.log(`- ${task.name}`);
+  }
+  console.log(`Run dir: ${store.getRunDir(runId)}`);
+}
+
+export async function planCommandHandler(options: PlanCommandOptions): Promise<void> {
+  const commandOptions = options.config
+    ? { spec: options.spec, config: options.config }
+    : { spec: options.spec };
+  await planCommand(commandOptions);
 }
 
 export function registerPlanCommand(program: Command): void {
