@@ -437,6 +437,14 @@ export async function setupCommandHandler(options: SetupCommandOptions): Promise
 
     if (checkMode) {
       const requiredPass = Boolean(anthropicApiKey) && Boolean(openaiApiKey);
+      if (!requiredPass) {
+        console.log(
+          chalk.yellow("\nMissing required keys. Run `orca setup` to configure interactively,")
+        );
+        console.log(
+          chalk.yellow("or pass them directly: orca setup --anthropic-key <key> --openai-key <key>")
+        );
+      }
       process.exitCode = requiredPass ? 0 : 1;
       return;
     }
