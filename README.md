@@ -318,6 +318,12 @@ Orca auto-loads skills in this precedence order (first matching skill name wins)
 
 This repo ships a bundled default `code-simplifier` skill at `./.orca/skills/code-simplifier/SKILL.md`, and it loads even when Orca runs in arbitrary target repositories. Project/global/config skills can still override it by reusing the same skill name. Planner/reviewer/executor prompts explicitly apply `code-simplifier` guidance for all code-writing and code-review steps while keeping behavior unchanged unless a task explicitly requires behavior changes.
 
+When Orca uses the Codex executor, each turn is sent with both:
+- a text input item (`{ type: "text", text: ... }`), and
+- explicit skill input items (`{ type: "skill", name, path }`) for every loaded skill in the same precedence order above.
+
+This keeps Codex skill loading deterministic instead of relying only on prompt/context pickup.
+
 ### Run State Locations
 
 - Run status: `<runsDir>/<run-id>/status.json`

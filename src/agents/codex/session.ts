@@ -11,6 +11,7 @@ import type {
 } from "../../types/index.js";
 import { TaskGraphReviewPayloadSchema } from "../../core/task-graph-review.js";
 import type { CodexEffort } from "../../types/effort.js";
+import { loadSkills, type LoadedSkill } from "../../utils/skill-loader.js";
 
 export type { PlanResult, TaskExecutionResult };
 
@@ -252,6 +253,17 @@ function getEffort(config?: OrcaConfig): CodexEffort | undefined {
   return config?.codex?.effort;
 }
 
+function buildTurnInput(text: string, skills: LoadedSkill[]): Array<{ type: "text"; text: string } | { type: "skill"; name: string; path: string }> {
+  return [
+    { type: "text", text },
+    ...skills.map((skill) => ({
+      type: "skill" as const,
+      name: skill.name,
+      path: skill.dirPath,
+    })),
+  ];
+}
+
 /**
  * Create a persistent Codex session. The thread persists across calls —
  * planSpec and executeTask share context within the same session.
@@ -284,8 +296,16 @@ export async function createCodexSession(
 
   await client.connect();
 
-  const thread = await client.startThread({});
-  const threadId = thread.id;
+  let skills: LoadedSkill[];
+  let threadId: string;
+  try {
+    skills = await loadSkills(config);
+    const thread = await client.startThread({});
+    threadId = thread.id;
+  } catch (error) {
+    await client.disconnect();
+    throw error;
+  }
 
   return {
     threadId,
@@ -299,11 +319,11 @@ export async function createCodexSession(
         ? await client.runTurn({
             threadId,
             effort,
-            input: [{ type: "text", text: buildPlanningPrompt(spec, systemContext) }],
+            input: buildTurnInput(buildPlanningPrompt(spec, systemContext), skills),
           })
         : await client.runTurn({
             threadId,
-            input: [{ type: "text", text: buildPlanningPrompt(spec, systemContext) }],
+            input: buildTurnInput(buildPlanningPrompt(spec, systemContext), skills),
           });
 
       const rawResponse = extractAgentText(result);
@@ -320,11 +340,11 @@ export async function createCodexSession(
         ? await client.runTurn({
             threadId,
             effort,
-            input: [{ type: "text", text: buildTaskGraphReviewPrompt(tasks, systemContext) }],
+            input: buildTurnInput(buildTaskGraphReviewPrompt(tasks, systemContext), skills),
           })
         : await client.runTurn({
             threadId,
-            input: [{ type: "text", text: buildTaskGraphReviewPrompt(tasks, systemContext) }],
+            input: buildTurnInput(buildTaskGraphReviewPrompt(tasks, systemContext), skills),
           });
 
       const rawResponse = extractAgentText(result);
@@ -341,21 +361,11 @@ export async function createCodexSession(
         ? await client.runTurn({
             threadId,
             effort,
-            input: [
-              {
-                type: "text",
-                text: buildTaskExecutionPrompt(task, runId, cwd, systemContext),
-              },
-            ],
+            input: buildTurnInput(buildTaskExecutionPrompt(task, runId, cwd, systemContext), skills),
           })
         : await client.runTurn({
             threadId,
-            input: [
-              {
-                type: "text",
-                text: buildTaskExecutionPrompt(task, runId, cwd, systemContext),
-              },
-            ],
+            input: buildTurnInput(buildTaskExecutionPrompt(task, runId, cwd, systemContext), skills),
           });
 
       const rawResponse = extractAgentText(result);
@@ -401,11 +411,11 @@ export async function createCodexSession(
         ? await client.runTurn({
             threadId,
             effort,
-            input: [{ type: "text", text: prompt }],
+            input: buildTurnInput(prompt, skills),
           })
         : await client.runTurn({
             threadId,
-            input: [{ type: "text", text: prompt }],
+            input: buildTurnInput(prompt, skills),
           });
 
       const rawResponse = extractAgentText(result);
@@ -441,11 +451,11 @@ export async function createCodexSession(
         ? await client.runTurn({
             threadId,
             effort,
-            input: [{ type: "text", text: prompt }],
+            input: buildTurnInput(prompt, skills),
           })
         : await client.runTurn({
             threadId,
-            input: [{ type: "text", text: prompt }],
+            input: buildTurnInput(prompt, skills),
           });
 
       return extractAgentText(result);

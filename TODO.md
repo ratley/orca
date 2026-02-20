@@ -18,6 +18,7 @@
 
 ## Recent Ships
 - ✅ Bundled `code-simplifier` skill added at `.orca/skills/code-simplifier/SKILL.md`; planner/reviewer/executor prompts now explicitly apply it for all code-writing and code-review steps (behavior-preserving by default)
+- ✅ Codex turn input now includes explicit `skill` items (`{ type: "skill", name, path }`) for all loaded skills (same precedence as loader), plus text input for every turn
 - ✅ `orca skills list` command shipped
 - ✅ Executor override flags shipped: `--codex-only` / `--claude-only`
 - ✅ Claude planner/executor deterministic structured-output path shipped (text JSON fallback gated)
