@@ -99,6 +99,7 @@ export interface OrcaConfig {
     model?: string;
     useV2Preview?: boolean;
     maxTurnsPerTask?: number;
+    allowTextJsonFallback?: boolean;
   };
   codex?: {
     enabled?: boolean;

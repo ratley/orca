@@ -1,162 +1,156 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
 
-import { parseTaskArray, parseTaskExecution } from "./session.js";
+afterEach(() => {
+  mock.restore();
+  delete process.env.ORCA_CLAUDE_ALLOW_TEXT_JSON_FALLBACK;
+});
 
-// ---------------------------------------------------------------------------
-// parseTaskArray
-// ---------------------------------------------------------------------------
+describe("claude session structured contract", () => {
+  test("accepts valid structured planner payload", async () => {
+    const { parseStructuredPlanPayload } = await import(`./session.ts?test=${Math.random()}`);
+    const tasks = parseStructuredPlanPayload({
+      tasks: [
+        {
+          id: "t1",
+          name: "Create file",
+          description: "Create foo.txt",
+          dependencies: [],
+          acceptance_criteria: ["foo.txt exists"],
+          status: "pending",
+          retries: 0,
+          maxRetries: 3,
+        },
+      ],
+    });
 
-describe("parseTaskArray", () => {
-  it("coerces numeric IDs to strings", () => {
-    const raw = JSON.stringify([
-      { id: 1, name: "Task A", description: "Do A", dependencies: [], acceptance_criteria: ["A done"], status: "pending", retries: 0, maxRetries: 3 },
-    ]);
-    const tasks = parseTaskArray(raw);
-    expect(tasks[0]?.id).toBe("1");
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]?.id).toBe("t1");
   });
 
-  it("defaults missing dependencies to []", () => {
-    const raw = JSON.stringify([
-      { id: "1", name: "Task A", description: "Do A", acceptance_criteria: ["A done"], status: "pending", retries: 0, maxRetries: 3 },
-    ]);
-    const tasks = parseTaskArray(raw);
-    expect(tasks[0]?.dependencies).toEqual([]);
+  test("invalid structured payload hard-fails with actionable schema error", async () => {
+    const { parseStructuredPlanPayload } = await import(`./session.ts?test=${Math.random()}`);
+    expect(() =>
+      parseStructuredPlanPayload({
+        tasks: [
+          {
+            id: 1,
+            name: "bad id",
+            description: "bad",
+            dependencies: [],
+            acceptance_criteria: [],
+            status: "pending",
+            retries: 0,
+            maxRetries: 3,
+          },
+        ],
+      }),
+    ).toThrow("Claude structured plan payload failed schema validation");
   });
 
-  it("coerces numeric dependency refs to strings", () => {
-    const raw = JSON.stringify([
-      { id: "2", name: "Task B", description: "Do B", dependencies: [1], acceptance_criteria: [], status: "pending", retries: 0, maxRetries: 3 },
-    ]);
-    const tasks = parseTaskArray(raw);
-    expect(tasks[0]?.dependencies).toEqual(["1"]);
-  });
-
-  it("defaults missing name to 'Unnamed task'", () => {
-    const raw = JSON.stringify([
-      { id: "1", description: "Do A", acceptance_criteria: [], status: "pending", retries: 0, maxRetries: 3 },
-    ]);
-    const tasks = parseTaskArray(raw);
-    expect(tasks[0]?.name).toBe("Unnamed task");
-  });
-
-  it("defaults missing description to empty string", () => {
-    const raw = JSON.stringify([
-      { id: "1", name: "Task A", acceptance_criteria: [], status: "pending", retries: 0, maxRetries: 3 },
-    ]);
-    const tasks = parseTaskArray(raw);
-    expect(tasks[0]?.description).toBe("");
-  });
-
-  it("defaults missing acceptance_criteria to []", () => {
-    const raw = JSON.stringify([
-      { id: "1", name: "Task A", description: "Do A", status: "pending", retries: 0, maxRetries: 3 },
-    ]);
-    const tasks = parseTaskArray(raw);
-    expect(tasks[0]?.acceptance_criteria).toEqual([]);
-  });
-
-  it("defaults missing status to 'pending'", () => {
-    const raw = JSON.stringify([
-      { id: "1", name: "Task A", description: "Do A", acceptance_criteria: [] },
-    ]);
-    const tasks = parseTaskArray(raw);
-    expect(tasks[0]?.status).toBe("pending");
-  });
-
-  it("defaults missing retries to 0", () => {
-    const raw = JSON.stringify([
-      { id: "1", name: "Task A", description: "Do A", acceptance_criteria: [] },
-    ]);
-    const tasks = parseTaskArray(raw);
-    expect(tasks[0]?.retries).toBe(0);
-  });
-
-  it("defaults missing maxRetries to 3", () => {
-    const raw = JSON.stringify([
-      { id: "1", name: "Task A", description: "Do A", acceptance_criteria: [] },
-    ]);
-    const tasks = parseTaskArray(raw);
-    expect(tasks[0]?.maxRetries).toBe(3);
-  });
-
-  it("throws when input is not an array", () => {
-    const raw = JSON.stringify({ id: "1", name: "Task A" });
-    expect(() => parseTaskArray(raw)).toThrow("Claude plan response was not a JSON array");
-  });
-
-  it("throws on invalid JSON", () => {
-    expect(() => parseTaskArray("not-json")).toThrow();
-  });
-
-  it("strips markdown json fences before parsing", () => {
-    const tasks = [
-      { id: "1", name: "Task A", description: "Do A", dependencies: [], acceptance_criteria: ["A done"], status: "pending", retries: 0, maxRetries: 3 }
-    ];
-    const raw = "```json\n" + JSON.stringify(tasks) + "\n```";
-    const result = parseTaskArray(raw);
-    expect(result[0]?.id).toBe("1");
-    expect(result[0]?.name).toBe("Task A");
-  });
-
-  it("strips plain markdown fences before parsing", () => {
-    const tasks = [
-      { id: "2", name: "Task B", description: "Do B", dependencies: [], acceptance_criteria: ["B done"], status: "pending", retries: 0, maxRetries: 3 }
-    ];
-    const raw = "```\n" + JSON.stringify(tasks) + "\n```";
-    const result = parseTaskArray(raw);
-    expect(result[0]?.id).toBe("2");
+  test("structured task payload rejects done+error combination", async () => {
+    const { parseStructuredTaskExecutionPayload } = await import(`./session.ts?test=${Math.random()}`);
+    expect(() =>
+      parseStructuredTaskExecutionPayload({
+        outcome: "done",
+        error: "should not exist",
+      }),
+    ).toThrow("Claude structured task payload failed schema validation");
   });
 });
 
-// ---------------------------------------------------------------------------
-// parseTaskExecution
-// ---------------------------------------------------------------------------
+describe("claude session structured-output critical path", () => {
+  test("markdown-fenced assistant text does not hit text parser when structured output exists", async () => {
+    mock.module("@anthropic-ai/claude-agent-sdk", () => ({
+      query: () => {
+        const messages = [
+          {
+            type: "assistant",
+            message: {
+              content: [{ type: "text", text: "```json\n{not-valid-json}\n```" }],
+            },
+          },
+          {
+            type: "result",
+            subtype: "success",
+            result: "ignored",
+            structured_output: {
+              tasks: [
+                {
+                  id: "t1",
+                  name: "N",
+                  description: "D",
+                  dependencies: [],
+                  acceptance_criteria: ["A"],
+                  status: "pending",
+                  retries: 0,
+                  maxRetries: 3,
+                },
+              ],
+            },
+          },
+        ];
 
-describe("parseTaskExecution", () => {
-  it("parses a valid done outcome", () => {
-    const raw = JSON.stringify({ outcome: "done" });
-    const result = parseTaskExecution(raw);
-    expect(result.outcome).toBe("done");
-    expect(result.rawResponse).toBe(raw);
-    expect(result.error).toBeUndefined();
+        return {
+          close() {},
+          async *[Symbol.asyncIterator]() {
+            for (const msg of messages) {
+              yield msg;
+            }
+          },
+        };
+      },
+    }));
+
+    const { planSpec } = await import(`./session.ts?test=${Math.random()}`);
+    const result = await planSpec("spec", "ctx");
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0]?.id).toBe("t1");
   });
 
-  it("parses a valid failed outcome with error string", () => {
-    const raw = JSON.stringify({ outcome: "failed", error: "something broke" });
-    const result = parseTaskExecution(raw);
-    expect(result.outcome).toBe("failed");
-    expect(result.error).toBe("something broke");
-    expect(result.rawResponse).toBe(raw);
+  test("missing structured output hard-fails by default", async () => {
+    mock.module("@anthropic-ai/claude-agent-sdk", () => ({
+      query: () => ({
+        close() {},
+        async *[Symbol.asyncIterator]() {
+          yield {
+            type: "assistant",
+            message: {
+              content: [{ type: "text", text: '{"tasks":[]}' }],
+            },
+          };
+          yield { type: "result", subtype: "success", result: '{"tasks":[]}' };
+        },
+      }),
+    }));
+
+    const { planSpec } = await import(`./session.ts?test=${Math.random()}`);
+    await expect(planSpec("spec", "ctx")).rejects.toThrow("Refusing freeform JSON parsing on critical path");
   });
 
-  it("parses a valid failed outcome without error field", () => {
-    const raw = JSON.stringify({ outcome: "failed" });
-    const result = parseTaskExecution(raw);
-    expect(result.outcome).toBe("failed");
-    expect(result.error).toBeUndefined();
-  });
+  test("fallback parser is explicitly gated and still zod-validates", async () => {
+    process.env.ORCA_CLAUDE_ALLOW_TEXT_JSON_FALLBACK = "1";
 
-  it("throws when outcome is invalid", () => {
-    const raw = JSON.stringify({ outcome: "skipped" });
-    expect(() => parseTaskExecution(raw)).toThrow("Claude task response missing valid outcome");
-  });
+    mock.module("@anthropic-ai/claude-agent-sdk", () => ({
+      query: () => ({
+        close() {},
+        async *[Symbol.asyncIterator]() {
+          yield {
+            type: "assistant",
+            message: {
+              content: [
+                {
+                  type: "text",
+                  text: "```json\n{\"tasks\":[{\"id\":123,\"name\":\"bad\",\"description\":\"x\",\"dependencies\":[],\"acceptance_criteria\":[],\"status\":\"pending\",\"retries\":0,\"maxRetries\":3}]}\n```",
+                },
+              ],
+            },
+          };
+          yield { type: "result", subtype: "success", result: "ignored" };
+        },
+      }),
+    }));
 
-  it("throws when outcome is missing", () => {
-    const raw = JSON.stringify({ error: "oops" });
-    expect(() => parseTaskExecution(raw)).toThrow("Claude task response missing valid outcome");
-  });
-
-  it("throws when input is not a JSON object", () => {
-    const raw = JSON.stringify([{ outcome: "done" }]);
-    expect(() => parseTaskExecution(raw)).toThrow("Claude task response was not a JSON object");
-  });
-
-  it("throws on invalid JSON", () => {
-    expect(() => parseTaskExecution("not-json")).toThrow();
-  });
-
-  it("throws when error field is not a string", () => {
-    const raw = JSON.stringify({ outcome: "failed", error: 42 });
-    expect(() => parseTaskExecution(raw)).toThrow("Claude task response error must be a string");
+    const { planSpec } = await import(`./session.ts?test=${Math.random()}`);
+    await expect(planSpec("spec", "ctx")).rejects.toThrow("Claude plan response failed schema validation");
   });
 });
