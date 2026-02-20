@@ -60,6 +60,14 @@ function printStyledHelpPage(): void {
       command: "--config <path>",
       description: "explicit config file (auto-discovered by default)"
     },
+    {
+      command: "--codex-only",
+      description: "override executor to Codex for the current run"
+    },
+    {
+      command: "--claude-only",
+      description: "override executor to Claude for the current run"
+    },
     { command: "--full-auto", description: "skip all questions, proceed autonomously" },
     { command: "--on-complete <cmd>", description: "shell hook on run complete" },
     { command: "--on-error <cmd>", description: "shell hook on run error" },

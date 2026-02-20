@@ -1,14 +1,17 @@
 import type { Command } from "commander";
 
+import { resolveConfig } from "../../core/config-loader.js";
 import { runTaskRunner } from "../../core/task-runner.js";
 import { RunStore } from "../../state/store.js";
-import type { RunStatus } from "../../types/index.js";
+import type { OrcaConfig, RunStatus } from "../../types/index.js";
 import { getLastRun } from "../../utils/last-run.js";
 
 export interface ResumeCommandOptions {
   run?: string;
   last?: boolean;
   config?: string;
+  codexOnly?: boolean;
+  claudeOnly?: boolean;
 }
 
 function createStore(): RunStore {
@@ -28,8 +31,26 @@ function getActiveRuns(runs: RunStatus[]): RunStatus[] {
   return runs.filter((run) => run.overallStatus === "planning" || run.overallStatus === "running");
 }
 
+function applyExecutorOverrideForResume(
+  config: OrcaConfig | undefined,
+  options: Pick<ResumeCommandOptions, "codexOnly" | "claudeOnly">
+): OrcaConfig | undefined {
+  if (!options.codexOnly && !options.claudeOnly) {
+    return config;
+  }
+
+  const executor: OrcaConfig["executor"] = options.codexOnly ? "codex" : "claude";
+  return { ...config, executor };
+}
+
 export async function resumeCommandHandler(options: ResumeCommandOptions): Promise<void> {
+  if (options.codexOnly && options.claudeOnly) {
+    throw new Error("--codex-only and --claude-only are mutually exclusive; choose only one executor override.");
+  }
+
   const store = createStore();
+  const resolvedConfig = await resolveConfig(options.config);
+  const effectiveConfig = applyExecutorOverrideForResume(resolvedConfig, options);
 
   if (options.last) {
     const lastRun = await getLastRun(store);
@@ -83,7 +104,8 @@ export async function resumeCommandHandler(options: ResumeCommandOptions): Promi
 
   await runTaskRunner({
     runId: run.runId,
-    store
+    store,
+    ...(effectiveConfig ? { config: effectiveConfig } : {})
   });
 
   const refreshed = await store.getRun(run.runId);
@@ -101,5 +123,14 @@ export function registerResumeCommand(program: Command): void {
     .option("--run <run-id>", "Run ID to resume")
     .option("--last", "Use the most recent run")
     .option("--config <path>", "Path to orca config file")
-    .action(async (options: ResumeCommandOptions) => resumeCommandHandler(options));
+    .option("--codex-only", "Force Codex executor for this resumed run (overrides config)")
+    .option("--claude-only", "Force Claude executor for this resumed run (overrides config)")
+    .action(async (options: ResumeCommandOptions) => {
+      try {
+        await resumeCommandHandler(options);
+      } catch (err) {
+        console.error(err instanceof Error ? err.message : String(err));
+        process.exitCode = 1;
+      }
+    });
 }

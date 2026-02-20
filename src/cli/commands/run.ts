@@ -15,7 +15,7 @@ import { createOpenclawHookHandler, detectOpenclawAvailability } from "../../hoo
 import { createStdoutHookHandler } from "../../hooks/adapters/stdout.js";
 import { HookDispatcher } from "../../hooks/dispatcher.js";
 import { RunStore } from "../../state/store.js";
-import type { HookEvent, HookName } from "../../types/index.js";
+import type { HookEvent, HookName, OrcaConfig } from "../../types/index.js";
 import { generateRunId } from "../../utils/ids.js";
 
 export interface RunCommandOptions {
@@ -25,6 +25,8 @@ export interface RunCommandOptions {
   prompt?: string;
   goal?: string;
   config?: string;
+  codexOnly?: boolean;
+  claudeOnly?: boolean;
   onMilestone?: string;
   onTaskComplete?: string;
   onTaskFail?: string;
@@ -74,7 +76,23 @@ function buildCliCommandHooks(options: RunCommandOptions): Partial<Record<HookNa
   };
 }
 
+function applyExecutorOverrideForRun(
+  config: OrcaConfig | undefined,
+  options: Pick<RunCommandOptions, "codexOnly" | "claudeOnly">
+): OrcaConfig | undefined {
+  if (!options.codexOnly && !options.claudeOnly) {
+    return config;
+  }
+
+  const executor: OrcaConfig["executor"] = options.codexOnly ? "codex" : "claude";
+  return { ...config, executor };
+}
+
 export async function runCommandHandler(options: RunCommandOptions): Promise<void> {
+  if (options.codexOnly && options.claudeOnly) {
+    throw new Error("--codex-only and --claude-only are mutually exclusive; choose only one executor override.");
+  }
+
   const inlineTask = options.task ?? options.prompt ?? options.goal;
   const inputSpecPath = options.spec ?? options.plan;
 
@@ -109,6 +127,7 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
     });
 
     const orcaConfig = await resolveConfig(options.config);
+    const effectiveConfig = applyExecutorOverrideForRun(orcaConfig, options);
 
     const runId = generateRunId(specPath);
     console.log(`Run ID: ${runId}`);
@@ -116,7 +135,7 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
     const store = createStore();
     await store.createRun(runId, specPath);
 
-    await runPlanner(specPath, store, runId, orcaConfig);
+    await runPlanner(specPath, store, runId, effectiveConfig);
     await store.updateRun(runId, {
       mode: "run",
       overallStatus: "running"
@@ -169,53 +188,64 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
       await dispatcher.dispatch(event);
     };
 
-    const cwd = process.cwd();
+    const executor = effectiveConfig?.executor ?? "codex";
+    if (executor === "codex") {
+      const cwd = process.cwd();
 
-    const multiAgentResult = await ensureCodexMultiAgent(orcaConfig ?? undefined);
-    if (multiAgentResult.action === "created" || multiAgentResult.action === "appended") {
-      console.log(`Multi-agent: enabled (updated ${multiAgentResult.path})`);
-    }
-
-    const codexSession = await createCodexSession(cwd, orcaConfig ?? undefined);
-
-    try {
-      // Phase 4: Codex consults the task graph before execution begins.
-      const plannedRun = await store.getRun(runId);
-      if (!plannedRun) {
-        throw new Error(`Run not found after planning: ${runId}`);
+      const multiAgentResult = await ensureCodexMultiAgent(effectiveConfig);
+      if (multiAgentResult.action === "created" || multiAgentResult.action === "appended") {
+        console.log(`Multi-agent: enabled (updated ${multiAgentResult.path})`);
       }
 
-      console.log("Phase 4: Codex reviewing task graph...");
-      const consultation = await codexSession.consultTaskGraph(plannedRun.tasks);
-      if (consultation.issues.length > 0) {
-        console.log("Codex consultation issues:");
-        for (const issue of consultation.issues) {
-          console.log(`  - ${issue}`);
+      const codexSession = await createCodexSession(cwd, effectiveConfig);
+
+      try {
+        // Phase 4: Codex consults the task graph before execution begins.
+        const plannedRun = await store.getRun(runId);
+        if (!plannedRun) {
+          throw new Error(`Run not found after planning: ${runId}`);
         }
+
+        console.log("Phase 4: Codex reviewing task graph...");
+        const consultation = await codexSession.consultTaskGraph(plannedRun.tasks);
+        if (consultation.issues.length > 0) {
+          console.log("Codex consultation issues:");
+          for (const issue of consultation.issues) {
+            console.log(`  - ${issue}`);
+          }
+        }
+
+        if (!consultation.ok) {
+          console.error("Codex flagged the task graph as not OK. Aborting.");
+          await store.updateRun(runId, { overallStatus: "failed" });
+          return;
+        }
+
+        console.log("Codex consultation passed. Starting execution...");
+
+        await runTaskRunner({
+          runId,
+          store,
+          ...(effectiveConfig ? { config: effectiveConfig } : {}),
+          emitHook,
+          executeTask: (task, taskRunId, _config, systemContext) =>
+            codexSession.executeTask(task, taskRunId, systemContext),
+        });
+
+        const reviewText = await codexSession.reviewChanges();
+        console.log("Codex post-execution review:");
+        console.log(reviewText);
+      } finally {
+        await codexSession.disconnect();
       }
-
-      if (!consultation.ok) {
-        console.error("Codex flagged the task graph as not OK. Aborting.");
-        await store.updateRun(runId, { overallStatus: "failed" });
-        return;
-      }
-
-      console.log("Codex consultation passed. Starting execution...");
-
+    } else {
+      console.log("Phase 4: Skipping Codex consultation because executor is set to Claude.");
       await runTaskRunner({
         runId,
         store,
-        ...(orcaConfig ? { config: orcaConfig } : {}),
-        emitHook,
-        executeTask: (task, runId, _config, systemContext) =>
-          codexSession.executeTask(task, runId, systemContext),
+        ...(effectiveConfig ? { config: effectiveConfig } : {}),
+        emitHook
       });
-
-      const reviewText = await codexSession.reviewChanges();
-      console.log("Codex post-execution review:");
-      console.log(reviewText);
-    } finally {
-      await codexSession.disconnect();
     }
 
     const run = await store.getRun(runId);
@@ -257,6 +287,8 @@ export function registerRunCommand(program: Command): void {
     .option("--task <text>", "Inline task text (alternative to --spec)")
     .option("-p, --prompt <text>", "Inline task text (alias for --task)")
     .option("--config <path>", "Path to orca config file")
+    .option("--codex-only", "Force Codex executor for this run (overrides config)")
+    .option("--claude-only", "Force Claude executor for this run (overrides config)")
     .option("--on-milestone <cmd>", "Shell hook command for onMilestone")
     .option("--on-task-complete <cmd>", "Shell hook command for onTaskComplete")
     .option("--on-task-fail <cmd>", "Shell hook command for onTaskFail")
@@ -268,6 +300,13 @@ export function registerRunCommand(program: Command): void {
           ...commandOptions,
           ...(goal !== undefined ? { goal } : {})
         };
+
+        if (normalizedOptions.codexOnly && normalizedOptions.claudeOnly) {
+          console.error("Error: --codex-only and --claude-only are mutually exclusive; choose only one.");
+          process.exitCode = 1;
+          return;
+        }
+
         const inlineTask = normalizedOptions.task ?? normalizedOptions.prompt ?? normalizedOptions.goal;
         const inputSpecPath = normalizedOptions.spec ?? normalizedOptions.plan;
 
