@@ -310,13 +310,13 @@ async function loadCodexListedSkills(client: CodexClient, cwd: string, config?: 
     return [];
   }
 
-  const request = maybeRequest as (method: string, params?: unknown, timeoutMs?: number) => Promise<unknown>;
+  const request = maybeRequest as (this: unknown, method: string, params?: unknown, timeoutMs?: number) => Promise<unknown>;
 
   const perCwdExtraUserRoots = getPerCwdExtraUserRootsForCwd(config, cwd);
 
   let response: unknown;
   try {
-    response = await request("skills/list", {
+    response = await request.call(client, "skills/list", {
       cwd,
       forceReload: true,
       ...(perCwdExtraUserRoots.length > 0 ? { perCwdExtraUserRoots } : {}),
