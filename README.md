@@ -1,4 +1,6 @@
-<img src="assets/orca-banner.jpg" alt="Orca" width="380" />
+<p align="center">
+  <img src="assets/orca-banner.jpg" alt="Orca" width="380" />
+</p>
 
 # orca
 
