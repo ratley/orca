@@ -1,3 +1,5 @@
+<img src="assets/orca-banner.jpg" alt="Orca" width="600" />
+
 # orca
 
 Coordinated agent run harness. Breaks down a goal into a task graph, then executes it end-to-end via a persistent [Codex](https://github.com/ratley/codex-client) session with full context across tasks.
