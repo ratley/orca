@@ -315,7 +315,7 @@ Orca auto-loads skills in this precedence order (first matching skill name wins)
 2. `./.orca/skills/`
 3. `~/.orca/skills/`
 
-This repo includes a default `code-simplifier` skill at `./.orca/skills/code-simplifier/SKILL.md`. When loaded, planner/reviewer/executor prompts explicitly apply it for refactor/simplification work while keeping behavior unchanged unless a task explicitly requires behavior changes.
+This repo includes a default `code-simplifier` skill at `./.orca/skills/code-simplifier/SKILL.md`. Planner/reviewer/executor prompts explicitly apply it for all code-writing and code-review steps while keeping behavior unchanged unless a task explicitly requires behavior changes.
 
 ### Run State Locations
 

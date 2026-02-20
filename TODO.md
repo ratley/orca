@@ -17,7 +17,7 @@
 - ✅ Shipped in v0.2.8 — executor config validation, symlink guard, EACCES/EPERM resilience, parseTaskArray field defaults, Codex session leak fix, claude session unit tests (19 new), shared PlanResult/TaskExecutionResult types
 
 ## Recent Ships
-- ✅ Bundled `code-simplifier` skill added at `.orca/skills/code-simplifier/SKILL.md`; planner/reviewer/executor prompts now explicitly apply it for refactor/simplification work (behavior-preserving by default)
+- ✅ Bundled `code-simplifier` skill added at `.orca/skills/code-simplifier/SKILL.md`; planner/reviewer/executor prompts now explicitly apply it for all code-writing and code-review steps (behavior-preserving by default)
 - ✅ `orca skills list` command shipped
 - ✅ Executor override flags shipped: `--codex-only` / `--claude-only`
 - ✅ Claude planner/executor deterministic structured-output path shipped (text JSON fallback gated)

@@ -70,5 +70,5 @@ export default {
 - Post-exec reviewer uses strict JSON schema (`summary`, `findings[]`, `fixed`) with one bounded repair retry on malformed output
 - Hook smoke harness: run `npm run smoke:hooks`
 - Run ID format: `<slug>-<unix-ms>-<hex4>`  (e.g. cobalt-summit-1708123456789-a3f2)
-- Bundled project skill: `./.orca/skills/code-simplifier/SKILL.md` (applied explicitly in planner/reviewer/executor prompts for refactor/simplification tasks)
+- Bundled project skill: `./.orca/skills/code-simplifier/SKILL.md` (applied explicitly in planner/reviewer/executor prompts for all code-writing and code-review steps)
 - Use `orca answer` to unblock a waiting run

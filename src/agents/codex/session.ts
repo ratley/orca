@@ -14,26 +14,10 @@ import type { CodexEffort } from "../../types/effort.js";
 
 export type { PlanResult, TaskExecutionResult };
 
-const CODE_SIMPLIFIER_MARKERS = [
-  /^###\s+code-simplifier\s*$/im,
-  /\bname:\s*code-simplifier\b/i,
-];
-
-function hasCodeSimplifierSkill(systemContext?: string): boolean {
-  if (!systemContext) {
-    return false;
-  }
-
-  return CODE_SIMPLIFIER_MARKERS.some((marker) => marker.test(systemContext));
-}
-
-function getCodeSimplifierGuidance(systemContext?: string): string[] {
-  if (!hasCodeSimplifierSkill(systemContext)) {
-    return [];
-  }
-
+function getCodeSimplifierGuidance(): string[] {
   return [
-    "When work involves refactoring or simplification, apply the code-simplifier skill guidance.",
+    "For every code-writing step, explicitly apply code-simplifier guidance (use the bundled code-simplifier skill when available).",
+    "For every code-review step, explicitly apply code-simplifier guidance (use the bundled code-simplifier skill when available).",
     "Keep changes behavior-preserving unless the task explicitly requires behavior changes.",
   ];
 }
@@ -42,7 +26,7 @@ function buildPlanningPrompt(spec: string, systemContext: string): string {
   return [
     systemContext,
     "You are decomposing a spec into an ordered task graph.",
-    ...getCodeSimplifierGuidance(systemContext),
+    ...getCodeSimplifierGuidance(),
     "Return a JSON array of tasks.",
     "Each task must include fields: id, name, description, dependencies, acceptance_criteria, status, retries, maxRetries.",
     'Set status to "pending", retries to 0, and maxRetries to 3 for every task.',
@@ -63,7 +47,7 @@ function buildTaskExecutionPrompt(
   return [
     ...(systemContext ? [systemContext] : []),
     "You are Orca's task execution assistant.",
-    ...getCodeSimplifierGuidance(systemContext),
+    ...getCodeSimplifierGuidance(),
     `Run ID: ${runId}`,
     `Repository CWD: ${cwd}`,
     `Task ID: ${task.id}`,
@@ -87,7 +71,7 @@ function buildTaskGraphReviewPrompt(tasks: Task[], systemContext: string): strin
   return [
     systemContext,
     "You are Orca's pre-execution task-graph reviewer.",
-    ...getCodeSimplifierGuidance(systemContext),
+    ...getCodeSimplifierGuidance(),
     "Return JSON matching this shape exactly: {\"changes\":[...operations...]}",
     "Allowed operation shapes:",
     "- {\"op\":\"update_task\",\"taskId\":\"...\",\"fields\":{\"name\"?:string,\"description\"?:string,\"acceptance_criteria\"?:string[]}}",

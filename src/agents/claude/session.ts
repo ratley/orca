@@ -17,26 +17,10 @@ type JsonSchema = Record<string, unknown>;
 
 export type { PlanResult, TaskExecutionResult };
 
-const CODE_SIMPLIFIER_MARKERS = [
-  /^###\s+code-simplifier\s*$/im,
-  /\bname:\s*code-simplifier\b/i,
-];
-
-function hasCodeSimplifierSkill(systemContext?: string): boolean {
-  if (!systemContext) {
-    return false;
-  }
-
-  return CODE_SIMPLIFIER_MARKERS.some((marker) => marker.test(systemContext));
-}
-
-function getCodeSimplifierGuidance(systemContext?: string): string[] {
-  if (!hasCodeSimplifierSkill(systemContext)) {
-    return [];
-  }
-
+function getCodeSimplifierGuidance(): string[] {
   return [
-    "When work involves refactoring or simplification, apply the code-simplifier skill guidance.",
+    "For every code-writing step, explicitly apply code-simplifier guidance (use the bundled code-simplifier skill when available).",
+    "For every code-review step, explicitly apply code-simplifier guidance (use the bundled code-simplifier skill when available).",
     "Keep changes behavior-preserving unless the task explicitly requires behavior changes.",
   ];
 }
@@ -172,7 +156,7 @@ function buildPlanningPrompt(spec: string, systemContext: string): string {
   return [
     systemContext,
     "You are decomposing a spec into an ordered task graph.",
-    ...getCodeSimplifierGuidance(systemContext),
+    ...getCodeSimplifierGuidance(),
     "Use the configured structured output schema only.",
     "Do not include prose or markdown.",
     "Spec:",
@@ -189,7 +173,7 @@ function buildTaskExecutionPrompt(
   return [
     ...(systemContext ? [systemContext] : []),
     "You are Orca's task execution assistant.",
-    ...getCodeSimplifierGuidance(systemContext),
+    ...getCodeSimplifierGuidance(),
     `Run ID: ${runId}`,
     `Repository CWD: ${cwd}`,
     `Task ID: ${task.id}`,
@@ -207,7 +191,7 @@ function buildTaskGraphReviewPrompt(tasks: Task[], systemContext: string): strin
   return [
     systemContext,
     "You are Orca's pre-execution task-graph reviewer.",
-    ...getCodeSimplifierGuidance(systemContext),
+    ...getCodeSimplifierGuidance(),
     "Return only structured review operations in the configured schema.",
     "Allowed operations: update_task (name/description/acceptance_criteria), add_task, remove_task, add_dependency, remove_dependency.",
     "Return an empty changes array if no edits are needed.",
