@@ -1,5 +1,5 @@
 import { execSync, spawnSync } from "node:child_process";
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, readFileSync } from "node:fs";
 import { access, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -86,7 +86,11 @@ function commandExists(command: string): boolean {
   return result.status === 0;
 }
 
-export function resolveApiKey(flagValue: string | undefined, envVarName: string): string | undefined {
+export function resolveApiKey(
+  flagValue: string | undefined,
+  envVarName: string,
+  openclawConfigPath?: string
+): string | undefined {
   if (flagValue && flagValue.trim().length > 0) {
     return flagValue.trim();
   }
@@ -94,6 +98,48 @@ export function resolveApiKey(flagValue: string | undefined, envVarName: string)
   const envValue = process.env[envVarName];
   if (envValue && envValue.trim().length > 0) {
     return envValue.trim();
+  }
+
+  const openclawValue = readOpenclawEnvVar(envVarName, openclawConfigPath);
+  if (openclawValue) {
+    return openclawValue;
+  }
+
+  return undefined;
+}
+
+function readOpenclawEnvVar(envVarName: string, openclawConfigPath?: string): string | undefined {
+  const configPath = openclawConfigPath ?? path.join(os.homedir(), ".openclaw", "openclaw.json");
+  try {
+    const fileText = readFileSync(configPath, "utf8");
+    const parsed = JSON.parse(fileText) as { env?: { vars?: Record<string, unknown> } };
+    const value = parsed.env?.vars?.[envVarName];
+
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+
+    if (value && typeof value === "object") {
+      const candidateObject = value as {
+        value?: unknown;
+        ref?: unknown;
+        opRef?: unknown;
+        reference?: unknown;
+      };
+
+      for (const candidate of [
+        candidateObject.value,
+        candidateObject.ref,
+        candidateObject.opRef,
+        candidateObject.reference
+      ]) {
+        if (typeof candidate === "string" && candidate.trim().length > 0) {
+          return candidate.trim();
+        }
+      }
+    }
+  } catch {
+    return undefined;
   }
 
   return undefined;
@@ -329,7 +375,7 @@ export async function setupCommandHandler(options: SetupCommandOptions): Promise
       results.push({ name: "ANTHROPIC_API_KEY", status: "pass", detail: checkMode ? "set" : "found" });
       if (!checkMode) console.log(chalk.green("✓ Anthropic API key found"));
     } else {
-      results.push({ name: "ANTHROPIC_API_KEY", status: "warn", detail: checkMode ? "not configured" : "not set" });
+      results.push({ name: "ANTHROPIC_API_KEY", status: "warn", detail: "not set" });
       if (!checkMode) console.log(chalk.yellow("! ANTHROPIC_API_KEY not set"));
     }
 
@@ -341,7 +387,7 @@ export async function setupCommandHandler(options: SetupCommandOptions): Promise
       results.push({ name: "OPENAI_API_KEY", status: "pass", detail: checkMode ? "set" : "found" });
       if (!checkMode) console.log(chalk.green("✓ OpenAI API key found"));
     } else {
-      results.push({ name: "OPENAI_API_KEY", status: "warn", detail: checkMode ? "not configured" : "not set" });
+      results.push({ name: "OPENAI_API_KEY", status: "warn", detail: "not set" });
       if (!checkMode) console.log(chalk.yellow("! OPENAI_API_KEY not set"));
     }
 

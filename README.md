@@ -128,6 +128,10 @@ Global:
 - `--spec <path>`
 - `--plan <path>`
 - `--config <path>`
+- `--codex-only` (force Codex executor for this run)
+- `--claude-only` (force Claude executor for this run)
+- `--codex-effort <low|medium|high>`
+- `--claude-effort <low|medium|high|max>`
 - `--on-milestone <cmd>`
 - `--on-task-complete <cmd>`
 - `--on-task-fail <cmd>`
@@ -150,6 +154,10 @@ Global:
 - `--run <run-id>`
 - `--last`
 - `--config <path>`
+- `--codex-only`
+- `--claude-only`
+- `--codex-effort <low|medium|high>`
+- `--claude-effort <low|medium|high|max>`
 
 `orca cancel`:
 
@@ -180,7 +188,7 @@ Global:
 
 - `--anthropic-key <key>`
 - `--openai-key <key>`
-- `--check`
+- `--check` (also checks `~/.openclaw/openclaw.json` `env.vars` fallback)
 - `--global`
 - `--project`
 

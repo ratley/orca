@@ -1,15 +1,25 @@
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
 import { afterEach, describe, expect, test } from "bun:test";
 
 import { buildConfigModule, detectPackageManager, resolveApiKey } from "./setup.js";
 
 describe("resolveApiKey", () => {
   const originalAnthropic = process.env.ANTHROPIC_API_KEY;
+  let tempHomeDir: string | undefined;
 
-  afterEach(() => {
+  afterEach(async () => {
     if (originalAnthropic === undefined) {
       delete process.env.ANTHROPIC_API_KEY;
     } else {
       process.env.ANTHROPIC_API_KEY = originalAnthropic;
+    }
+
+    if (tempHomeDir) {
+      await rm(tempHomeDir, { recursive: true, force: true });
+      tempHomeDir = undefined;
     }
   });
 
@@ -29,10 +39,49 @@ describe("resolveApiKey", () => {
     expect(resolved).toBe("env-value");
   });
 
-  test("returns undefined when both are absent", () => {
+  test("returns OpenClaw env var when shell env is absent", async () => {
     delete process.env.ANTHROPIC_API_KEY;
 
-    const resolved = resolveApiKey(undefined, "ANTHROPIC_API_KEY");
+    tempHomeDir = await mkdtemp(path.join(os.tmpdir(), "orca-setup-test-"));
+    const openclawDir = path.join(tempHomeDir, ".openclaw");
+    await mkdir(openclawDir, { recursive: true });
+    const configPath = path.join(openclawDir, "openclaw.json");
+    await writeFile(
+      configPath,
+      JSON.stringify({ env: { vars: { ANTHROPIC_API_KEY: "gateway-value" } } }),
+      "utf8"
+    );
+
+    const resolved = resolveApiKey(undefined, "ANTHROPIC_API_KEY", configPath);
+
+    expect(resolved).toBe("gateway-value");
+  });
+
+  test("treats OpenClaw 1Password refs as configured", async () => {
+    delete process.env.ANTHROPIC_API_KEY;
+
+    tempHomeDir = await mkdtemp(path.join(os.tmpdir(), "orca-setup-test-"));
+    const openclawDir = path.join(tempHomeDir, ".openclaw");
+    await mkdir(openclawDir, { recursive: true });
+    const configPath = path.join(openclawDir, "openclaw.json");
+    await writeFile(
+      configPath,
+      JSON.stringify({ env: { vars: { ANTHROPIC_API_KEY: "op://Eve/Anthropic/credential" } } }),
+      "utf8"
+    );
+
+    const resolved = resolveApiKey(undefined, "ANTHROPIC_API_KEY", configPath);
+
+    expect(resolved).toBe("op://Eve/Anthropic/credential");
+  });
+
+  test("returns undefined when no source provides a key", async () => {
+    delete process.env.ANTHROPIC_API_KEY;
+
+    tempHomeDir = await mkdtemp(path.join(os.tmpdir(), "orca-setup-test-"));
+    const configPath = path.join(tempHomeDir, ".openclaw", "openclaw.json");
+
+    const resolved = resolveApiKey(undefined, "ANTHROPIC_API_KEY", configPath);
 
     expect(resolved).toBeUndefined();
   });

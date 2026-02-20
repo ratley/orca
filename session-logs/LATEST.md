@@ -1,62 +1,35 @@
 ---
-date: 2026-02-20T06:20:00Z
-session: orca-effort-flags-strict-enums
+date: 2026-02-20T06:30:00Z
+session: orca-setup-cosmetic-fix
 agent: subagent
 ---
 
 ## Task
-Implemented strict per-executor effort controls for Codex + Claude, including CLI overrides, config validation, wiring, and tests.
+Fix `orca setup` status reporting so `ANTHROPIC_API_KEY` is shown as set when available via OpenClaw gateway env config (including 1Password refs), not only shell env.
 
 ## Files changed
-- `src/types/effort.ts` (new)
-- `src/types/index.ts`
-- `src/core/config-loader.ts`
-- `src/core/config-loader.test.ts`
-- `src/agents/codex/session.ts`
-- `src/agents/codex/session.unit.test.ts` (new)
-- `src/agents/claude/session.ts`
-- `src/agents/claude/session.test.ts`
-- `src/cli/commands/run.ts`
-- `src/cli/commands/run.test.ts`
-- `src/cli/commands/resume.ts`
-- `src/cli/commands/help.ts`
+- `src/cli/commands/setup.ts`
+- `src/cli/commands/setup.test.ts`
 
 ## What changed
-- Added strict enums and parsers:
-  - Codex effort: `low | medium | high`
-  - Claude effort: `low | medium | high | max`
-- Added CLI flags:
-  - `--codex-effort <value>`
-  - `--claude-effort <value>`
-  - available on both `run` and `resume`
-- Validation behavior:
-  - invalid values hard-fail with actionable errors
-  - e.g. `Codex effort must be one of 'low', 'medium', 'high', got 'extreme'`
-- Precedence/resolution:
-  - per-run CLI effort overrides config for that executor
-  - executor precedence remains: CLI executor override > config > default
-  - both effort flags can be provided; active executor consumes its own effort
-- Wiring:
-  - Codex effort is now passed into `client.runTurn(...)`
-  - Claude effort is now passed into query options (`effortValue`) when set
-- Config hardening:
-  - `config-loader` validates `config.codex.effort` and `config.claude.effort`
+- Located existing env lookup in `resolveApiKey(...)` inside `src/cli/commands/setup.ts`.
+- Extended key resolution precedence to:
+  1) CLI flag
+  2) shell env (`process.env`)
+  3) OpenClaw config env vars (`~/.openclaw/openclaw.json` → `env.vars.<KEY>`)
+- Added OpenClaw env parser that treats non-empty values as configured, including 1Password-style references (e.g. `op://...`).
+- Updated setup check wording for missing keys to consistently show `not set`.
+- Added/updated tests covering OpenClaw fallback detection.
 
-## Commands run + key outcomes
-1. Targeted tests:
-- `bun test src/cli/commands/run.test.ts src/core/config-loader.test.ts src/agents/claude/session.test.ts src/agents/codex/session.unit.test.ts`
-- Outcome: **29 pass, 0 fail**
+## Commands run + outcomes
+1. `bun test src/cli/commands/setup.test.ts`
+   - First run: failed (2 tests) due to HOME-based path assumption in tests.
+   - After refactor to injectable config path: pass.
+2. `bun test`
+   - Fails due to unrelated pre-existing repository test issues outside this change (e.g. `run.test`, stdout hook tests, and dist test import issues).
+3. `bun run build`
+   - Pass (`tsc` + postbuild chmod).
 
-2. Build:
-- `npm run build`
-- Outcome: **pass** (`tsc` + postbuild)
-
-3. Smoke tests (codex-only / claude-only effort usage paths):
-- `bun test src/cli/commands/run.test.ts -t "both effort flags are accepted; active executor uses matching effort"`
-- `bun test src/cli/commands/run.test.ts -t "applies --codex-effort to effective codex config"`
-- `bun test src/cli/commands/run.test.ts -t "applies --claude-effort to effective claude config"`
-- Outcome: **all pass**
-
-## Compatibility caveats
-- Claude SDK typing currently does not expose `effortValue` in the `options` type, so effort is added via a typed builder object before passing to `query(...)`. Runtime path is covered by test (`claude session effort wiring`).
-- Codex client accepts `effort` as string; exact optional property typing required conditional inclusion (not `undefined`) when composing params.
+## Result
+- `orca setup` now treats `ANTHROPIC_API_KEY` as **set** when it is available through OpenClaw-configured gateway env vars / 1Password ref (even if not exported in shell env).
+- It shows **not set** only when missing from all checked sources.
