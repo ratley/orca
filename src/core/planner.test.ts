@@ -284,7 +284,7 @@ describe("runPlanner task graph validation", () => {
 
     await runPlanner(specPath, store, runId);
 
-    expect(capturedSystemContext).toBe("You are Orca planner.");
+    expect(capturedSystemContext.startsWith("You are Orca planner.")).toBe(true);
     expect(capturedSystemContext).not.toContain("## Project Instructions");
   });
 

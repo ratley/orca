@@ -17,6 +17,30 @@ type JsonSchema = Record<string, unknown>;
 
 export type { PlanResult, TaskExecutionResult };
 
+const CODE_SIMPLIFIER_MARKERS = [
+  /^###\s+code-simplifier\s*$/im,
+  /\bname:\s*code-simplifier\b/i,
+];
+
+function hasCodeSimplifierSkill(systemContext?: string): boolean {
+  if (!systemContext) {
+    return false;
+  }
+
+  return CODE_SIMPLIFIER_MARKERS.some((marker) => marker.test(systemContext));
+}
+
+function getCodeSimplifierGuidance(systemContext?: string): string[] {
+  if (!hasCodeSimplifierSkill(systemContext)) {
+    return [];
+  }
+
+  return [
+    "When work involves refactoring or simplification, apply the code-simplifier skill guidance.",
+    "Keep changes behavior-preserving unless the task explicitly requires behavior changes.",
+  ];
+}
+
 const PlannedTaskSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -148,6 +172,7 @@ function buildPlanningPrompt(spec: string, systemContext: string): string {
   return [
     systemContext,
     "You are decomposing a spec into an ordered task graph.",
+    ...getCodeSimplifierGuidance(systemContext),
     "Use the configured structured output schema only.",
     "Do not include prose or markdown.",
     "Spec:",
@@ -164,6 +189,7 @@ function buildTaskExecutionPrompt(
   return [
     ...(systemContext ? [systemContext] : []),
     "You are Orca's task execution assistant.",
+    ...getCodeSimplifierGuidance(systemContext),
     `Run ID: ${runId}`,
     `Repository CWD: ${cwd}`,
     `Task ID: ${task.id}`,
@@ -181,6 +207,7 @@ function buildTaskGraphReviewPrompt(tasks: Task[], systemContext: string): strin
   return [
     systemContext,
     "You are Orca's pre-execution task-graph reviewer.",
+    ...getCodeSimplifierGuidance(systemContext),
     "Return only structured review operations in the configured schema.",
     "Allowed operations: update_task (name/description/acceptance_criteria), add_task, remove_task, add_dependency, remove_dependency.",
     "Return an empty changes array if no edits are needed.",

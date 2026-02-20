@@ -307,6 +307,16 @@ During planning, Orca automatically injects project instruction files when prese
 
 Files are discovered from the project root (nearest `.git` from the spec/task context) and injected in that order.
 
+### Project Skills
+
+Orca auto-loads skills in this precedence order (first matching skill name wins):
+
+1. `config.skills[]`
+2. `./.orca/skills/`
+3. `~/.orca/skills/`
+
+This repo includes a default `code-simplifier` skill at `./.orca/skills/code-simplifier/SKILL.md`. When loaded, planner/reviewer/executor prompts explicitly apply it for refactor/simplification work while keeping behavior unchanged unless a task explicitly requires behavior changes.
+
 ### Run State Locations
 
 - Run status: `<runsDir>/<run-id>/status.json`
