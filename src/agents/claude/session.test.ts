@@ -87,6 +87,25 @@ describe("parseTaskArray", () => {
   it("throws on invalid JSON", () => {
     expect(() => parseTaskArray("not-json")).toThrow();
   });
+
+  it("strips markdown json fences before parsing", () => {
+    const tasks = [
+      { id: "1", name: "Task A", description: "Do A", dependencies: [], acceptance_criteria: ["A done"], status: "pending", retries: 0, maxRetries: 3 }
+    ];
+    const raw = "```json\n" + JSON.stringify(tasks) + "\n```";
+    const result = parseTaskArray(raw);
+    expect(result[0]?.id).toBe("1");
+    expect(result[0]?.name).toBe("Task A");
+  });
+
+  it("strips plain markdown fences before parsing", () => {
+    const tasks = [
+      { id: "2", name: "Task B", description: "Do B", dependencies: [], acceptance_criteria: ["B done"], status: "pending", retries: 0, maxRetries: 3 }
+    ];
+    const raw = "```\n" + JSON.stringify(tasks) + "\n```";
+    const result = parseTaskArray(raw);
+    expect(result[0]?.id).toBe("2");
+  });
 });
 
 // ---------------------------------------------------------------------------

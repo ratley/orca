@@ -1,3 +1,4 @@
+import Anthropic from "@anthropic-ai/sdk";
 import { unstable_v2_createSession } from "@anthropic-ai/claude-agent-sdk";
 
 import type { OrcaConfig, PlanResult, Task, TaskExecutionResult } from "../../types/index.js";
@@ -68,7 +69,9 @@ function extractAssistantText(message: unknown): string | null {
 }
 
 export function parseTaskArray(raw: string): Task[] {
-  const parsed = JSON.parse(raw) as unknown;
+  // Strip markdown fences if present (defensive fallback)
+  const stripped = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "");
+  const parsed = JSON.parse(stripped) as unknown;
   if (!Array.isArray(parsed)) {
     throw new Error("Claude plan response was not a JSON array");
   }
@@ -155,23 +158,63 @@ function getModel(config?: OrcaConfig): string {
 }
 
 export async function planSpec(spec: string, systemContext: string, config?: OrcaConfig): Promise<PlanResult> {
-  const session = unstable_v2_createSession({
-    model: getModel(config)
+  const client = new Anthropic();
+
+  const response = await client.messages.create({
+    model: getModel(config),
+    max_tokens: 8192,
+    system: systemContext,
+    messages: [
+      {
+        role: "user",
+        content: buildPlanningPrompt(spec, systemContext)
+      }
+    ],
+    tools: [
+      {
+        name: "submit_plan",
+        description: "Submit the task plan as a structured JSON array",
+        input_schema: {
+          type: "object" as const,
+          properties: {
+            tasks: {
+              type: "array" as const,
+              items: {
+                type: "object" as const,
+                properties: {
+                  id: { type: "string" as const },
+                  name: { type: "string" as const },
+                  description: { type: "string" as const },
+                  dependencies: { type: "array" as const, items: { type: "string" as const } },
+                  acceptance_criteria: { type: "array" as const, items: { type: "string" as const } },
+                  status: { type: "string" as const },
+                  retries: { type: "number" as const },
+                  maxRetries: { type: "number" as const }
+                },
+                required: ["id", "name", "description", "dependencies", "acceptance_criteria", "status", "retries", "maxRetries"]
+              }
+            }
+          },
+          required: ["tasks"]
+        }
+      }
+    ],
+    tool_choice: { type: "any" as const }
   });
 
-  try {
-    const streamPromise = collectSessionResult(session);
-
-    await session.send(buildPlanningPrompt(spec, systemContext));
-    const rawResponse = await streamPromise;
-
-    return {
-      tasks: parseTaskArray(rawResponse),
-      rawResponse
-    };
-  } finally {
-    session.close();
+  // Extract the task array from the tool_use block
+  const toolUseBlock = response.content.find((block) => block.type === "tool_use" && block.name === "submit_plan");
+  if (!toolUseBlock || toolUseBlock.type !== "tool_use") {
+    throw new Error("Claude did not call the submit_plan tool");
   }
+
+  const toolInput = toolUseBlock.input as { tasks: unknown[] };
+  const rawResponse = JSON.stringify(toolInput.tasks);
+
+  return {
+    tasks: parseTaskArray(rawResponse),
+    rawResponse
+  };
 }
 
 export async function executeTask(
