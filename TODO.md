@@ -16,11 +16,15 @@
 ## Validation Hardening
 - ✅ Shipped in v0.2.8 — executor config validation, symlink guard, EACCES/EPERM resilience, parseTaskArray field defaults, Codex session leak fix, claude session unit tests (19 new), shared PlanResult/TaskExecutionResult types
 
+## Recent Ships
+- ✅ `orca skills list` command shipped
+- ✅ Executor override flags shipped: `--codex-only` / `--claude-only`
+- ✅ Claude planner/executor deterministic structured-output path shipped (text JSON fallback gated)
+- ✅ Effort controls shipped: `--codex-effort <low|medium|high>`, `--claude-effort <low|medium|high|max>`
+- ✅ `orca setup --check` key detection improved (OpenClaw env + cross-platform `.env` fallbacks)
+
 ## Remaining
-- Fix `orca setup` showing ANTHROPIC_API_KEY "not set" (key is in gateway env, not shell)
 - Zod v3→v4 upgrade (peer dep conflict with @anthropic-ai/claude-agent-sdk@0.2.47)
-- `orca skills list` command — show loaded skills from all discovery paths
-- Model flags: `--codex-only` / `--claude-only` CLI flags for per-run executor override
 - Review → improvement step: pre-execution review that modifies the task graph
 - AGENTS.md / CLAUDE.md injection into planning context
 - Review cycle depth: `maxReviewCycles` config property + `--max-review-cycles <n>` CLI flag
