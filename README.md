@@ -4,7 +4,7 @@
   <a href="https://orcastrator.dev">orcastrator.dev</a>
 </p>
 
-# orca
+# Orca
 
 Coordinated agent run harness. Breaks down a goal into a task graph, then executes it end-to-end via a persistent [Codex](https://github.com/ratley/codex-client) session with full context across tasks.
 
@@ -100,7 +100,7 @@ export default {
 
 Codex supports experimental [multi-agent workflows](https://developers.openai.com/codex/multi-agent) where it can spawn parallel sub-agents for complex tasks.
 
-To enable it in orca, set `codex.multiAgent: true` in your config:
+To enable it in Orca, set `codex.multiAgent: true` in your config:
 
 ```js
 export default {
@@ -108,7 +108,7 @@ export default {
 };
 ```
 
-When enabled, orca adds `multi_agent = true` to your global `~/.codex/config.toml`. If you already have multi-agent enabled in your Codex config, it will work automatically without setting anything in orca.
+When enabled, Orca adds `multi_agent = true` to your global `~/.codex/config.toml`. If you already have multi-agent enabled in your Codex config, it will work automatically without setting anything in Orca.
 
 > **Note:** Multi-agent is off by default because enabling it modifies your global Codex configuration. It is currently an experimental Codex feature.
 
