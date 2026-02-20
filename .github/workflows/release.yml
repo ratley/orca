@@ -1,0 +1,57 @@
+name: Release Tracking
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          semver_tag_pattern='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
+          if ! [[ "$TAG" =~ $semver_tag_pattern ]]; then
+            echo "Skipping release tracking for non-semver tag: $TAG"
+            exit 0
+          fi
+
+          prerelease=false
+          if [[ "$TAG" == *-* ]]; then
+            prerelease=true
+          fi
+
+          release_id=""
+          if release_json="$(gh api "repos/$REPO/releases/tags/$TAG" 2>/dev/null)"; then
+            release_id="$(printf '%s' "$release_json" | jq -r '.id')"
+          fi
+
+          if [[ -n "$release_id" && "$release_id" != "null" ]]; then
+            generated_notes="$(gh api --method POST "repos/$REPO/releases/generate-notes" -F tag_name="$TAG" | jq -r '.body')"
+
+            gh api --method PATCH "repos/$REPO/releases/$release_id" \
+              -F tag_name="$TAG" \
+              -F name="$TAG" \
+              -f body="$generated_notes" \
+              -F draft=false \
+              -F prerelease="$prerelease"
+            echo "Updated existing release for $TAG"
+            exit 0
+          fi
+
+          gh api --method POST "repos/$REPO/releases" \
+            -F tag_name="$TAG" \
+            -F name="$TAG" \
+            -F generate_release_notes=true \
+            -F draft=false \
+            -F prerelease="$prerelease"
+          echo "Created release for $TAG"
