@@ -27,7 +27,10 @@ orca status [--last]     Check run status
 orca answer <text>       Answer a question the agent raised
 orca resume [--last]     Resume a paused run
 orca cancel [--last]     Cancel a run
-orca pr create [--last]  Open a PR for the run's branch
+orca pr draft [--last]   Open a draft PR for the run's branch
+orca pr create [--last]  Create and publish a PR
+orca pr publish [--last] Publish (un-draft) an existing draft PR
+orca pr status [--last]  Check PR and CI status
 ```
 
 ## Config (~/.orca/config.js or ./orca.config.js)

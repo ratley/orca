@@ -66,7 +66,7 @@ orca pr create --run <run-id>
 orca pr publish --run <run-id>
 orca pr status --run <run-id>
 
-orca pr-finalize --config ./orca.config.js
+orca pr publish --config ./orca.config.js
 ```
 
 ## Config
@@ -174,7 +174,7 @@ Global:
 - `--last`
 - `--config <path>`
 
-`orca pr-finalize`:
+`orca pr publish`:
 
 - `--config <path>`
 
