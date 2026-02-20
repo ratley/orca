@@ -1,5 +1,5 @@
-import { CodexClient } from "orca-codex-client";
-import type { CompletedTurn } from "orca-codex-client";
+import { CodexClient } from "@ratley/codex-client";
+import type { CompletedTurn } from "@ratley/codex-client";
 
 import type { OrcaConfig, PlanResult, Task, TaskExecutionResult } from "../../types/index.js";
 
