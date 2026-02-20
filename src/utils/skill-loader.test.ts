@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
-import { loadSkill, loadSkills, loadSkillsFromDir, parseSkillFile } from "./skill-loader.js";
+import { getBundledSkillsDir, loadSkill, loadSkills, loadSkillsFromDir, parseSkillFile } from "./skill-loader.js";
 
 describe("skill-loader", () => {
   let tempDir: string;
@@ -164,7 +164,7 @@ describe("skill-loader", () => {
     }
   });
 
-  test("loadSkills deduplicates by name (first wins)", async () => {
+  test("loadSkills uses precedence config > project > global > bundled (first name wins)", async () => {
     const projectDir = path.join(tempDir, "project");
     const homeDir = path.join(tempDir, "home");
     const configSkillDir = path.join(tempDir, "config-skill");
@@ -201,12 +201,35 @@ describe("skill-loader", () => {
 
     const loaded = await loadSkills({ skills: [configSkillDir] });
 
-    expect(loaded.map((skill) => skill.name)).toEqual(["Duplicate", "Unique"]);
+    expect(loaded[0]?.name).toBe("Duplicate");
     expect(loaded[0]?.description).toBe("from config");
     expect(loaded[0]?.body).toBe("config body");
+    expect(loaded.some((skill) => skill.name === "Unique")).toBe(true);
   });
 
-  test("loadSkills returns empty array when no skills found", async () => {
+  test("loadSkills allows project skills to override bundled defaults by name", async () => {
+    const projectDir = path.join(tempDir, "project-override");
+    const homeDir = path.join(tempDir, "home-override");
+    const overrideDir = path.join(projectDir, ".orca", "skills", "code-simplifier");
+    await fs.mkdir(overrideDir, { recursive: true });
+    await fs.mkdir(homeDir, { recursive: true });
+    process.chdir(projectDir);
+    process.env.HOME = homeDir;
+    await fs.writeFile(
+      path.join(overrideDir, "SKILL.md"),
+      "---\nname: code-simplifier\ndescription: project override\n---\nproject override body",
+      "utf8"
+    );
+
+    const loaded = await loadSkills();
+    const codeSimplifier = loaded.find((skill) => skill.name === "code-simplifier");
+
+    expect(codeSimplifier).toBeDefined();
+    expect(codeSimplifier?.description).toBe("project override");
+    expect(codeSimplifier?.dirPath.endsWith(path.join(".orca", "skills", "code-simplifier"))).toBe(true);
+  });
+
+  test("loadSkills loads bundled defaults even with empty project/global/config", async () => {
     const projectDir = path.join(tempDir, "empty-project");
     const homeDir = path.join(tempDir, "empty-home");
     await fs.mkdir(projectDir, { recursive: true });
@@ -215,6 +238,22 @@ describe("skill-loader", () => {
     process.env.HOME = homeDir;
 
     const loaded = await loadSkills();
-    expect(loaded).toEqual([]);
+    const bundled = loaded.find((skill) => skill.name === "code-simplifier");
+
+    expect(bundled).toBeDefined();
+    expect(bundled?.dirPath).toBe(path.join(getBundledSkillsDir(), "code-simplifier"));
+  });
+
+  test("loadSkills does not duplicate bundled skills when cwd is the Orca package root", async () => {
+    const homeDir = path.join(tempDir, "home-package-root");
+    await fs.mkdir(homeDir, { recursive: true });
+    process.chdir(originalCwd);
+    process.env.HOME = homeDir;
+
+    const loaded = await loadSkills();
+    const bundledMatches = loaded.filter((skill) => skill.name === "code-simplifier");
+
+    expect(bundledMatches).toHaveLength(1);
+    expect(bundledMatches[0]?.dirPath).toBe(path.join(getBundledSkillsDir(), "code-simplifier"));
   });
 });

@@ -29,6 +29,7 @@ function makeSkill(input: {
 async function loadSkillsModule(options?: {
   resolveConfig?: (configPath?: string) => Promise<OrcaConfig | undefined>;
   loadSkills?: (config?: OrcaConfig) => Promise<LoadedSkill[]>;
+  bundledSkillsDir?: string;
 }): Promise<{
   skillsModule: SkillsModule;
   resolveConfigMock: ReturnType<typeof mock>;
@@ -42,7 +43,8 @@ async function loadSkillsModule(options?: {
   }));
 
   mock.module("../../utils/skill-loader.js", () => ({
-    loadSkills: loadSkillsMock
+    loadSkills: loadSkillsMock,
+    getBundledSkillsDir: () => options?.bundledSkillsDir ?? path.join(tempDir, "bundled", ".orca", "skills")
   }));
 
   const skillsModule = await import(`./skills.js?test=${Math.random()}`);
@@ -106,17 +108,19 @@ describe("skills command", () => {
     expect(output).toContain(configSkillDir);
   });
 
-  test("labels skills from config, project, and global sources", async () => {
+  test("labels skills from config, project, global, and bundled sources", async () => {
     const configSkillDir = path.join(tempDir, "config", "config-skill");
     const projectSkillDir = path.join(process.cwd(), ".orca", "skills", "project-skill");
     const globalSkillDir = path.join(os.homedir(), ".orca", "skills", "global-skill");
+    const bundledSkillDir = path.join(tempDir, "bundled", ".orca", "skills", "code-simplifier");
 
     const { skillsModule } = await loadSkillsModule({
       resolveConfig: async () => ({ skills: [configSkillDir] }),
       loadSkills: async () => [
         makeSkill({ name: "ConfigSkill", description: "From config", dirPath: configSkillDir }),
         makeSkill({ name: "ProjectSkill", description: "From project", dirPath: projectSkillDir }),
-        makeSkill({ name: "GlobalSkill", description: "From global", dirPath: globalSkillDir })
+        makeSkill({ name: "GlobalSkill", description: "From global", dirPath: globalSkillDir }),
+        makeSkill({ name: "BundledSkill", description: "From bundled", dirPath: bundledSkillDir })
       ]
     });
 
@@ -126,13 +130,33 @@ describe("skills command", () => {
     expect(output).toContain("ConfigSkill");
     expect(output).toContain("ProjectSkill");
     expect(output).toContain("GlobalSkill");
-    expect(output).toContain("From config");
-    expect(output).toContain("From project");
-    expect(output).toContain("From global");
+    expect(output).toContain("BundledSkill");
 
     expect(output).toMatch(/ConfigSkill\s+From config\s+config\s+/);
     expect(output).toMatch(/ProjectSkill\s+From project\s+project\s+/);
     expect(output).toMatch(/GlobalSkill\s+From global\s+global\s+/);
+    expect(output).toMatch(/BundledSkill\s+From bundled\s+bundled\s+/);
+  });
+
+  test("labels bundled skill as bundled when cwd matches package root", async () => {
+    const overlappingSkillDir = path.join(process.cwd(), ".orca", "skills", "code-simplifier");
+
+    const { skillsModule } = await loadSkillsModule({
+      resolveConfig: async () => ({}),
+      loadSkills: async () => [
+        makeSkill({
+          name: "code-simplifier",
+          description: "Bundled default",
+          dirPath: overlappingSkillDir
+        })
+      ],
+      bundledSkillsDir: path.join(process.cwd(), ".orca", "skills")
+    });
+
+    await skillsModule.skillsCommandHandler({});
+
+    const output = logs.join("\n");
+    expect(output).toMatch(/code-simplifier\s+Bundled default\s+bundled\s+/);
   });
 
   test("passes --config option through resolveConfig and loadSkills", async () => {

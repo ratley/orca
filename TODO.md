@@ -2,8 +2,8 @@
 
 ## Skills System
 - ✅ Shipped in v0.2.6 — skill loader, frontmatter parsing, injection into planner + task-runner
-- Skill discovery: config.skills[] > .orca/skills/ > ~/.orca/skills/ (first name wins)
-- Future: `orca skills list` command to show what's loaded
+- ✅ Skill discovery precedence is now explicit and deterministic: config.skills[] > .orca/skills/ > ~/.orca/skills/ > bundled `<orca package root>/.orca/skills/` (first name wins)
+- ✅ `orca skills list` command shipped (includes bundled source labeling)
 
 ## Codex-as-Executor
 - ✅ Shipped in v0.2.7 — Codex is now default executor; persistent session per run; Claude fallback on init failure

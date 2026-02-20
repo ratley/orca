@@ -95,6 +95,77 @@ describe("claude session effort wiring", () => {
   });
 });
 
+describe("claude session prompt guidance", () => {
+  test("includes explicit code-simplifier directives in planning, review, and execution prompts", async () => {
+    const prompts: string[] = [];
+
+    const queryMock = mock((params: { prompt?: string }) => {
+      const prompt = params.prompt ?? "";
+      prompts.push(prompt);
+
+      const structuredOutput = prompt.includes("pre-execution task-graph reviewer")
+        ? { changes: [] }
+        : prompt.includes("task execution assistant")
+          ? { outcome: "done" }
+          : {
+              tasks: [
+                {
+                  id: "t1",
+                  name: "N",
+                  description: "D",
+                  dependencies: [],
+                  acceptance_criteria: ["A"],
+                  status: "pending",
+                  retries: 0,
+                  maxRetries: 3,
+                },
+              ],
+            };
+
+      return {
+        close() {},
+        async *[Symbol.asyncIterator]() {
+          yield {
+            type: "result",
+            subtype: "success",
+            result: "ok",
+            structured_output: structuredOutput,
+          };
+        },
+      };
+    });
+
+    mock.module("@anthropic-ai/claude-agent-sdk", () => ({ query: queryMock }));
+
+    const { planSpec, reviewTaskGraph, executeTask } = await import(`./session.ts?test=${Math.random()}`);
+
+    await planSpec("spec", "context");
+    await reviewTaskGraph([], "context");
+    await executeTask(
+      {
+        id: "t1",
+        name: "Task",
+        description: "Do thing",
+        dependencies: [],
+        acceptance_criteria: ["Done"],
+        status: "pending",
+        retries: 0,
+        maxRetries: 3,
+      },
+      "run-1",
+      undefined,
+      "context"
+    );
+
+    expect(prompts).toHaveLength(3);
+    for (const prompt of prompts) {
+      expect(prompt).toContain("For every code-writing step, explicitly apply code-simplifier guidance");
+      expect(prompt).toContain("For every code-review step, explicitly apply code-simplifier guidance");
+      expect(prompt).toContain("Keep changes behavior-preserving unless the task explicitly requires behavior changes.");
+    }
+  });
+});
+
 describe("claude session structured-output critical path", () => {
   test("markdown-fenced assistant text does not hit text parser when structured output exists", async () => {
     mock.module("@anthropic-ai/claude-agent-sdk", () => ({

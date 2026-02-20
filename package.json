@@ -46,7 +46,8 @@
   "files": [
     "dist/**/*.js",
     "!dist/**/*.test.js",
-    "README.md"
+    "README.md",
+    ".orca/skills/**/SKILL.md"
   ],
   "description": "Coordinated agent run harness",
   "author": "ratley",

@@ -5,13 +5,13 @@ import type { Command } from "commander";
 
 import { resolveConfig } from "../../core/config-loader.js";
 import type { LoadedSkill } from "../../utils/skill-loader.js";
-import { loadSkills } from "../../utils/skill-loader.js";
+import { getBundledSkillsDir, loadSkills } from "../../utils/skill-loader.js";
 
 export interface SkillsCommandOptions {
   config?: string;
 }
 
-type SkillSource = "config" | "project" | "global";
+type SkillSource = "config" | "project" | "global" | "bundled";
 
 function pad(value: string, width: number): string {
   return value.padEnd(width, " ");
@@ -56,6 +56,11 @@ function detectSkillSource(skill: LoadedSkill, configSkillDirs: Set<string>): Sk
     return "config";
   }
 
+  const bundledSkillsRoot = getBundledSkillsDir();
+  if (pathWithin(skill.dirPath, bundledSkillsRoot)) {
+    return "bundled";
+  }
+
   const projectSkillsRoot = path.join(process.cwd(), ".orca", "skills");
   if (pathWithin(skill.dirPath, projectSkillsRoot)) {
     return "project";
@@ -66,7 +71,6 @@ function detectSkillSource(skill: LoadedSkill, configSkillDirs: Set<string>): Sk
     return "global";
   }
 
-  // loadSkills currently only returns config/project/global entries.
   return "config";
 }
 

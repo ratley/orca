@@ -1,6 +1,7 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, realpath } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { OrcaConfig } from "../types/index.js";
 
@@ -143,17 +144,49 @@ export async function loadSkillsFromDir(skillsDirPath: string): Promise<LoadedSk
   return loaded.filter((skill): skill is LoadedSkill => skill !== null);
 }
 
+function getOrcaPackageRoot(): string {
+  const currentFilePath = fileURLToPath(import.meta.url);
+  return path.resolve(path.dirname(currentFilePath), "..", "..");
+}
+
+export function getBundledSkillsDir(): string {
+  return path.join(getOrcaPackageRoot(), ".orca", "skills");
+}
+
+async function resolveExistingRealPath(inputPath: string): Promise<string | null> {
+  try {
+    return await realpath(inputPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
 export async function loadSkills(config?: OrcaConfig): Promise<LoadedSkill[]> {
   // NOTE: config.skills paths are currently resolved relative to process.cwd().
   // A future improvement can resolve them relative to the config file location.
   const fromConfig = await Promise.all((config?.skills ?? []).map((skillPath) => loadSkill(skillPath)));
-  const projectSkills = await loadSkillsFromDir(path.join(process.cwd(), ".orca", "skills"));
+  const projectSkillsDir = path.join(process.cwd(), ".orca", "skills");
+  const bundledSkillsDir = getBundledSkillsDir();
+  const projectSkills = await loadSkillsFromDir(projectSkillsDir);
   const globalSkills = await loadSkillsFromDir(path.join(os.homedir(), ".orca", "skills"));
+
+  const [projectSkillsRealPath, bundledSkillsRealPath] = await Promise.all([
+    resolveExistingRealPath(projectSkillsDir),
+    resolveExistingRealPath(bundledSkillsDir)
+  ]);
+  const bundledSkills =
+    projectSkillsRealPath !== null && projectSkillsRealPath === bundledSkillsRealPath
+      ? []
+      : await loadSkillsFromDir(bundledSkillsDir);
 
   const allSkills = [
     ...fromConfig.filter((skill): skill is LoadedSkill => skill !== null),
     ...projectSkills,
-    ...globalSkills
+    ...globalSkills,
+    ...bundledSkills
   ];
 
   const seenNames = new Set<string>();

@@ -312,10 +312,11 @@ Files are discovered from the project root (nearest `.git` from the spec/task co
 Orca auto-loads skills in this precedence order (first matching skill name wins):
 
 1. `config.skills[]`
-2. `./.orca/skills/`
-3. `~/.orca/skills/`
+2. `./.orca/skills/` (project-local, from current working directory)
+3. `~/.orca/skills/` (global)
+4. Bundled defaults from the Orca package: `<orca package root>/.orca/skills/`
 
-This repo includes a default `code-simplifier` skill at `./.orca/skills/code-simplifier/SKILL.md`. Planner/reviewer/executor prompts explicitly apply it for all code-writing and code-review steps while keeping behavior unchanged unless a task explicitly requires behavior changes.
+This repo ships a bundled default `code-simplifier` skill at `./.orca/skills/code-simplifier/SKILL.md`, and it loads even when Orca runs in arbitrary target repositories. Project/global/config skills can still override it by reusing the same skill name. Planner/reviewer/executor prompts explicitly apply `code-simplifier` guidance for all code-writing and code-review steps while keeping behavior unchanged unless a task explicitly requires behavior changes.
 
 ### Run State Locations
 
