@@ -86,10 +86,17 @@ function commandExists(command: string): boolean {
   return result.status === 0;
 }
 
+type ResolveApiKeyOptions = {
+  openclawConfigPath?: string;
+  cwd?: string;
+  homedir?: string;
+};
+
 export function resolveApiKey(
   flagValue: string | undefined,
   envVarName: string,
-  openclawConfigPath?: string
+  openclawConfigPathOrOptions?: string | ResolveApiKeyOptions,
+  maybeOptions?: ResolveApiKeyOptions
 ): string | undefined {
   if (flagValue && flagValue.trim().length > 0) {
     return flagValue.trim();
@@ -100,16 +107,34 @@ export function resolveApiKey(
     return envValue.trim();
   }
 
-  const openclawValue = readOpenclawEnvVar(envVarName, openclawConfigPath);
+  const options =
+    typeof openclawConfigPathOrOptions === "string"
+      ? { ...maybeOptions, openclawConfigPath: openclawConfigPathOrOptions }
+      : (openclawConfigPathOrOptions ?? {});
+
+  const homedir = options.homedir ?? os.homedir();
+  const openclawValue = readOpenclawEnvVar(envVarName, options.openclawConfigPath, homedir);
   if (openclawValue) {
     return openclawValue;
+  }
+
+  const dotenvValue = readDotEnvFallback(envVarName, {
+    cwd: options.cwd ?? process.cwd(),
+    homedir
+  });
+  if (dotenvValue) {
+    return dotenvValue;
   }
 
   return undefined;
 }
 
-function readOpenclawEnvVar(envVarName: string, openclawConfigPath?: string): string | undefined {
-  const configPath = openclawConfigPath ?? path.join(os.homedir(), ".openclaw", "openclaw.json");
+function readOpenclawEnvVar(
+  envVarName: string,
+  openclawConfigPath?: string,
+  homedir: string = os.homedir()
+): string | undefined {
+  const configPath = openclawConfigPath ?? path.join(homedir, ".openclaw", "openclaw.json");
   try {
     const fileText = readFileSync(configPath, "utf8");
     const parsed = JSON.parse(fileText) as { env?: { vars?: Record<string, unknown> } };
@@ -143,6 +168,113 @@ function readOpenclawEnvVar(envVarName: string, openclawConfigPath?: string): st
   }
 
   return undefined;
+}
+
+function readDotEnvFallback(
+  envVarName: string,
+  options: { cwd: string; homedir: string }
+): string | undefined {
+  const candidatePaths = [
+    path.join(options.homedir, ".claude", ".env"),
+    path.join(options.homedir, ".config", "claude", ".env"),
+    path.join(options.cwd, ".env")
+  ];
+
+  for (const candidatePath of candidatePaths) {
+    const value = readEnvVarFromDotEnvFile(candidatePath, envVarName);
+    if (value !== undefined) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function readEnvVarFromDotEnvFile(filePath: string, envVarName: string): string | undefined {
+  try {
+    const parsed = parseDotEnv(readFileSync(filePath, "utf8"));
+    const value = parsed[envVarName];
+
+    if (value !== undefined && value.trim().length > 0) {
+      return value.trim();
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
+}
+
+function parseDotEnv(text: string): Record<string, string> {
+  const values: Record<string, string> = {};
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) {
+      continue;
+    }
+
+    const normalized = line.startsWith("export ") ? line.slice(7).trimStart() : line;
+    const separatorIndex = normalized.indexOf("=");
+    if (separatorIndex <= 0) {
+      continue;
+    }
+
+    const key = normalized.slice(0, separatorIndex).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      continue;
+    }
+
+    let rawValue = normalized.slice(separatorIndex + 1).trim();
+    if (!rawValue) {
+      values[key] = "";
+      continue;
+    }
+
+    if (rawValue.startsWith('"') || rawValue.startsWith("'")) {
+      const quote = rawValue.charAt(0);
+      const closingQuoteIndex = findClosingQuote(rawValue, quote);
+      if (closingQuoteIndex > 0) {
+        rawValue = rawValue.slice(1, closingQuoteIndex);
+      } else {
+        rawValue = rawValue.slice(1);
+      }
+      values[key] = quote === '"' ? unescapeDoubleQuoted(rawValue) : unescapeSingleQuoted(rawValue);
+      continue;
+    }
+
+    const commentStart = rawValue.search(/\s#/);
+    if (commentStart >= 0) {
+      rawValue = rawValue.slice(0, commentStart).trimEnd();
+    }
+
+    values[key] = rawValue;
+  }
+
+  return values;
+}
+
+function findClosingQuote(value: string, quote: string): number {
+  for (let i = 1; i < value.length; i += 1) {
+    if (value[i] === quote && value[i - 1] !== "\\") {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+function unescapeDoubleQuoted(value: string): string {
+  return value
+    .replace(/\\n/g, "\n")
+    .replace(/\\r/g, "\r")
+    .replace(/\\t/g, "\t")
+    .replace(/\\"/g, '"')
+    .replace(/\\\\/g, "\\");
+}
+
+function unescapeSingleQuoted(value: string): string {
+  return value.replace(/\\'/g, "'").replace(/\\\\/g, "\\");
 }
 
 export function detectPackageManager(

@@ -1,35 +1,56 @@
 ---
-date: 2026-02-20T06:30:00Z
-session: orca-setup-cosmetic-fix
+date: 2026-02-20T06:50:00Z
+session: orca-setup-cross-platform-key-locations
 agent: subagent
 ---
 
 ## Task
-Fix `orca setup` status reporting so `ANTHROPIC_API_KEY` is shown as set when available via OpenClaw gateway env config (including 1Password refs), not only shell env.
+Extend `orca setup --check` API key detection so it is not OpenClaw-only and resolves keys from common locations across macOS/Linux/Windows conventions.
 
 ## Files changed
 - `src/cli/commands/setup.ts`
 - `src/cli/commands/setup.test.ts`
+- `README.md`
+- `session-logs/LATEST.md`
 
 ## What changed
-- Located existing env lookup in `resolveApiKey(...)` inside `src/cli/commands/setup.ts`.
-- Extended key resolution precedence to:
-  1) CLI flag
-  2) shell env (`process.env`)
-  3) OpenClaw config env vars (`~/.openclaw/openclaw.json` → `env.vars.<KEY>`)
-- Added OpenClaw env parser that treats non-empty values as configured, including 1Password-style references (e.g. `op://...`).
-- Updated setup check wording for missing keys to consistently show `not set`.
-- Added/updated tests covering OpenClaw fallback detection.
+- Kept existing precedence first:
+  1) CLI flag (`--anthropic-key` / `--openai-key`)
+  2) `process.env`
+  3) OpenClaw config (`~/.openclaw/openclaw.json` → `env.vars.<KEY>`)
+- Added new fallback sources after OpenClaw:
+  4) `~/.claude/.env`
+  5) `~/.config/claude/.env`
+  6) project-local `./.env`
+- Added safe `.env` parsing:
+  - ignores blank lines and `#` comments
+  - supports `export KEY=...`
+  - supports quoted values (`"..."` and `'...'`)
+  - never prints secret values; only set/not set behavior is used by setup output
+- Added tests for:
+  - each new fallback location
+  - precedence ordering across all sources
+  - missing key returns `undefined`
+  - quoted/commented `.env` parsing behavior
+- Updated README `orca setup --check` docs with the full lookup order.
 
 ## Commands run + outcomes
 1. `bun test src/cli/commands/setup.test.ts`
-   - First run: failed (2 tests) due to HOME-based path assumption in tests.
-   - After refactor to injectable config path: pass.
-2. `bun test`
-   - Fails due to unrelated pre-existing repository test issues outside this change (e.g. `run.test`, stdout hook tests, and dist test import issues).
+   - Pass (`16 pass, 0 fail`).
+2. `bun run build`
+   - First run failed with TS type error:
+     - `src/cli/commands/setup.ts(236,60): error TS2345`
+   - Fixed by using `rawValue.charAt(0)` for quote extraction.
 3. `bun run build`
-   - Pass (`tsc` + postbuild chmod).
+   - Pass (`tsc` + `chmod +x dist/cli/index.js`).
+4. `bun test src/cli/commands/setup.test.ts`
+   - Pass (`16 pass, 0 fail`).
 
-## Result
-- `orca setup` now treats `ANTHROPIC_API_KEY` as **set** when it is available through OpenClaw-configured gateway env vars / 1Password ref (even if not exported in shell env).
-- It shows **not set** only when missing from all checked sources.
+## Final API key resolution order
+1. CLI flag value
+2. Environment variable (`process.env[KEY]`)
+3. OpenClaw env vars from `~/.openclaw/openclaw.json` (`env.vars[KEY]`, including object/ref forms)
+4. `~/.claude/.env`
+5. `~/.config/claude/.env`
+6. `./.env`
+7. `undefined` if still not found
