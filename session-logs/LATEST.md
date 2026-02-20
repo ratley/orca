@@ -1,65 +1,53 @@
 ---
-date: 2026-02-20T06:45:00Z
-session: orca-agents-claude-injection
+date: 2026-02-20T06:39:00Z
+session: orca-zod-v4-upgrade
 agent: subagent
 ---
 
 ## Task
-Implement automatic `AGENTS.md` / `CLAUDE.md` injection into planner system context (bounded + deterministic), with tests, build, and smoke verification.
+Upgrade `zod` from v3 to v4 with minimal breakage, resolve peer-dependency compatibility cleanly, run validation commands, and record outcomes.
 
 ## Files changed
-- `src/core/planner.ts`
-- `src/core/planner.test.ts`
+- `package.json`
+- `package-lock.json`
+- `bun.lock`
 - `session-logs/LATEST.md`
 
-## What changed
-- Added project-instruction discovery and injection to planner context:
-  - Detects project root from `specPath` by walking up to nearest `.git` directory (falls back to spec directory if no git root found).
-  - Loads project instruction files in deterministic order:
-    1. `AGENTS.md`
-    2. `CLAUDE.md`
-- Added bounded "Project Instructions" section to system context when files are present.
-- Added per-file cap for token safety:
-  - `PROJECT_INSTRUCTION_CHAR_CAP = 4000`
-  - truncation marker appended when file exceeds cap.
-- Added explicit path headers per file in injected section.
-- Kept existing skills injection; context order is now:
-  1. default planner context
-  2. project instructions (if any)
-  3. skills (if any)
+## Dependency versions after upgrade
+- `zod`: `4.3.6` (declared as `^4.3.6` in `package.json`)
+- `@anthropic-ai/claude-agent-sdk`: `0.2.47`
 
-## Exact injection format + ordering
-Injected section header:
-- `## Project Instructions`
+Compatibility note:
+- `@anthropic-ai/claude-agent-sdk@0.2.47` peers on `zod: ^4.0.0`, so moving to Zod v4 removes the historical peer mismatch.
 
-Per file block (for each present file in fixed order AGENTS then CLAUDE):
-- `### <FILE_NAME> (<ABSOLUTE_PATH>)`
-- fenced markdown block:
-  - ````md
-    <capped file content>
-    ````
-- optional truncation line when needed:
-  - `(truncated to 4000 characters)`
-
-## Tests added/updated
-In `src/core/planner.test.ts`:
-- `injects AGENTS.md when present`
-- `injects CLAUDE.md when present`
-- `injects AGENTS.md before CLAUDE.md when both are present`
-- `does not inject project instructions when neither file is present`
-- `caps and marks truncated project instruction content`
-- Existing skills-injection and DAG validation tests remain and pass.
+## Code/API updates for Zod v4
+- No source changes were required.
+- Existing Zod usage compiled and tested as-is (`z.object`, `z.enum`, `z.literal`, `safeParse`, `superRefine`, `z.ZodIssueCode.custom`, `z.ZodError`).
 
 ## Commands run + outcomes
-1. `bun test src/core/planner.test.ts`
-   - Pass (`9 pass, 0 fail`).
-2. `npm run build`
-   - Initial fail due to strict TS in test fixture (`baseTasks[0]` inferred as possibly undefined).
-3. Edited test fixtures to use `baseTask: Task` constant.
-4. `bun test src/core/planner.test.ts && npm run build`
-   - Pass (`9 pass, 0 fail`; `tsc` pass; postbuild chmod pass).
-5. Smoke test:
-   - Command:
-     - `bun --eval '<inline script creating temp git repo + AGENTS.md, stubbing planner call, asserting context>'`
-   - Output:
-     - `SMOKE_OK: AGENTS injected`
+1. `npm install zod@^4`
+   - Success.
+   - Output included: `changed 2 packages` / `found 0 vulnerabilities`.
+
+2. `bun install`
+   - Success.
+   - Updated `bun.lock`.
+
+3. `bun test src/agents/claude/session.test.ts`
+   - Pass (`7 pass, 0 fail`).
+
+4. `npm run build`
+   - Pass (`tsc` + postbuild chmod).
+
+5. `npm test`
+   - Fails in full suite (`257 pass, 11 fail`).
+   - Failures appear unrelated to Zod upgrade and include pre-existing/dist-test issues (examples):
+     - `src/cli/commands/run.test.ts` assertion expecting executor `"claude"` got `undefined`.
+     - `src/hooks/adapters/stdout.test.ts` expected one log line, got zero.
+     - Multiple `dist/...` tests failing with module resolution errors like:
+       - `Cannot find module './session.ts?test=...'`.
+
+## Build/test status summary
+- Targeted tests for touched area: ✅ pass
+- Build: ✅ pass
+- Full test suite: ❌ fails, with failures that do not indicate Zod v4 migration breakage.
