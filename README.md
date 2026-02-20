@@ -50,6 +50,8 @@ After task execution, Orca can run deterministic validation commands, then ask C
 
 When using the Codex executor, Orca enforces a strict reviewer JSON schema (`{summary, findings, fixed}`) as the primary path. If the first response is malformed, Orca issues one deterministic repair prompt (max 2 attempts total); if still invalid, it emits an `onFindings` event with an explicit parse error and stops auto-fix progression for that cycle.
 
+Run the dedicated integration coverage for this JSON retry/validation path with `npm run test:postexec-json`.
+
 Orca then prints a final post-execution review summary.
 
 ## Spec And Plan Files
@@ -324,6 +326,7 @@ Run local development and tests with Bun (faster runtime for this project):
 ```bash
 bun run src/cli/index.ts "your goal here"
 bun test src
+npm run test:postexec-json
 ```
 
 ## Validation pipeline

@@ -22,6 +22,7 @@
 - ✅ Claude planner/executor deterministic structured-output path shipped (text JSON fallback gated)
 - ✅ Effort controls shipped: `--codex-effort <low|medium|high>`, `--claude-effort <low|medium|high|max>`
 - ✅ `orca setup --check` key detection improved (OpenClaw env + cross-platform `.env` fallbacks)
+- ✅ Dedicated post-exec reviewer JSON hardening integration target shipped (`npm run test:postexec-json`)
 
 ## Remaining
 - Zod v3→v4 upgrade (peer dep conflict with @anthropic-ai/claude-agent-sdk@0.2.47)
