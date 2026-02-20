@@ -188,7 +188,7 @@ Global:
 
 - `--anthropic-key <key>`
 - `--openai-key <key>`
-- `--check` (API key lookup order: CLI flag → process env → `~/.openclaw/openclaw.json` `env.vars` → `~/.claude/.env` → `~/.config/claude/.env` → `./.env`)
+- `--check` (API key lookup order: CLI flag → process env → `~/.openclaw/openclaw.json` `env.vars` → `~/.claude/.env` → `~/.config/claude/.env`)
 - `--global`
 - `--project`
 

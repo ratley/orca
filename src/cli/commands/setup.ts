@@ -88,7 +88,6 @@ function commandExists(command: string): boolean {
 
 type ResolveApiKeyOptions = {
   openclawConfigPath?: string;
-  cwd?: string;
   homedir?: string;
 };
 
@@ -119,7 +118,6 @@ export function resolveApiKey(
   }
 
   const dotenvValue = readDotEnvFallback(envVarName, {
-    cwd: options.cwd ?? process.cwd(),
     homedir
   });
   if (dotenvValue) {
@@ -172,12 +170,11 @@ function readOpenclawEnvVar(
 
 function readDotEnvFallback(
   envVarName: string,
-  options: { cwd: string; homedir: string }
+  options: { homedir: string }
 ): string | undefined {
   const candidatePaths = [
     path.join(options.homedir, ".claude", ".env"),
-    path.join(options.homedir, ".config", "claude", ".env"),
-    path.join(options.cwd, ".env")
+    path.join(options.homedir, ".config", "claude", ".env")
   ];
 
   for (const candidatePath of candidatePaths) {

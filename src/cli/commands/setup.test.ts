@@ -96,7 +96,6 @@ describe("resolveApiKey", () => {
 
     const resolved = resolveApiKey(undefined, "OPENAI_API_KEY", {
       homedir: tempDir,
-      cwd: tempDir,
       openclawConfigPath: path.join(tempDir, ".openclaw", "openclaw.json")
     });
 
@@ -117,14 +116,13 @@ describe("resolveApiKey", () => {
 
     const resolved = resolveApiKey(undefined, "ANTHROPIC_API_KEY", {
       homedir: tempDir,
-      cwd: tempDir,
       openclawConfigPath: path.join(tempDir, ".openclaw", "openclaw.json")
     });
 
     expect(resolved).toBe("linux-config-value");
   });
 
-  test("returns value from project-local .env fallback", async () => {
+  test("ignores project-local .env", async () => {
     delete process.env.OPENAI_API_KEY;
 
     tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-setup-test-"));
@@ -136,11 +134,10 @@ describe("resolveApiKey", () => {
 
     const resolved = resolveApiKey(undefined, "OPENAI_API_KEY", {
       homedir: path.join(tempDir, "home-without-keys"),
-      cwd: tempDir,
       openclawConfigPath: path.join(tempDir, ".openclaw", "openclaw.json")
     });
 
-    expect(resolved).toBe("project-env-value");
+    expect(resolved).toBeUndefined();
   });
 
   test("supports quoted .env values and ignores comments", async () => {
@@ -157,14 +154,13 @@ describe("resolveApiKey", () => {
 
     const resolved = resolveApiKey(undefined, "ANTHROPIC_API_KEY", {
       homedir: tempDir,
-      cwd: tempDir,
       openclawConfigPath: path.join(tempDir, ".openclaw", "openclaw.json")
     });
 
     expect(resolved).toBe("quoted value");
   });
 
-  test("respects precedence across all sources", async () => {
+  test("respects precedence across supported sources", async () => {
     process.env.ANTHROPIC_API_KEY = "env-value";
 
     tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-setup-test-"));
@@ -185,14 +181,12 @@ describe("resolveApiKey", () => {
 
     const withFlag = resolveApiKey("flag-value", "ANTHROPIC_API_KEY", {
       homedir: tempDir,
-      cwd: tempDir,
       openclawConfigPath
     });
     expect(withFlag).toBe("flag-value");
 
     const withEnv = resolveApiKey(undefined, "ANTHROPIC_API_KEY", {
       homedir: tempDir,
-      cwd: tempDir,
       openclawConfigPath
     });
     expect(withEnv).toBe("env-value");
@@ -201,7 +195,6 @@ describe("resolveApiKey", () => {
 
     const withOpenclaw = resolveApiKey(undefined, "ANTHROPIC_API_KEY", {
       homedir: tempDir,
-      cwd: tempDir,
       openclawConfigPath
     });
     expect(withOpenclaw).toBe("gateway-value");
@@ -214,7 +207,6 @@ describe("resolveApiKey", () => {
 
     const resolved = resolveApiKey(undefined, "ANTHROPIC_API_KEY", {
       homedir: tempDir,
-      cwd: tempDir,
       openclawConfigPath: path.join(tempDir, ".openclaw", "openclaw.json")
     });
 
