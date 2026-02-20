@@ -1,6 +1,8 @@
 import type { HookEvent, HookHandler } from "../../types/index.js";
 
-export function createStdoutHookHandler(prefix = "[hook]"): HookHandler {
+type StdoutWrite = (line: string) => void;
+
+export function createStdoutHookHandler(prefix = "[hook]", write: StdoutWrite = console.log): HookHandler {
   return async (event: HookEvent): Promise<void> => {
     const line = {
       prefix,
@@ -13,6 +15,6 @@ export function createStdoutHookHandler(prefix = "[hook]"): HookHandler {
       metadata: event.metadata
     };
 
-    console.log(JSON.stringify(line));
+    write(JSON.stringify(line));
   };
 }

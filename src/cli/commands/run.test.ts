@@ -36,6 +36,8 @@ async function loadRunModule(): Promise<{
 }> {
   const runPlannerMock = mock(async () => {});
   const runTaskRunnerMock = mock(async () => {});
+  const { resolveConfig: realResolveConfig } = await import(`../../core/config-loader.js?real=${Math.random()}`);
+  const resolveConfigMock = mock((configPath?: string) => realResolveConfig(configPath));
   const ensureCodexMultiAgentMock = mock(async () => ({
     action: "skipped" as const,
     path: path.join(tempDir, "mock-codex-config.toml")
@@ -53,6 +55,9 @@ async function loadRunModule(): Promise<{
   mock.module("../../core/task-runner.js", () => ({
     runTaskRunner: runTaskRunnerMock
   }));
+  mock.module("../../core/config-loader.js", () => ({
+    resolveConfig: resolveConfigMock
+  }));
   mock.module("../../core/codex-config.js", () => ({
     ensureCodexMultiAgent: ensureCodexMultiAgentMock
   }));
@@ -62,9 +67,6 @@ async function loadRunModule(): Promise<{
   mock.module("../../hooks/adapters/openclaw.js", () => ({
     detectOpenclawAvailability: () => ({ available: false }),
     createOpenclawHookHandler: () => async () => {}
-  }));
-  mock.module("../../hooks/adapters/stdout.js", () => ({
-    createStdoutHookHandler: () => async () => {}
   }));
   mock.module("../../hooks/dispatcher.js", () => ({
     HookDispatcher: class {

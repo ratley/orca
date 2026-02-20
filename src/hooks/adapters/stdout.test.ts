@@ -1,20 +1,11 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 
 import type { HookEvent } from "../../types/index.js";
 import { createStdoutHookHandler } from "./stdout.js";
 
 describe("createStdoutHookHandler", () => {
-  const originalLog = console.log;
-
-  afterEach(() => {
-    console.log = originalLog;
-  });
-
   test("logs structured JSON with expected fields", async () => {
     const lines: string[] = [];
-    console.log = (...args: unknown[]): void => {
-      lines.push(String(args[0]));
-    };
 
     const event: HookEvent = {
       runId: "run-1234-abcd",
@@ -25,7 +16,9 @@ describe("createStdoutHookHandler", () => {
       metadata: { retries: 1 }
     };
 
-    const handler = createStdoutHookHandler("[test-hook]");
+    const handler = createStdoutHookHandler("[test-hook]", (line) => {
+      lines.push(line);
+    });
     await handler(event);
 
     expect(lines).toHaveLength(1);

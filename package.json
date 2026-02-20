@@ -10,7 +10,7 @@
     "dev": "bun run src/cli/index.ts",
     "lint": "oxlint src/",
     "typecheck": "tsc --noEmit",
-    "test": "bun test",
+    "test": "bun test src", 
     "start": "bun run src/cli/index.ts",
     "prepare": "husky",
     "postbuild": "chmod +x dist/cli/index.js"
