@@ -1,25 +1,25 @@
 ---
-date: 2026-02-20T02:12:00-08:00
-session: hook-contract-no-env-regression-fix
+date: 2026-02-20T10:55:00-08:00
+session: postexec-reviewer-structured-output-hardening
 agent: subagent
 ---
 
 ## Task
-Fix dispatcher regression that reintroduced legacy `ORCA_*` hook payload env vars, keep command-hook payload transport stdin JSON only, and align tests/smoke/docs with that contract.
+Harden Codex post-execution reviewer parsing by making strict schema-validated structured output the primary path, with deterministic bounded repair retry for malformed responses.
 
 ## Files changed
-- `src/hooks/dispatcher.ts`
-- `src/hooks/dispatcher.test.ts`
-- `specs/smoke/hooks/record-command-hook.mjs`
+- `src/cli/commands/run.ts`
+- `src/cli/commands/run.test.ts`
+- `README.md`
+- `SKILL.md`
 - `session-logs/LATEST.md`
 
-## Hook contract (current)
-- Function hooks remain primary typed path.
-- Command hooks receive full payload via stdin JSON only.
-- Dispatcher does **not** inject hook payload env vars (`ORCA_HOOK`, `ORCA_MSG`, `ORCA_RUN_ID`, `ORCA_TASK_ID`, `ORCA_TASK_NAME`, `ORCA_ERROR`).
+## Behavior update
+- Enforce strict reviewer payload schema: `{ summary: string, findings: string[], fixed: boolean }`.
+- On malformed reviewer output, run one explicit repair prompt (max 2 attempts total).
+- If still invalid, emit explicit findings parse error and stop that cycle's auto-fix progression.
 
 ## Verification run
 - `npm run validate` ✅
 - `npm run smoke:hooks` ✅
-- `npm run smoke:hooks` ✅
-- Codex review on final diff: no significant issues; contract upheld.
+- Codex review of final diff completed; only low-severity test-coverage suggestions were raised and addressed with additional schema-retry test.

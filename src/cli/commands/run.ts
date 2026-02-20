@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 
 import { InvalidArgumentError, type Command } from "commander";
+import { z } from "zod";
 
 import { createCodexSession } from "../../agents/codex/session.js";
 import { ensureCodexMultiAgent } from "../../core/codex-config.js";
@@ -37,6 +38,14 @@ interface ExecutionReviewResult {
   fixed: boolean;
   rawResponse: string;
 }
+
+const ExecutionReviewPayloadSchema = z.object({
+  summary: z.string().min(1),
+  findings: z.array(z.string()),
+  fixed: z.boolean()
+}).strict();
+
+type StructuredReviewResult = z.infer<typeof ExecutionReviewPayloadSchema>;
 
 export interface RunCommandOptions {
   spec?: string;
@@ -220,29 +229,90 @@ function buildPostExecutionReviewPrompt(cycleIndex: number, validationResults: V
   ].join("\n\n");
 }
 
-function parseExecutionReviewResult(raw: string): ExecutionReviewResult {
+function extractJsonCandidate(raw: string): string {
   const match = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const candidate = (match?.[1] ?? raw).trim();
+  return (match?.[1] ?? raw).trim();
+}
 
+function parseStructuredExecutionReview(raw: string):
+  | { ok: true; value: StructuredReviewResult }
+  | { ok: false; error: string } {
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(candidate) as { summary?: unknown; findings?: unknown; fixed?: unknown };
-    const findings = Array.isArray(parsed.findings) ? parsed.findings.filter((item): item is string => typeof item === "string") : [];
-
-    return {
-      findings,
-      summary: typeof parsed.summary === "string" ? parsed.summary : (findings.length > 0 ? findings.join("; ") : "No findings."),
-      fixed: parsed.fixed === true,
-      rawResponse: raw
-    };
+    parsed = JSON.parse(extractJsonCandidate(raw));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return {
-      findings: [`review-response-parse-error: ${message}`],
-      summary: `Post-execution reviewer returned invalid JSON (${message})`,
-      fixed: false,
-      rawResponse: raw
-    };
+    return { ok: false, error: `JSON parse failed: ${message}` };
   }
+
+  const result = ExecutionReviewPayloadSchema.safeParse(parsed);
+  if (!result.success) {
+    const details = result.error.issues
+      .map((issue) => `${issue.path.length > 0 ? issue.path.join(".") : "<root>"}: ${issue.message}`)
+      .join("; ");
+    return { ok: false, error: `Schema validation failed: ${details}` };
+  }
+
+  return { ok: true, value: result.data };
+}
+
+function buildExecutionReviewRepairPrompt(
+  cycleIndex: number,
+  previousResponse: string,
+  parseError: string,
+  extraPrompt?: string
+): string {
+  return [
+    "Your previous post-execution review response was invalid.",
+    `Cycle: ${cycleIndex}`,
+    `Validation failure: ${parseError}`,
+    "Return JSON only using this exact shape and types:",
+    '{"summary":"...","findings":["..."],"fixed":true|false}',
+    "Do not include markdown fences.",
+    "Do not include any additional keys.",
+    "Previous invalid response:",
+    previousResponse,
+    ...(extraPrompt ? ["Additional reviewer instructions:", extraPrompt] : [])
+  ].join("\n\n");
+}
+
+async function requestStructuredExecutionReview(
+  runPrompt: (prompt: string) => Promise<string>,
+  cycleIndex: number,
+  basePrompt: string,
+  extraPrompt?: string
+): Promise<ExecutionReviewResult> {
+  const maxAttempts = 2;
+  let prompt = basePrompt;
+  let lastRaw = "";
+  let lastError = "unknown validation error";
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const raw = await runPrompt(prompt);
+    lastRaw = raw;
+    const parsed = parseStructuredExecutionReview(raw);
+    if (parsed.ok) {
+      return {
+        findings: parsed.value.findings,
+        summary: parsed.value.summary,
+        fixed: parsed.value.fixed,
+        rawResponse: raw
+      };
+    }
+
+    lastError = parsed.error;
+    console.error(`[orca] Post-execution reviewer response failed validation (attempt ${attempt}/${maxAttempts}): ${parsed.error}`);
+    if (attempt < maxAttempts) {
+      prompt = buildExecutionReviewRepairPrompt(cycleIndex, raw, parsed.error, extraPrompt);
+    }
+  }
+
+  return {
+    findings: [`review-response-parse-error: ${lastError}`],
+    summary: `Post-execution reviewer returned invalid JSON after ${maxAttempts} attempts (${lastError})`,
+    fixed: false,
+    rawResponse: lastRaw
+  };
 }
 
 export async function runCommandHandler(options: RunCommandOptions): Promise<void> {
@@ -421,8 +491,12 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
           for (let cycleIndex = 1; cycleIndex <= reviewConfig.maxCycles; cycleIndex += 1) {
             const validationResults = await runValidatorCommands(validatorCommands);
             const prompt = buildPostExecutionReviewPrompt(cycleIndex, validationResults, reviewConfig.prompt);
-            const rawReview = await codexSession.runPrompt(prompt);
-            const reviewResult = parseExecutionReviewResult(rawReview);
+            const reviewResult = await requestStructuredExecutionReview(
+              codexSession.runPrompt,
+              cycleIndex,
+              prompt,
+              reviewConfig.prompt
+            );
             finalSummaries.push(`cycle ${cycleIndex}: ${reviewResult.summary}`);
 
             if (reviewResult.findings.length === 0) {

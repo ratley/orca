@@ -67,6 +67,7 @@ export default {
 - Must be run inside a git repo
 - Function hooks are primary (`hooks`) and receive `(event, context)` with deterministic context `{ cwd, pid, invokedAt }`
 - Hook commands still work, but they now receive structured event JSON on stdin (no `ORCA_*` hook env payload)
+- Post-exec reviewer uses strict JSON schema (`summary`, `findings[]`, `fixed`) with one bounded repair retry on malformed output
 - Hook smoke harness: run `npm run smoke:hooks`
 - Run ID format: `<slug>-<unix-ms>-<hex4>`  (e.g. cobalt-summit-1708123456789-a3f2)
 - Use `orca answer` to unblock a waiting run

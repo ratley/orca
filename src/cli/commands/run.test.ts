@@ -413,12 +413,65 @@ describe("run command executor flags", () => {
     expect(runPromptMock).toHaveBeenCalledTimes(1);
   });
 
-  test("invalid reviewer JSON is treated as findings and dispatches onFindings", async () => {
-    const { runModule, createCodexSessionMock, hookDispatchMock } = await loadRunModule();
+  test("invalid reviewer JSON retries once and succeeds with structured output", async () => {
+    const { runModule, createCodexSessionMock } = await loadRunModule();
+    const runPromptMock = mock(async () => "not-json");
+    runPromptMock.mockImplementationOnce(async () => "not-json");
+    runPromptMock.mockImplementationOnce(async () => '{"summary":"clean","findings":[],"fixed":false}');
+
     createCodexSessionMock.mockImplementationOnce(async () => ({
       consultTaskGraph: async () => ({ issues: [], ok: true }),
       executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
-      runPrompt: async () => "not-json",
+      runPrompt: runPromptMock,
+      reviewChanges: async () => "review",
+      disconnect: async () => {}
+    }));
+
+    const configPath = path.join(tempDir, "orca.config.js");
+    await writeFile(configPath, "export default { review: { execution: { onFindings: 'report_only', validator: { auto: false } } } };\n", "utf8");
+
+    await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
+
+    expect(runPromptMock).toHaveBeenCalledTimes(2);
+    expect(runPromptMock).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining("previous post-execution review response was invalid")
+    );
+  });
+
+  test("schema-invalid reviewer payload retries once and succeeds", async () => {
+    const { runModule, createCodexSessionMock } = await loadRunModule();
+    const runPromptMock = mock(async () => '{"summary":"missing fixed","findings":[]}');
+    runPromptMock.mockImplementationOnce(async () => '{"summary":"missing fixed","findings":[]}');
+    runPromptMock.mockImplementationOnce(async () => '{"summary":"clean","findings":[],"fixed":false}');
+
+    createCodexSessionMock.mockImplementationOnce(async () => ({
+      consultTaskGraph: async () => ({ issues: [], ok: true }),
+      executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
+      runPrompt: runPromptMock,
+      reviewChanges: async () => "review",
+      disconnect: async () => {}
+    }));
+
+    const configPath = path.join(tempDir, "orca.config.js");
+    await writeFile(configPath, "export default { review: { execution: { onFindings: 'report_only', validator: { auto: false } } } };\n", "utf8");
+
+    await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
+
+    expect(runPromptMock).toHaveBeenCalledTimes(2);
+    expect(runPromptMock).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining("Schema validation failed")
+    );
+  });
+
+  test("invalid reviewer JSON after bounded retries is treated as findings and dispatches onFindings", async () => {
+    const { runModule, createCodexSessionMock, hookDispatchMock } = await loadRunModule();
+    const runPromptMock = mock(async () => "still-not-json");
+    createCodexSessionMock.mockImplementationOnce(async () => ({
+      consultTaskGraph: async () => ({ issues: [], ok: true }),
+      executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
+      runPrompt: runPromptMock,
       reviewChanges: async () => "review",
       disconnect: async () => {}
     }));
@@ -432,8 +485,9 @@ describe("run command executor flags", () => {
       (call) => (call[0] as { hook?: string })?.hook === "onFindings"
     )?.[0] as { message?: string; metadata?: { findingsCount?: number } } | undefined;
 
+    expect(runPromptMock).toHaveBeenCalledTimes(2);
     expect(findingsEvent?.metadata?.findingsCount).toBe(1);
-    expect(findingsEvent?.message).toContain("invalid JSON");
+    expect(findingsEvent?.message).toContain("invalid JSON after 2 attempts");
   });
 });
 
