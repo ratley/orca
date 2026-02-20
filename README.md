@@ -42,9 +42,9 @@ orca plan --spec ./specs/feature.md
 ## Run Management
 
 ```bash
-orca status
-orca status --last
-orca status --run <run-id>
+orca status                  # list all runs (summary table)
+orca status --last           # status of the most recent run
+orca status --run <run-id>   # status of a specific run
 
 orca list
 
@@ -138,8 +138,6 @@ Global:
 
 - `--spec <path>`
 - `--config <path>`
-- `--on-milestone <cmd>`
-- `--on-error <cmd>`
 
 `orca status`:
 
@@ -185,6 +183,11 @@ Global:
 - `--check`
 - `--global`
 - `--project`
+
+`orca help`:
+
+- positional: `[command]` — show help for a specific command (e.g. `orca help plan`)
+- no flags; also works as `orca --help` or `orca <command> --help`
 
 ### Hooks
 

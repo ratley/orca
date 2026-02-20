@@ -24,7 +24,7 @@ orca "your goal here"
 ```
 orca <goal>              Start a new run
 orca status [--last]     Check run status
-orca answer <text>       Answer a question the agent raised
+orca answer [--run <id>] [answer]    Answer a question the agent raised
 orca resume [--last]     Resume a paused run
 orca cancel [--last]     Cancel a run
 orca pr draft [--last]   Open a draft PR for the run's branch
@@ -51,5 +51,5 @@ export default {
 
 - Codex executor requires `~/.codex/auth.json`
 - Must be run inside a git repo
-- Run ID format: `<adjective>-<noun>-<timestamp>`
+- Run ID format: `<slug>-<unix-ms>-<hex4>`  (e.g. cobalt-summit-1708123456789-a3f2)
 - Use `orca answer` to unblock a waiting run
