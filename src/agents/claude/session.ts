@@ -2,6 +2,7 @@ import { query, type Query } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 
 import type { OrcaConfig, PlanResult, Task, TaskExecutionResult } from "../../types/index.js";
+import type { ClaudeEffort } from "../../types/effort.js";
 import { parseAgentJson } from "../../utils/agent-json.js";
 
 type JsonSchema = Record<string, unknown>;
@@ -91,13 +92,16 @@ const EXECUTION_OUTPUT_SCHEMA: JsonSchema = {
     outcome: { type: "string", enum: ["done", "failed"] },
     error: { type: "string" },
   },
+  // eslint-disable-next-line unicorn/no-thenable
   allOf: [
     {
       if: { properties: { outcome: { const: "failed" } } },
+      // eslint-disable-next-line unicorn/no-thenable
       then: { required: ["error"] },
     },
     {
       if: { properties: { outcome: { const: "done" } } },
+      // eslint-disable-next-line unicorn/no-thenable
       then: { not: { required: ["error"] } },
     },
   ],
@@ -270,6 +274,33 @@ function getModel(config?: OrcaConfig): string {
   return config?.claude?.model ?? process.env.ORCA_CLAUDE_MODEL ?? "claude-sonnet-4-5";
 }
 
+function getEffort(config?: OrcaConfig): ClaudeEffort | undefined {
+  return config?.claude?.effort;
+}
+
+function buildClaudeQueryOptions(
+  config: OrcaConfig | undefined,
+  outputFormat: typeof PLAN_OUTPUT_FORMAT | typeof EXECUTION_OUTPUT_FORMAT,
+): { model: string; permissionMode: "bypassPermissions"; outputFormat: typeof outputFormat } {
+  const options: {
+    model: string;
+    permissionMode: "bypassPermissions";
+    outputFormat: typeof outputFormat;
+    effortValue?: ClaudeEffort;
+  } = {
+    model: getModel(config),
+    permissionMode: "bypassPermissions",
+    outputFormat,
+  };
+
+  const effort = getEffort(config);
+  if (effort) {
+    options.effortValue = effort;
+  }
+
+  return options;
+}
+
 function shouldAllowTextJsonFallback(config?: OrcaConfig): boolean {
   if (config?.claude?.allowTextJsonFallback !== undefined) {
     return config.claude.allowTextJsonFallback;
@@ -289,11 +320,7 @@ function throwMissingStructuredOutput(kind: "planner" | "task execution"): never
 export async function planSpec(spec: string, systemContext: string, config?: OrcaConfig): Promise<PlanResult> {
   const claudeQuery = query({
     prompt: buildPlanningPrompt(spec, systemContext),
-    options: {
-      model: getModel(config),
-      permissionMode: "bypassPermissions",
-      outputFormat: PLAN_OUTPUT_FORMAT,
-    },
+    options: buildClaudeQueryOptions(config, PLAN_OUTPUT_FORMAT),
   });
 
   try {
@@ -328,11 +355,7 @@ export async function executeTask(
 ): Promise<TaskExecutionResult> {
   const claudeQuery = query({
     prompt: buildTaskExecutionPrompt(task, runId, process.cwd(), systemContext),
-    options: {
-      model: getModel(config),
-      permissionMode: "bypassPermissions",
-      outputFormat: EXECUTION_OUTPUT_FORMAT,
-    },
+    options: buildClaudeQueryOptions(config, EXECUTION_OUTPUT_FORMAT),
   });
 
   try {

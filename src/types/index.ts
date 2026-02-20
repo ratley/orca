@@ -1,3 +1,5 @@
+import type { ClaudeEffort, CodexEffort } from "./effort.js";
+
 export type RunId = `${string}-${number}-${string}`;
 
 export interface Spec {
@@ -97,6 +99,7 @@ export interface OrcaConfig {
   executor?: "claude" | "codex";
   claude?: {
     model?: string;
+    effort?: ClaudeEffort;
     useV2Preview?: boolean;
     maxTurnsPerTask?: number;
     allowTextJsonFallback?: boolean;
@@ -104,6 +107,7 @@ export interface OrcaConfig {
   codex?: {
     enabled?: boolean;
     model?: string;
+    effort?: CodexEffort;
     command?: string;
     timeoutMs?: number;
     multiAgent?: boolean;

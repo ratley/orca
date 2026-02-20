@@ -92,6 +92,32 @@ describe("config-loader", () => {
     expect(resolved?.executor).toBe("codex");
   });
 
+  test("resolveConfigFromPaths throws on invalid codex effort value", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(cliPath, "export default { codex: { effort: 'extreme' } };\n", "utf8");
+
+    await expect(
+      resolveConfigFromPaths(
+        path.join(tempDir, "missing-global.js"),
+        path.join(tempDir, "missing-project.js"),
+        cliPath
+      )
+    ).rejects.toThrow("Codex effort must be one of");
+  });
+
+  test("resolveConfigFromPaths throws on invalid claude effort value", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(cliPath, "export default { claude: { effort: 'extreme' } };\n", "utf8");
+
+    await expect(
+      resolveConfigFromPaths(
+        path.join(tempDir, "missing-global.js"),
+        path.join(tempDir, "missing-project.js"),
+        cliPath
+      )
+    ).rejects.toThrow("Claude effort must be one of");
+  });
+
   test("resolveConfigFromPaths merges global and project", async () => {
     const globalPath = path.join(tempDir, "global.config.js");
     const projectPath = path.join(tempDir, "project.config.js");

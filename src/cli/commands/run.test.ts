@@ -148,6 +148,74 @@ describe("run command executor flags", () => {
     ).rejects.toThrow("--codex-only and --claude-only are mutually exclusive");
   });
 
+  test("applies --codex-effort to effective codex config", async () => {
+    const { runModule, runPlannerMock, runTaskRunnerMock } = await loadRunModule();
+
+    await parseRun(runModule, ["run", "--task", "x", "--codex-effort", "medium"]);
+
+    const plannerConfig = runPlannerMock.mock.calls[0]?.[3] as { codex?: { effort?: string } } | undefined;
+    const runnerArg = runTaskRunnerMock.mock.calls[0]?.[0] as
+      | { config?: { codex?: { effort?: string } } }
+      | undefined;
+    expect(plannerConfig?.codex?.effort).toBe("medium");
+    expect(runnerArg?.config?.codex?.effort).toBe("medium");
+  });
+
+  test("applies --claude-effort to effective claude config", async () => {
+    const { runModule, runPlannerMock, runTaskRunnerMock } = await loadRunModule();
+
+    await parseRun(runModule, ["run", "--task", "x", "--claude-effort", "max"]);
+
+    const plannerConfig = runPlannerMock.mock.calls[0]?.[3] as { claude?: { effort?: string } } | undefined;
+    const runnerArg = runTaskRunnerMock.mock.calls[0]?.[0] as
+      | { config?: { claude?: { effort?: string } } }
+      | undefined;
+    expect(plannerConfig?.claude?.effort).toBe("max");
+    expect(runnerArg?.config?.claude?.effort).toBe("max");
+  });
+
+  test("both effort flags are accepted; active executor uses matching effort", async () => {
+    const { runModule, runPlannerMock, runTaskRunnerMock } = await loadRunModule();
+
+    await parseRun(runModule, [
+      "run",
+      "--task",
+      "x",
+      "--codex-only",
+      "--codex-effort",
+      "high",
+      "--claude-effort",
+      "low",
+    ]);
+
+    const plannerConfig = runPlannerMock.mock.calls[0]?.[3] as
+      | { executor?: string; codex?: { effort?: string }; claude?: { effort?: string } }
+      | undefined;
+    const runnerArg = runTaskRunnerMock.mock.calls[0]?.[0] as
+      | { config?: { executor?: string; codex?: { effort?: string }; claude?: { effort?: string } } }
+      | undefined;
+
+    expect(plannerConfig?.executor).toBe("codex");
+    expect(plannerConfig?.codex?.effort).toBe("high");
+    expect(plannerConfig?.claude?.effort).toBe("low");
+    expect(runnerArg?.config?.executor).toBe("codex");
+    expect(runnerArg?.config?.codex?.effort).toBe("high");
+  });
+
+  test("rejects invalid codex effort", async () => {
+    const { runModule } = await loadRunModule();
+    await expect(parseRun(runModule, ["run", "--task", "x", "--codex-effort", "extreme"])).rejects.toThrow(
+      "Codex effort must be one of",
+    );
+  });
+
+  test("rejects invalid claude effort", async () => {
+    const { runModule } = await loadRunModule();
+    await expect(parseRun(runModule, ["run", "--task", "x", "--claude-effort", "ultra"])).rejects.toThrow(
+      "Claude effort must be one of",
+    );
+  });
+
   test("rejects invalid boolean value for --codex-only", async () => {
     const { runModule } = await loadRunModule();
     await expect(

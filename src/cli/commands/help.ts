@@ -68,6 +68,14 @@ function printStyledHelpPage(): void {
       command: "--claude-only",
       description: "override executor to Claude for the current run"
     },
+    {
+      command: "--codex-effort <value>",
+      description: "override Codex effort for the current run"
+    },
+    {
+      command: "--claude-effort <value>",
+      description: "override Claude effort for the current run"
+    },
     { command: "--full-auto", description: "skip all questions, proceed autonomously" },
     { command: "--on-complete <cmd>", description: "shell hook on run complete" },
     { command: "--on-error <cmd>", description: "shell hook on run error" },

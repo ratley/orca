@@ -58,6 +58,43 @@ describe("claude session structured contract", () => {
   });
 });
 
+describe("claude session effort wiring", () => {
+  test("passes configured effort into Claude query options", async () => {
+    const queryMock = mock((_params: { options?: { effortValue?: string } }) => ({
+      close() {},
+      async *[Symbol.asyncIterator]() {
+        yield {
+          type: "result",
+          subtype: "success",
+          result: "ok",
+          structured_output: {
+            tasks: [
+              {
+                id: "t1",
+                name: "N",
+                description: "D",
+                dependencies: [],
+                acceptance_criteria: ["A"],
+                status: "pending",
+                retries: 0,
+                maxRetries: 3,
+              },
+            ],
+          },
+        };
+      },
+    }));
+
+    mock.module("@anthropic-ai/claude-agent-sdk", () => ({ query: queryMock }));
+
+    const { planSpec } = await import(`./session.ts?test=${Math.random()}`);
+    await planSpec("spec", "ctx", { claude: { effort: "max" } });
+
+    expect(queryMock).toHaveBeenCalled();
+    expect(queryMock.mock.calls[0]?.[0]?.options?.effortValue).toBe("max");
+  });
+});
+
 describe("claude session structured-output critical path", () => {
   test("markdown-fenced assistant text does not hit text parser when structured output exists", async () => {
     mock.module("@anthropic-ai/claude-agent-sdk", () => ({

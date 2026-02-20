@@ -2,6 +2,7 @@ import { CodexClient } from "@ratley/codex-client";
 import type { CompletedTurn } from "@ratley/codex-client";
 
 import type { OrcaConfig, PlanResult, Task, TaskExecutionResult } from "../../types/index.js";
+import type { CodexEffort } from "../../types/effort.js";
 
 export type { PlanResult, TaskExecutionResult };
 
@@ -195,6 +196,10 @@ function getCodexPath(): string {
   );
 }
 
+function getEffort(config?: OrcaConfig): CodexEffort | undefined {
+  return config?.codex?.effort;
+}
+
 /**
  * Create a persistent Codex session. The thread persists across calls —
  * planSpec and executeTask share context within the same session.
@@ -235,10 +240,17 @@ export async function createCodexSession(
       spec: string,
       systemContext: string,
     ): Promise<PlanResult> {
-      const result = await client.runTurn({
-        threadId,
-        input: [{ type: "text", text: buildPlanningPrompt(spec, systemContext) }],
-      });
+      const effort = getEffort(config);
+      const result = effort
+        ? await client.runTurn({
+            threadId,
+            effort,
+            input: [{ type: "text", text: buildPlanningPrompt(spec, systemContext) }],
+          })
+        : await client.runTurn({
+            threadId,
+            input: [{ type: "text", text: buildPlanningPrompt(spec, systemContext) }],
+          });
 
       const rawResponse = extractAgentText(result);
 
@@ -253,15 +265,27 @@ export async function createCodexSession(
       runId: string,
       systemContext?: string,
     ): Promise<TaskExecutionResult> {
-      const result = await client.runTurn({
-        threadId,
-        input: [
-          {
-            type: "text",
-            text: buildTaskExecutionPrompt(task, runId, cwd, systemContext),
-          },
-        ],
-      });
+      const effort = getEffort(config);
+      const result = effort
+        ? await client.runTurn({
+            threadId,
+            effort,
+            input: [
+              {
+                type: "text",
+                text: buildTaskExecutionPrompt(task, runId, cwd, systemContext),
+              },
+            ],
+          })
+        : await client.runTurn({
+            threadId,
+            input: [
+              {
+                type: "text",
+                text: buildTaskExecutionPrompt(task, runId, cwd, systemContext),
+              },
+            ],
+          });
 
       const rawResponse = extractAgentText(result);
 
@@ -301,10 +325,17 @@ export async function createCodexSession(
         taskGraphJson,
       ].join("\n");
 
-      const result = await client.runTurn({
-        threadId,
-        input: [{ type: "text", text: prompt }],
-      });
+      const effort = getEffort(config);
+      const result = effort
+        ? await client.runTurn({
+            threadId,
+            effort,
+            input: [{ type: "text", text: prompt }],
+          })
+        : await client.runTurn({
+            threadId,
+            input: [{ type: "text", text: prompt }],
+          });
 
       const rawResponse = extractAgentText(result);
       const json = extractJson(rawResponse);

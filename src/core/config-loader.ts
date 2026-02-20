@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { parseClaudeEffort, parseCodexEffort } from "../types/effort.js";
 import type { OrcaConfig } from "../types/index.js";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -76,6 +77,38 @@ function coerceConfig(candidate: unknown): OrcaConfig {
       throw new Error(
         `Config.executor must be 'claude' or 'codex', got ${String(candidate.executor)}`
       );
+    }
+  }
+
+  if ("claude" in candidate && candidate.claude !== undefined) {
+    if (!isObject(candidate.claude)) {
+      throw new Error(`Config.claude must be an object, got ${describeType(candidate.claude)}`);
+    }
+
+    if ("effort" in candidate.claude && candidate.claude.effort !== undefined) {
+      if (typeof candidate.claude.effort !== "string") {
+        throw new Error(
+          `Config.claude.effort must be a string, got ${describeType(candidate.claude.effort)}`
+        );
+      }
+
+      parseClaudeEffort(candidate.claude.effort);
+    }
+  }
+
+  if ("codex" in candidate && candidate.codex !== undefined) {
+    if (!isObject(candidate.codex)) {
+      throw new Error(`Config.codex must be an object, got ${describeType(candidate.codex)}`);
+    }
+
+    if ("effort" in candidate.codex && candidate.codex.effort !== undefined) {
+      if (typeof candidate.codex.effort !== "string") {
+        throw new Error(
+          `Config.codex.effort must be a string, got ${describeType(candidate.codex.effort)}`
+        );
+      }
+
+      parseCodexEffort(candidate.codex.effort);
     }
   }
 

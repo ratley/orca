@@ -1,9 +1,10 @@
-import type { Command } from "commander";
+import { InvalidArgumentError, type Command } from "commander";
 
 import { resolveConfig } from "../../core/config-loader.js";
 import { runTaskRunner } from "../../core/task-runner.js";
 import { RunStore } from "../../state/store.js";
 import type { OrcaConfig, RunStatus } from "../../types/index.js";
+import { parseClaudeEffort, parseCodexEffort, type ClaudeEffort, type CodexEffort } from "../../types/effort.js";
 import { getLastRun } from "../../utils/last-run.js";
 
 export interface ResumeCommandOptions {
@@ -12,6 +13,8 @@ export interface ResumeCommandOptions {
   config?: string;
   codexOnly?: boolean;
   claudeOnly?: boolean;
+  codexEffort?: CodexEffort;
+  claudeEffort?: ClaudeEffort;
 }
 
 function createStore(): RunStore {
@@ -31,16 +34,45 @@ function getActiveRuns(runs: RunStatus[]): RunStatus[] {
   return runs.filter((run) => run.overallStatus === "planning" || run.overallStatus === "running");
 }
 
+function parseCodexEffortOption(value: string): CodexEffort {
+  try {
+    return parseCodexEffort(value);
+  } catch (error) {
+    throw new InvalidArgumentError(error instanceof Error ? error.message : String(error));
+  }
+}
+
+function parseClaudeEffortOption(value: string): ClaudeEffort {
+  try {
+    return parseClaudeEffort(value);
+  } catch (error) {
+    throw new InvalidArgumentError(error instanceof Error ? error.message : String(error));
+  }
+}
+
 function applyExecutorOverrideForResume(
   config: OrcaConfig | undefined,
-  options: Pick<ResumeCommandOptions, "codexOnly" | "claudeOnly">
+  options: Pick<ResumeCommandOptions, "codexOnly" | "claudeOnly" | "codexEffort" | "claudeEffort">
 ): OrcaConfig | undefined {
-  if (!options.codexOnly && !options.claudeOnly) {
-    return config;
+  const nextConfig: OrcaConfig = { ...config };
+
+  if (options.codexOnly || options.claudeOnly) {
+    nextConfig.executor = options.codexOnly ? "codex" : "claude";
   }
 
-  const executor: OrcaConfig["executor"] = options.codexOnly ? "codex" : "claude";
-  return { ...config, executor };
+  if (options.codexEffort !== undefined) {
+    nextConfig.codex = { ...nextConfig.codex, effort: options.codexEffort };
+  }
+
+  if (options.claudeEffort !== undefined) {
+    nextConfig.claude = { ...nextConfig.claude, effort: options.claudeEffort };
+  }
+
+  if (config === undefined && Object.keys(nextConfig).length === 0) {
+    return undefined;
+  }
+
+  return nextConfig;
 }
 
 export async function resumeCommandHandler(options: ResumeCommandOptions): Promise<void> {
@@ -125,6 +157,8 @@ export function registerResumeCommand(program: Command): void {
     .option("--config <path>", "Path to orca config file")
     .option("--codex-only", "Force Codex executor for this resumed run (overrides config)")
     .option("--claude-only", "Force Claude executor for this resumed run (overrides config)")
+    .option("--codex-effort <value>", "Codex effort override for this resumed run", parseCodexEffortOption)
+    .option("--claude-effort <value>", "Claude effort override for this resumed run", parseClaudeEffortOption)
     .action(async (options: ResumeCommandOptions) => {
       try {
         await resumeCommandHandler(options);

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
-import type { Command } from "commander";
+import { InvalidArgumentError, type Command } from "commander";
 
 import { createCodexSession } from "../../agents/codex/session.js";
 import { ensureCodexMultiAgent } from "../../core/codex-config.js";
@@ -16,6 +16,7 @@ import { createStdoutHookHandler } from "../../hooks/adapters/stdout.js";
 import { HookDispatcher } from "../../hooks/dispatcher.js";
 import { RunStore } from "../../state/store.js";
 import type { HookEvent, HookName, OrcaConfig } from "../../types/index.js";
+import { parseClaudeEffort, parseCodexEffort, type ClaudeEffort, type CodexEffort } from "../../types/effort.js";
 import { generateRunId } from "../../utils/ids.js";
 
 export interface RunCommandOptions {
@@ -27,6 +28,8 @@ export interface RunCommandOptions {
   config?: string;
   codexOnly?: boolean;
   claudeOnly?: boolean;
+  codexEffort?: CodexEffort;
+  claudeEffort?: ClaudeEffort;
   onMilestone?: string;
   onTaskComplete?: string;
   onTaskFail?: string;
@@ -51,6 +54,22 @@ const VALID_HOOK_NAMES = new Set<HookName>([
 
 function isHookName(value: string): value is HookName {
   return VALID_HOOK_NAMES.has(value as HookName);
+}
+
+function parseCodexEffortOption(value: string): CodexEffort {
+  try {
+    return parseCodexEffort(value);
+  } catch (error) {
+    throw new InvalidArgumentError(error instanceof Error ? error.message : String(error));
+  }
+}
+
+function parseClaudeEffortOption(value: string): ClaudeEffort {
+  try {
+    return parseClaudeEffort(value);
+  } catch (error) {
+    throw new InvalidArgumentError(error instanceof Error ? error.message : String(error));
+  }
 }
 
 function createStore(): RunStore {
@@ -78,14 +97,27 @@ function buildCliCommandHooks(options: RunCommandOptions): Partial<Record<HookNa
 
 function applyExecutorOverrideForRun(
   config: OrcaConfig | undefined,
-  options: Pick<RunCommandOptions, "codexOnly" | "claudeOnly">
+  options: Pick<RunCommandOptions, "codexOnly" | "claudeOnly" | "codexEffort" | "claudeEffort">
 ): OrcaConfig | undefined {
-  if (!options.codexOnly && !options.claudeOnly) {
-    return config;
+  const nextConfig: OrcaConfig = { ...config };
+
+  if (options.codexOnly || options.claudeOnly) {
+    nextConfig.executor = options.codexOnly ? "codex" : "claude";
   }
 
-  const executor: OrcaConfig["executor"] = options.codexOnly ? "codex" : "claude";
-  return { ...config, executor };
+  if (options.codexEffort !== undefined) {
+    nextConfig.codex = { ...nextConfig.codex, effort: options.codexEffort };
+  }
+
+  if (options.claudeEffort !== undefined) {
+    nextConfig.claude = { ...nextConfig.claude, effort: options.claudeEffort };
+  }
+
+  if (config === undefined && Object.keys(nextConfig).length === 0) {
+    return undefined;
+  }
+
+  return nextConfig;
 }
 
 export async function runCommandHandler(options: RunCommandOptions): Promise<void> {
@@ -289,6 +321,8 @@ export function registerRunCommand(program: Command): void {
     .option("--config <path>", "Path to orca config file")
     .option("--codex-only", "Force Codex executor for this run (overrides config)")
     .option("--claude-only", "Force Claude executor for this run (overrides config)")
+    .option("--codex-effort <value>", "Codex effort override for this run", parseCodexEffortOption)
+    .option("--claude-effort <value>", "Claude effort override for this run", parseClaudeEffortOption)
     .option("--on-milestone <cmd>", "Shell hook command for onMilestone")
     .option("--on-task-complete <cmd>", "Shell hook command for onTaskComplete")
     .option("--on-task-fail <cmd>", "Shell hook command for onTaskFail")
