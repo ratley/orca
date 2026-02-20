@@ -1,7 +1,7 @@
 <p align="center">
   <img src="assets/orca-banner.jpg" alt="Orca" width="380" />
   <br/><br/>
-  <a href="https://github.com/ratley/orca-web">CLI Reference →</a>
+  <a href="https://orcastrator.dev">orcastrator.dev</a>
 </p>
 
 # orca
