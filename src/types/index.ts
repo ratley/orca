@@ -160,6 +160,14 @@ export interface OrcaConfig {
     command?: string;
     timeoutMs?: number;
     multiAgent?: boolean;
+    /**
+     * Optional extra skill roots to use for specific working directories when
+     * querying Codex app-server skills/list.
+     */
+    perCwdExtraUserRoots?: Array<{
+      cwd: string;
+      extraUserRoots: string[];
+    }>;
   };
   hooks?: { [K in HookName]?: HookHandler<K> };
   hookCommands?: Partial<Record<HookName, string>>;

@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { CodexClient } from "@ratley/codex-client";
 import type { CompletedTurn } from "@ratley/codex-client";
 
@@ -264,6 +266,137 @@ function buildTurnInput(text: string, skills: LoadedSkill[]): Array<{ type: "tex
   ];
 }
 
+interface RawSkill {
+  name?: unknown;
+  path?: unknown;
+}
+
+interface RawSkillsListEntry {
+  cwd?: unknown;
+  skills?: unknown;
+}
+
+function normalizePerCwdExtraUserRoots(config?: OrcaConfig): Array<{ cwd: string; extraUserRoots: string[] }> {
+  const configured = config?.codex?.perCwdExtraUserRoots;
+  if (!configured || configured.length === 0) {
+    return [];
+  }
+
+  return configured
+    .filter((entry): entry is { cwd: string; extraUserRoots: string[] } =>
+      typeof entry.cwd === "string" && Array.isArray(entry.extraUserRoots)
+    )
+    .map((entry) => {
+      const trimmedCwd = entry.cwd.trim();
+      return {
+        cwd: trimmedCwd.length > 0 ? path.resolve(trimmedCwd) : "",
+        extraUserRoots: entry.extraUserRoots
+        .filter((root): root is string => typeof root === "string")
+        .map((root) => root.trim())
+        .filter((root) => root.length > 0),
+      };
+    })
+    .filter((entry) => entry.cwd.length > 0 && entry.extraUserRoots.length > 0);
+}
+
+function getPerCwdExtraUserRootsForCwd(config: OrcaConfig | undefined, cwd: string): Array<{ cwd: string; extraUserRoots: string[] }> {
+  const normalizedCwd = path.resolve(cwd);
+  return normalizePerCwdExtraUserRoots(config).filter((entry) => entry.cwd === normalizedCwd);
+}
+
+async function loadCodexListedSkills(client: CodexClient, cwd: string, config?: OrcaConfig): Promise<LoadedSkill[]> {
+  const maybeRequest = Reflect.get(client as object, "request");
+  if (typeof maybeRequest !== "function") {
+    return [];
+  }
+
+  const request = maybeRequest as (method: string, params?: unknown, timeoutMs?: number) => Promise<unknown>;
+
+  const perCwdExtraUserRoots = getPerCwdExtraUserRootsForCwd(config, cwd);
+
+  let response: unknown;
+  try {
+    response = await request("skills/list", {
+      cwd,
+      forceReload: true,
+      ...(perCwdExtraUserRoots.length > 0 ? { perCwdExtraUserRoots } : {}),
+    });
+  } catch {
+    return [];
+  }
+
+  if (!response || typeof response !== "object" || !("data" in response) || !Array.isArray(response.data)) {
+    return [];
+  }
+
+  const discovered: LoadedSkill[] = [];
+
+  for (const entry of response.data as RawSkillsListEntry[]) {
+    if (!entry || typeof entry !== "object" || !Array.isArray(entry.skills)) {
+      continue;
+    }
+
+    for (const skill of entry.skills as RawSkill[]) {
+      if (!skill || typeof skill !== "object" || typeof skill.name !== "string" || typeof skill.path !== "string") {
+        continue;
+      }
+
+      const normalizedSkillPath = skill.path.trim();
+      if (normalizedSkillPath.length === 0) {
+        continue;
+      }
+
+      discovered.push({
+        name: skill.name,
+        description: "",
+        body: "",
+        dirPath: path.dirname(normalizedSkillPath),
+        filePath: normalizedSkillPath,
+      });
+    }
+  }
+
+  discovered.sort((a, b) => {
+    if (a.name < b.name) {
+      return -1;
+    }
+    if (a.name > b.name) {
+      return 1;
+    }
+    if (a.dirPath < b.dirPath) {
+      return -1;
+    }
+    if (a.dirPath > b.dirPath) {
+      return 1;
+    }
+    return 0;
+  });
+
+  return discovered;
+}
+
+async function resolveTurnSkills(client: CodexClient, config: OrcaConfig | undefined, cwd: string): Promise<LoadedSkill[]> {
+  const baseSkills = await loadSkills(config);
+
+  const listedSkills = await loadCodexListedSkills(client, cwd, config);
+
+  if (listedSkills.length === 0) {
+    return baseSkills;
+  }
+
+  const mergedByName = new Map<string, LoadedSkill>();
+  for (const skill of baseSkills) {
+    mergedByName.set(skill.name, skill);
+  }
+  for (const skill of listedSkills) {
+    if (!mergedByName.has(skill.name)) {
+      mergedByName.set(skill.name, skill);
+    }
+  }
+
+  return [...mergedByName.values()];
+}
+
 /**
  * Create a persistent Codex session. The thread persists across calls —
  * planSpec and executeTask share context within the same session.
@@ -299,7 +432,7 @@ export async function createCodexSession(
   let skills: LoadedSkill[];
   let threadId: string;
   try {
-    skills = await loadSkills(config);
+    skills = await resolveTurnSkills(client, config, cwd);
     const thread = await client.startThread({});
     threadId = thread.id;
   } catch (error) {

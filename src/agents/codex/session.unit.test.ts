@@ -116,6 +116,115 @@ describe("codex session code-simplifier guidance", () => {
   });
 });
 
+describe("codex session skill discovery", () => {
+  test("calls skills/list with forceReload and perCwdExtraUserRoots", async () => {
+    const requestMock = mock(async () => ({ data: [] }));
+
+    mock.module("@ratley/codex-client", () => ({
+      CodexClient: class {
+        async connect(): Promise<void> {}
+        async disconnect(): Promise<void> {}
+        async startThread(): Promise<{ id: string }> {
+          return { id: "thread-1" };
+        }
+        async runTurn(): Promise<{ agentMessage: string; turn: { status: "completed" }; items: [] }> {
+          return { agentMessage: "[]", turn: { status: "completed" }, items: [] };
+        }
+        request = requestMock;
+        async runReview(): Promise<{ reviewText: string }> {
+          return { reviewText: "ok" };
+        }
+      },
+    }));
+
+    mock.module("../../utils/skill-loader.js", () => ({
+      loadSkills: async () => [],
+    }));
+
+    const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
+    const cwd = process.cwd();
+    const session = await createCodexSession(cwd, {
+      codex: {
+        perCwdExtraUserRoots: [{ cwd, extraUserRoots: ["/tmp/extra-skills"] }],
+      },
+    });
+
+    try {
+      expect(requestMock).toHaveBeenCalledWith("skills/list", {
+        cwd,
+        forceReload: true,
+        perCwdExtraUserRoots: [{ cwd, extraUserRoots: ["/tmp/extra-skills"] }],
+      });
+    } finally {
+      await session.disconnect();
+    }
+  });
+
+  test("merges app-server listed skills after Orca-loaded skills without overriding deterministic precedence", async () => {
+    type TurnInputItem = { type: "text"; text: string } | { type: "skill"; name: string; path: string };
+
+    let capturedInput: TurnInputItem[] = [];
+
+    mock.module("@ratley/codex-client", () => ({
+      CodexClient: class {
+        async connect(): Promise<void> {}
+        async disconnect(): Promise<void> {}
+        async startThread(): Promise<{ id: string }> {
+          return { id: "thread-1" };
+        }
+        async runTurn(params: { input?: TurnInputItem[] }): Promise<{ agentMessage: string; turn: { status: "completed" }; items: [] }> {
+          capturedInput = params.input ?? [];
+          return { agentMessage: "[]", turn: { status: "completed" }, items: [] };
+        }
+        async request(): Promise<{ data: Array<{ skills: Array<{ name: string; path: string }> }> }> {
+          return {
+            data: [
+              {
+                skills: [
+                  { name: "zeta-skill", path: "/srv/zeta/zeta-skill/SKILL.md" },
+                  { name: "code-simplifier", path: "/srv/override/code-simplifier/SKILL.md" },
+                  { name: "alpha-skill", path: "/srv/alpha/alpha-skill/SKILL.md" },
+                ],
+              },
+            ],
+          };
+        }
+        async runReview(): Promise<{ reviewText: string }> {
+          return { reviewText: "ok" };
+        }
+      },
+    }));
+
+    mock.module("../../utils/skill-loader.js", () => ({
+      loadSkills: async () => [
+        {
+          name: "code-simplifier",
+          description: "desc",
+          body: "body",
+          dirPath: "/tmp/skills/code-simplifier",
+          filePath: "/tmp/skills/code-simplifier/SKILL.md",
+        },
+      ],
+    }));
+
+    const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
+    const session = await createCodexSession(process.cwd());
+
+    try {
+      await session.planSpec("spec", "context");
+
+      const skills = capturedInput.filter((item): item is { type: "skill"; name: string; path: string } => item.type === "skill");
+      expect(skills).toEqual([
+        { type: "skill", name: "code-simplifier", path: "/tmp/skills/code-simplifier" },
+        { type: "skill", name: "alpha-skill", path: "/srv/alpha/alpha-skill" },
+        { type: "skill", name: "zeta-skill", path: "/srv/zeta/zeta-skill" },
+      ]);
+    } finally {
+      await session.disconnect();
+    }
+  });
+});
+
 describe("codex session explicit skill input", () => {
   test("disconnects Codex client if skill loading fails during session creation", async () => {
     const disconnectMock = mock(async () => {});

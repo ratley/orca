@@ -134,6 +134,9 @@ export default {
   codex: {
     model: "gpt-5.3-codex",       // override the codex model
     multiAgent: true,              // enable codex multi-agent (see below)
+    perCwdExtraUserRoots: [        // optional app-server skill roots per cwd (skills/list)
+      { cwd: process.cwd(), extraUserRoots: ["/tmp/shared-skills"] }
+    ]
   },
   review: {
     plan: {
@@ -321,6 +324,8 @@ This repo ships a bundled default `code-simplifier` skill at `./.orca/skills/cod
 When Orca uses the Codex executor, each turn is sent with both:
 - a text input item (`{ type: "text", text: ... }`), and
 - explicit skill input items (`{ type: "skill", name, path }`) for every loaded skill in the same precedence order above.
+
+At session startup, Orca also calls Codex app-server `skills/list` with `forceReload: true` (and optional `codex.perCwdExtraUserRoots`) so additional app-server-visible skills can be appended deterministically without overriding Orca-local precedence.
 
 This keeps Codex skill loading deterministic instead of relying only on prompt/context pickup.
 

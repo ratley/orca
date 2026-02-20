@@ -182,6 +182,42 @@ describe("config-loader", () => {
     ).rejects.toThrow("Claude effort must be one of");
   });
 
+  test("resolveConfigFromPaths validates codex.perCwdExtraUserRoots shape", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(
+      cliPath,
+      "export default { codex: { perCwdExtraUserRoots: [{ cwd: '/repo', extraUserRoots: [123] }] } };\n",
+      "utf8"
+    );
+
+    await expect(
+      resolveConfigFromPaths(
+        path.join(tempDir, "missing-global.js"),
+        path.join(tempDir, "missing-project.js"),
+        cliPath
+      )
+    ).rejects.toThrow("Config.codex.perCwdExtraUserRoots[].extraUserRoots entries must be strings");
+  });
+
+  test("resolveConfigFromPaths accepts valid codex.perCwdExtraUserRoots", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(
+      cliPath,
+      "export default { codex: { perCwdExtraUserRoots: [{ cwd: '/repo', extraUserRoots: ['/tmp/skills'] }] } };\n",
+      "utf8"
+    );
+
+    const resolved = await resolveConfigFromPaths(
+      path.join(tempDir, "missing-global.js"),
+      path.join(tempDir, "missing-project.js"),
+      cliPath
+    );
+
+    expect(resolved?.codex?.perCwdExtraUserRoots).toEqual([
+      { cwd: "/repo", extraUserRoots: ["/tmp/skills"] },
+    ]);
+  });
+
   test("resolveConfigFromPaths merges global and project", async () => {
     const globalPath = path.join(tempDir, "global.config.js");
     const projectPath = path.join(tempDir, "project.config.js");

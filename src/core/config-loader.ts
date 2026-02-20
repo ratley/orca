@@ -139,6 +139,42 @@ function coerceConfig(candidate: unknown): OrcaConfig {
 
       parseCodexEffort(candidate.codex.effort);
     }
+
+    if ("perCwdExtraUserRoots" in candidate.codex && candidate.codex.perCwdExtraUserRoots !== undefined) {
+      if (!Array.isArray(candidate.codex.perCwdExtraUserRoots)) {
+        throw new Error(
+          `Config.codex.perCwdExtraUserRoots must be an array, got ${describeType(candidate.codex.perCwdExtraUserRoots)}`
+        );
+      }
+
+      for (const entry of candidate.codex.perCwdExtraUserRoots) {
+        if (!isObject(entry)) {
+          throw new Error(
+            `Config.codex.perCwdExtraUserRoots entries must be objects, got ${describeType(entry)}`
+          );
+        }
+
+        if (typeof entry.cwd !== "string") {
+          throw new Error(
+            `Config.codex.perCwdExtraUserRoots[].cwd must be a string, got ${describeType(entry.cwd)}`
+          );
+        }
+
+        if (!Array.isArray(entry.extraUserRoots)) {
+          throw new Error(
+            `Config.codex.perCwdExtraUserRoots[].extraUserRoots must be an array, got ${describeType(entry.extraUserRoots)}`
+          );
+        }
+
+        for (const root of entry.extraUserRoots) {
+          if (typeof root !== "string") {
+            throw new Error(
+              `Config.codex.perCwdExtraUserRoots[].extraUserRoots entries must be strings, got ${describeType(root)}`
+            );
+          }
+        }
+      }
+    }
   }
 
   if ("review" in candidate && candidate.review !== undefined) {

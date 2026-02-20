@@ -57,7 +57,12 @@ export default {
       validator: { auto: true }
     }
   },
-  codex: { multiAgent: false },
+  codex: {
+    multiAgent: false,
+    perCwdExtraUserRoots: [
+      { cwd: process.cwd(), extraUserRoots: ["/tmp/shared-skills"] }
+    ]
+  },
 };
 ```
 
@@ -71,4 +76,6 @@ export default {
 - Hook smoke harness: run `npm run smoke:hooks`
 - Run ID format: `<slug>-<unix-ms>-<hex4>`  (e.g. cobalt-summit-1708123456789-a3f2)
 - Bundled default skill: `<orca package root>/.orca/skills/code-simplifier/SKILL.md` (shipped with Orca and applied explicitly in planner/reviewer/executor prompts for all code-writing and code-review steps)
+- Codex session startup calls app-server `skills/list` with `forceReload: true`; app-server-discovered skills are appended without overriding Orca loader precedence
+- `codex.perCwdExtraUserRoots` can scope extra app-server skill roots to specific cwd values when needed
 - Use `orca answer` to unblock a waiting run
