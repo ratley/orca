@@ -1,19 +1,30 @@
 ---
-date: 2026-02-19T18:50:00Z
-session: codex-completion-fix
-agent: eve
+date: 2026-02-20T04:32:23Z
+session: orca-skills-list-dogfooding
+agent: orca (orchestrated by eve)
 ---
-## Fixed
-- Codex completion detection: added 12 POSITIVE_COMPLETION_PATTERNS for natural-language narration
-- Strengthened buildTaskExecutionPrompt JSON mandate (MUST / last line / no fences)
-- Strategy: Option C (patterns + prompt) — eliminates false-negative warnings
+
+## Implemented
+- `orca skills list` command — lists all loaded skills from config/project/global discovery paths
+- Shows: name, description, source, directory path in formatted table
+- Proper source detection by checking config paths vs standard directories
+- Empty skills case handled gracefully
 
 ## Changed
-- src/agents/codex/session.ts — POSITIVE_COMPLETION_PATTERNS + buildTaskExecutionPrompt
-
-## Config
-- Created ~/.orca/config.js with global hookCommands (onComplete, onError, onTaskFail, onMilestone)
+- src/cli/commands/skills.ts — new command handler with table formatting
+- src/cli/commands/skills.test.ts — comprehensive test suite (empty case, multi-source detection, CLI option passing)
+- src/cli/index.ts — registered skills command import and invocation
+- TODO.md — marked feature as complete
 
 ## Tests
-- 222 pass, 0 fail (bun test)
-- Build: tsc clean (bun run build)
+- 224 pass (was 222), 0 fail (bun test)
+- Build: tsc clean (npm run build)
+
+## Dogfooding Notes
+- First feature implemented via orca itself (dogfooding the CLI)
+- Codex review passed: type safety solid, ESM compliance correct, test coverage good
+- Ready for version bump + npm publish (0.2.11)
+
+## Next
+- Model flags (--codex-only / --claude-only) — similar dogfooding approach
+- Review cycles feature (maxReviewCycles config) — more complex, requires planner changes

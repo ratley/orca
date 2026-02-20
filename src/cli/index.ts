@@ -16,6 +16,7 @@ import { registerPrFinalizeCommand } from "./commands/pr-finalize.js";
 import { registerResumeCommand } from "./commands/resume.js";
 import { registerRunCommand } from "./commands/run.js";
 import { registerSetupCommand } from "./commands/setup.js";
+import { registerSkillsCommand } from "./commands/skills.js";
 import { registerStatusCommand } from "./commands/status.js";
 
 const program = new Command();
@@ -27,6 +28,7 @@ registerAnswerCommand(program);
 registerPlanCommand(program);
 registerStatusCommand(program);
 registerListCommand(program);
+registerSkillsCommand(program);
 registerResumeCommand(program);
 registerCancelCommand(program);
 registerPrCommand(program);

@@ -23,3 +23,8 @@
 - Model flags: `--codex-only` / `--claude-only` CLI flags for per-run executor override
 - Review → improvement step: pre-execution review that modifies the task graph
 - AGENTS.md / CLAUDE.md injection into planning context
+- Review cycle depth: `maxReviewCycles` config property + `--max-review-cycles <n>` CLI flag
+  - Controls how many back-and-forth exchanges between executor and reviewer are allowed
+  - Always ends with a review (reviewer has last word)
+  - Default: 1 (one exchange, one final review)
+  - Example: maxReviewCycles=2 means executor→reviewer→executor→reviewer
