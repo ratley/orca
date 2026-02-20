@@ -222,6 +222,15 @@ Run IDs are generated as:
 - Project: `./orca.config.js` or `./orca.config.ts`
 - Explicit: `--config <path>`
 
+### Project Instruction Files
+
+During planning, Orca automatically injects project instruction files when present:
+
+1. `AGENTS.md`
+2. `CLAUDE.md`
+
+Files are discovered from the project root (nearest `.git` from the spec/task context) and injected in that order.
+
 ### Run State Locations
 
 - Run status: `<runsDir>/<run-id>/status.json`
