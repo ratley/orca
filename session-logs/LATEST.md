@@ -1,54 +1,97 @@
 ---
-date: 2026-02-20T06:52:00Z
-session: orca-fix-full-test-suite
+date: 2026-02-19T23:58:00-08:00
+session: invalid-plan-hook
 agent: subagent
 ---
 
 ## Task
-Fix current full-suite failures so `npm test` passes with zero failing tests, then verify build.
+Add an invalid-plan hook event for planner/review graph rejection, wire CLI/config hook surfaces, add deterministic tests, run smoke + validation.
 
 ## Files changed
-- `package.json`
-- `src/hooks/adapters/stdout.ts`
-- `src/hooks/adapters/stdout.test.ts`
+- `src/types/index.ts`
+- `src/core/planner.ts`
+- `src/core/planner.test.ts`
+- `src/cli/commands/run.ts`
 - `src/cli/commands/run.test.ts`
+- `src/hooks/dispatcher.ts`
+- `src/hooks/dispatcher.test.ts`
+- `README.md`
 - `session-logs/LATEST.md`
 
-## Root causes and fixes
+## Hook added
+- Name: `onInvalidPlan`
+- Trigger semantics:
+  - Emitted from `run` command when `runPlanner(...)` throws `InvalidPlanError`
+  - `InvalidPlanError` is raised for:
+    - invalid planner DAG (`stage: "planner"`)
+    - invalid review payload / invalid reviewed DAG rejected with fail policy (`stage: "review"`)
+- Event payload:
+  - `hook: "onInvalidPlan"`
+  - `message: invalid-plan:<stage>`
+  - `error: <original validation/review error message>`
+  - `metadata.stage: "planner" | "review"`
 
-1. Source test drift / flaky global logging interception (`stdout.test`)
-- Root cause: test depended on mutating global `console.log`, which was vulnerable to cross-file mock interference during parallel test execution.
-- Fix:
-  - `createStdoutHookHandler` now accepts an optional writer function (default remains `console.log`).
-  - `stdout.test` now injects a local writer callback instead of patching global console.
+## Hook command/config surfaces wired
+- CLI (`orca run`):
+  - added `--on-invalid-plan <cmd>`
+- Config:
+  - `hookCommands.onInvalidPlan`
+  - `hooks.onInvalidPlan`
+- Dispatcher registration list updated to include `onInvalidPlan`.
 
-2. Source test flake in `run.test` (`no executor flags keeps resolved config executor`)
-- Root cause: cross-file mock interference around `../../core/config-loader.js` in full-suite runs.
-- Fix:
-  - In `loadRunModule()`, explicitly mock `resolveConfig` using a delegated call to the real resolver imported via cache-busted query param.
-  - Removed unnecessary mock of `../../hooks/adapters/stdout.js` from `run.test` to reduce shared-mock contamination.
+## Env vars available to hook commands
+Existing:
+- `ORCA_MSG`
+- `ORCA_RUN_ID`
+- `ORCA_TASK_ID`
 
-3. Dist test strategy mismatch (`dist/...session.test.js` with `./session.ts?test=` import errors)
-- Root cause: compiled `dist` test files are not safe to execute as part of source test runs (cache-busting `.ts?test=` imports survive transpile and fail in `dist`).
-- Fix:
-  - Changed npm test script from `bun test` to `bun test src` so only source test suite runs.
-  - This preserves intended source coverage while robustly excluding non-runnable transpiled test artifacts.
+Added:
+- `ORCA_HOOK`
+- `ORCA_ERROR`
+- `ORCA_STAGE` (from `event.metadata.stage` when present)
 
-## Commands run + exact outcomes
+## Deterministic tests added/updated (value-add)
+1. `src/core/planner.test.ts`
+   - validates `InvalidPlanError` classification:
+     - duplicate IDs => `stage: "planner"`
+     - invalid reviewed graph (cycle) => `stage: "review"`
+   - Value: proves trigger path classification is deterministic and stage-aware.
 
-1) `npm test --silent`
-- Outcome: ✅ pass
-- Final summary:
-  - `135 pass`
-  - `0 fail`
-  - `260 expect() calls`
-  - `Ran 135 tests across 22 files. [3.27s]`
+2. `src/cli/commands/run.test.ts`
+   - `dispatches onInvalidPlan hook when planner rejects invalid graph`
+   - Mocks planner invalid failure and verifies dispatched hook payload (`hook`, `message`, `error`, `metadata.stage`) and that execution does not proceed.
+   - Value: direct coverage of new hook trigger path in CLI flow.
+
+3. `src/hooks/dispatcher.test.ts`
+   - extends command env-var test to assert `ORCA_HOOK`, `ORCA_ERROR`, `ORCA_STAGE` propagation.
+   - Value: guarantees hook command surface receives expected context.
+
+## Smoke / targeted simulation commands + outcomes
+1) Review→improvement path uses reviewed graph:
+- Command:
+  - `bun test src/core/planner.test.ts -t "execution path uses reviewed graph from store"`
+- Outcome:
+  - pass
+  - log includes review mutation summary (`update_task`) and `Plan complete`
+
+2) Invalid plan triggers new hook:
+- Command:
+  - `bun test src/cli/commands/run.test.ts -t "dispatches onInvalidPlan hook when planner rejects invalid graph"`
+- Outcome:
+  - pass
+  - output includes `Review output invalid. cycle`
+  - assertions confirm `onInvalidPlan` dispatch + stage metadata
+
+## Validation commands + outcomes
+1) `npm run test --silent`
+- ✅ pass (`140 pass, 0 fail`)
 
 2) `npm run build --silent`
-- Outcome: ✅ pass
-- Output: `(no output)`
+- ✅ pass
 
-## Final status
-- `npm test`: ✅ 0 failing tests
-- `npm run build`: ✅ success
+3) `npm run validate`
+- ✅ feasible and passed (lint, type-aware lint, typecheck, tests, build)
+
+## Notes
+- Scope intentionally kept minimal to hook/event plumbing + deterministic coverage.
 - No commit/push performed.

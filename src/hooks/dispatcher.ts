@@ -75,7 +75,10 @@ export class HookDispatcher {
         ...process.env,
         ORCA_MSG: event.message,
         ORCA_RUN_ID: event.runId,
-        ORCA_TASK_ID: event.taskId ?? ""
+        ORCA_TASK_ID: event.taskId ?? "",
+        ORCA_HOOK: event.hook,
+        ORCA_ERROR: event.error ?? "",
+        ORCA_STAGE: typeof event.metadata?.stage === "string" ? event.metadata.stage : ""
       }
     });
   }

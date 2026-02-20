@@ -9,11 +9,15 @@
     "build": "tsc",
     "dev": "bun run src/cli/index.ts",
     "lint": "oxlint src/",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "node ./scripts/typecheck.mjs",
     "test": "bun test src",
     "start": "bun run src/cli/index.ts",
     "prepare": "husky",
-    "postbuild": "chmod +x dist/cli/index.js"
+    "postbuild": "chmod +x dist/cli/index.js",
+    "lint:type-aware": "oxlint --type-aware --type-check --deny-warnings src/ --ignore-pattern \"**/*.test.ts\"",
+    "typecheck:native": "tsgo --noEmit",
+    "typecheck:tsc": "tsc --noEmit",
+    "validate": "npm run lint && npm run lint:type-aware && npm run typecheck && npm run test && npm run build"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.47",
@@ -27,8 +31,10 @@
     "@types/bun": "^1.2.21",
     "husky": "^9.1.7",
     "lint-staged": "^16.2.0",
-    "oxlint": "^0.15.14",
-    "typescript": "^5.8.2"
+    "oxlint": "^1.49.0",
+    "typescript": "^5.8.2",
+    "@typescript/native-preview": "^7.0.0-dev.20260219.1",
+    "oxlint-tsgolint": "^0.14.1"
   },
   "lint-staged": {
     "*.ts": [

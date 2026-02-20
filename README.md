@@ -22,7 +22,17 @@ Start with a plain-language goal:
 orca "add auth to the app"
 ```
 
-Orca will create a run, plan tasks, execute them, and persist run state.
+Orca will create a run, plan tasks, run a pre-execution review/improvement pass on the task graph, execute the reviewed graph, and persist run state.
+
+### Pre-execution review-improvement stage
+
+After planning, Orca runs a structured review pass that can edit the task graph before execution starts. The review output is schema-validated and supports concrete graph operations:
+
+- update task fields (`name`, `description`, `acceptance_criteria`)
+- add/remove task
+- add/remove dependency
+
+The edited graph is re-validated as a DAG. If review output is invalid, Orca fails with an actionable error by default. You can configure `review.onInvalid: "warn_skip"` to log a warning and continue with the original planner graph.
 
 ## Spec And Plan Files
 
@@ -92,6 +102,10 @@ export default {
   codex: {
     model: "gpt-5.3-codex",       // override the codex model
     multiAgent: true,              // enable codex multi-agent (see below)
+  },
+  review: {
+    enabled: true,                 // default true
+    onInvalid: "fail"             // or "warn_skip"
   }
 };
 ```
@@ -135,6 +149,7 @@ Global:
 - `--on-milestone <cmd>`
 - `--on-task-complete <cmd>`
 - `--on-task-fail <cmd>`
+- `--on-invalid-plan <cmd>`
 - `--on-complete <cmd>`
 - `--on-error <cmd>`
 
@@ -204,6 +219,7 @@ Hook names:
 - `onMilestone`
 - `onTaskComplete`
 - `onTaskFail`
+- `onInvalidPlan`
 - `onComplete`
 - `onError`
 
@@ -239,8 +255,54 @@ Files are discovered from the project root (nearest `.git` from the spec/task co
 
 ## Development
 
+Install dependencies with npm (primary lockfile):
+
 ```bash
-bun install
-bun test
-bun run src/cli/index.ts "your goal here"
+npm install
 ```
+
+Run local development and tests with Bun (faster runtime for this project):
+
+```bash
+bun run src/cli/index.ts "your goal here"
+bun test src
+```
+
+## Validation pipeline
+
+Use the full validation gate before opening/publishing changes:
+
+```bash
+npm run validate
+```
+
+This runs, in order:
+
+1. `npm run lint` (Oxlint syntax/style/static rules)
+2. `npm run lint:type-aware` (Oxlint + tsgolint alpha type-aware + type-check diagnostics)
+3. `npm run typecheck` (TypeScript Native Preview via `tsgo --noEmit`, with environment fallback to `tsc --noEmit`)
+4. `npm run test`
+5. `npm run build`
+
+`npm run build` remains `tsc` because the native preview compiler is used here as a fast typecheck gate; production JS emission stays on stable `typescript` for predictable package output.
+
+## Package manager + lockfile policy
+
+Orca uses a mixed runtime/tooling model on purpose:
+
+- **npm is canonical for dependency resolution, release builds, and deterministic installs**.
+- **Bun is used as a runtime/test runner in local workflows** (`dev`, `start`, `test`).
+
+Commit both lockfiles:
+
+- `package-lock.json` — canonical dependency graph for npm/CI/publish
+- `bun.lock` — Bun runtime resolution parity for local Bun commands
+
+When dependencies change, update both lockfiles in the same PR:
+
+```bash
+npm install
+bun install
+```
+
+This keeps npm and Bun behavior aligned without forcing a disruptive full migration.

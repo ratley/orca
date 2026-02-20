@@ -1,7 +1,15 @@
 import { CodexClient } from "@ratley/codex-client";
 import type { CompletedTurn } from "@ratley/codex-client";
 
-import type { OrcaConfig, PlanResult, Task, TaskExecutionResult } from "../../types/index.js";
+import type {
+  OrcaConfig,
+  PlanResult,
+  Task,
+  TaskExecutionResult,
+  TaskGraphReviewOperation,
+  TaskGraphReviewResult
+} from "../../types/index.js";
+import { TaskGraphReviewPayloadSchema } from "../../core/task-graph-review.js";
 import type { CodexEffort } from "../../types/effort.js";
 
 export type { PlanResult, TaskExecutionResult };
@@ -47,6 +55,39 @@ function buildTaskExecutionPrompt(
     '{"outcome":"failed","error":"short reason"}',
     "Do not wrap it in markdown fences. Do not add any text after the JSON line. The JSON line is required.",
   ].join("\n\n");
+}
+
+function buildTaskGraphReviewPrompt(tasks: Task[], systemContext: string): string {
+  return [
+    systemContext,
+    "You are Orca's pre-execution task-graph reviewer.",
+    "Return JSON matching this shape exactly: {\"changes\":[...operations...]}",
+    "Allowed operation shapes:",
+    "- {\"op\":\"update_task\",\"taskId\":\"...\",\"fields\":{\"name\"?:string,\"description\"?:string,\"acceptance_criteria\"?:string[]}}",
+    "- {\"op\":\"add_task\",\"task\":<full task object>}",
+    "- {\"op\":\"remove_task\",\"taskId\":\"...\"}",
+    "- {\"op\":\"add_dependency\",\"taskId\":\"...\",\"dependsOn\":\"...\"}",
+    "- {\"op\":\"remove_dependency\",\"taskId\":\"...\",\"dependsOn\":\"...\"}",
+    "Return ONLY JSON. No markdown.",
+    "Current task graph:",
+    JSON.stringify(tasks, null, 2),
+  ].join("\n\n");
+}
+
+function parseTaskGraphReview(raw: string): TaskGraphReviewResult {
+  const parsed = JSON.parse(extractJson(raw)) as unknown;
+  const result = TaskGraphReviewPayloadSchema.safeParse(parsed);
+  if (!result.success) {
+    const details = result.error.issues
+      .map((issue) => `${issue.path.length > 0 ? issue.path.join(".") : "<root>"}: ${issue.message}`)
+      .join("; ");
+    throw new Error(`Codex review response failed schema validation. ${details}`);
+  }
+
+  return {
+    changes: result.data.changes as TaskGraphReviewOperation[],
+    rawResponse: raw,
+  };
 }
 
 function extractAgentText(result: CompletedTurn): string {
@@ -214,6 +255,7 @@ export async function createCodexSession(
   config?: OrcaConfig,
 ): Promise<{
   planSpec: (spec: string, systemContext: string) => Promise<PlanResult>;
+  reviewTaskGraph: (tasks: Task[], systemContext: string) => Promise<TaskGraphReviewResult>;
   executeTask: (task: Task, runId: string, systemContext?: string) => Promise<TaskExecutionResult>;
   consultTaskGraph: (tasks: Task[]) => Promise<ConsultationResult>;
   reviewChanges: (threadId?: string) => Promise<string>;
@@ -258,6 +300,23 @@ export async function createCodexSession(
         tasks: parseTaskArray(rawResponse),
         rawResponse,
       };
+    },
+
+    async reviewTaskGraph(tasks: Task[], systemContext: string): Promise<TaskGraphReviewResult> {
+      const effort = getEffort(config);
+      const result = effort
+        ? await client.runTurn({
+            threadId,
+            effort,
+            input: [{ type: "text", text: buildTaskGraphReviewPrompt(tasks, systemContext) }],
+          })
+        : await client.runTurn({
+            threadId,
+            input: [{ type: "text", text: buildTaskGraphReviewPrompt(tasks, systemContext) }],
+          });
+
+      const rawResponse = extractAgentText(result);
+      return parseTaskGraphReview(rawResponse);
     },
 
     async executeTask(
@@ -384,6 +443,20 @@ export async function planSpec(
 
   try {
     return await session.planSpec(spec, systemContext);
+  } finally {
+    await session.disconnect();
+  }
+}
+
+export async function reviewTaskGraph(
+  tasks: Task[],
+  systemContext: string,
+  config?: OrcaConfig,
+): Promise<TaskGraphReviewResult> {
+  const session = await createCodexSession(process.cwd(), config);
+
+  try {
+    return await session.reviewTaskGraph(tasks, systemContext);
   } finally {
     await session.disconnect();
   }

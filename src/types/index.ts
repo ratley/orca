@@ -61,6 +61,7 @@ export type HookName =
   | "onMilestone"
   | "onTaskComplete"
   | "onTaskFail"
+  | "onInvalidPlan"
   | "onComplete"
   | "onError";
 
@@ -87,6 +88,40 @@ export interface TaskExecutionResult {
   outcome: "done" | "failed";
   rawResponse: string;
   error?: string;
+}
+
+export type TaskGraphReviewOperation =
+  | {
+    op: "update_task";
+    taskId: string;
+    fields: {
+      name?: string;
+      description?: string;
+      acceptance_criteria?: string[];
+    };
+  }
+  | {
+    op: "add_task";
+    task: Task;
+  }
+  | {
+    op: "remove_task";
+    taskId: string;
+  }
+  | {
+    op: "add_dependency";
+    taskId: string;
+    dependsOn: string;
+  }
+  | {
+    op: "remove_dependency";
+    taskId: string;
+    dependsOn: string;
+  };
+
+export interface TaskGraphReviewResult {
+  changes: TaskGraphReviewOperation[];
+  rawResponse: string;
 }
 
 export interface OrcaConfig {
@@ -117,5 +152,9 @@ export interface OrcaConfig {
   pr?: {
     enabled?: boolean;
     requireConfirmation?: boolean;
+  };
+  review?: {
+    enabled?: boolean;
+    onInvalid?: "fail" | "warn_skip";
   };
 }

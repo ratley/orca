@@ -47,19 +47,20 @@ describe("HookDispatcher", () => {
     const outputPath = path.join(tempDir, "hook-output.txt");
     const dispatcher = new HookDispatcher({
       commandHooks: {
-        onMilestone: `if [ "{runId}" = "$ORCA_RUN_ID" ]; then printf '%s|%s|%s' "$ORCA_MSG" "$ORCA_RUN_ID" "$ORCA_TASK_ID" > "${outputPath}"; fi`
+        onMilestone: `if [ "{runId}" = "$ORCA_RUN_ID" ]; then printf '%s|%s|%s|%s|%s|%s' "$ORCA_MSG" "$ORCA_RUN_ID" "$ORCA_TASK_ID" "$ORCA_HOOK" "$ORCA_ERROR" "$ORCA_STAGE" > "${outputPath}"; fi`
       }
     });
 
     await dispatcher.dispatch(
       makeEvent({
         message: "hello $(whoami) && keep-literal",
-        taskId: "task-9"
+        taskId: "task-9",
+        metadata: { stage: "review" }
       })
     );
 
     const output = await fs.readFile(outputPath, "utf8");
-    expect(output).toBe("hello $(whoami) && keep-literal|run-1000-abcd|task-9");
+    expect(output).toBe("hello $(whoami) && keep-literal|run-1000-abcd|task-9|onMilestone||review");
   });
 
   test("handler error triggers onError", async () => {

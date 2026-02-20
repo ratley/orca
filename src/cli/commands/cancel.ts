@@ -57,7 +57,7 @@ export async function cancelCommandHandler(options: CancelCommandOptions): Promi
   }
 
   const cancelledAt = new Date().toISOString();
-  let cancelledTaskId: string | null = null;
+  let cancelledTaskId: string | undefined;
 
   const tasks = run.tasks.map((task) => {
     if (task.status === "in_progress") {

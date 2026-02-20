@@ -5,7 +5,7 @@ import { promises as fs } from "node:fs";
 
 import type { Task } from "../types/index";
 import { RunStore } from "../state/store";
-import { runPlanner, setPlanSpecForTests } from "./planner";
+import { InvalidPlanError, runPlanner, setPlanSpecForTests, setReviewTaskGraphForTests } from "./planner";
 
 describe("runPlanner task graph validation", () => {
   let tempDir: string;
@@ -32,10 +32,12 @@ describe("runPlanner task graph validation", () => {
     await fs.writeFile(specPath, "# test spec\n", "utf8");
     store = new RunStore(path.join(tempDir, "runs"));
     await store.createRun(runId, specPath);
+    setReviewTaskGraphForTests(async () => ({ changes: [], rawResponse: '{"changes":[]}' }));
   });
 
   afterEach(async () => {
     setPlanSpecForTests(null);
+    setReviewTaskGraphForTests(null);
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
@@ -56,7 +58,14 @@ describe("runPlanner task graph validation", () => {
 
     setPlanSpecForTests(async () => ({ tasks, rawResponse: JSON.stringify(tasks) }));
 
-    await expect(runPlanner(specPath, store, runId)).rejects.toThrow("Duplicate task id");
+    try {
+      await runPlanner(specPath, store, runId);
+      throw new Error("expected runPlanner to throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(InvalidPlanError);
+      expect((error as InvalidPlanError).stage).toBe("planner");
+      expect((error as Error).message).toContain("Duplicate task id");
+    }
   });
 
   test("rejects missing dependency IDs", async () => {
@@ -93,6 +102,76 @@ describe("runPlanner task graph validation", () => {
     setPlanSpecForTests(async () => ({ tasks, rawResponse: JSON.stringify(tasks) }));
 
     await expect(runPlanner(specPath, store, runId)).rejects.toThrow("cycle");
+  });
+
+  test("review returns no changes", async () => {
+    setPlanSpecForTests(async () => ({ tasks: baseTasks, rawResponse: JSON.stringify(baseTasks) }));
+    setReviewTaskGraphForTests(async () => ({ changes: [], rawResponse: '{"changes":[]}' }));
+
+    await runPlanner(specPath, store, runId);
+
+    const run = await store.getRun(runId);
+    expect(run?.tasks).toEqual(baseTasks);
+  });
+
+  test("review applies valid changes", async () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: "t1", name: "Original" },
+      { ...baseTask, id: "t2", name: "Second", dependencies: ["t1"] }
+    ];
+
+    setPlanSpecForTests(async () => ({ tasks, rawResponse: JSON.stringify(tasks) }));
+    setReviewTaskGraphForTests(async () => ({
+      changes: [
+        { op: "update_task", taskId: "t1", fields: { name: "Renamed" } },
+        { op: "add_task", task: { ...baseTask, id: "t3", name: "Third", dependencies: ["t2"] } },
+        { op: "add_dependency", taskId: "t2", dependsOn: "t1" }
+      ],
+      rawResponse: "review"
+    }));
+
+    await runPlanner(specPath, store, runId);
+
+    const run = await store.getRun(runId);
+    expect(run?.tasks.map((task) => task.id)).toEqual(["t1", "t2", "t3"]);
+    expect(run?.tasks.find((task) => task.id === "t1")?.name).toBe("Renamed");
+  });
+
+  test("review output causes invalid DAG and is rejected", async () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: "t1", dependencies: [] },
+      { ...baseTask, id: "t2", dependencies: ["t1"] }
+    ];
+
+    setPlanSpecForTests(async () => ({ tasks, rawResponse: JSON.stringify(tasks) }));
+    setReviewTaskGraphForTests(async () => ({
+      changes: [{ op: "add_dependency", taskId: "t1", dependsOn: "t2" }],
+      rawResponse: "review"
+    }));
+
+    try {
+      await runPlanner(specPath, store, runId);
+      throw new Error("expected runPlanner to throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(InvalidPlanError);
+      expect((error as InvalidPlanError).stage).toBe("review");
+      expect((error as Error).message).toContain("cycle");
+    }
+  });
+
+  test("execution path uses reviewed graph from store", async () => {
+    setPlanSpecForTests(async () => ({ tasks: baseTasks, rawResponse: JSON.stringify(baseTasks) }));
+    setReviewTaskGraphForTests(async () => ({
+      changes: [
+        { op: "update_task", taskId: "t1", fields: { name: "Reviewed Task" } }
+      ],
+      rawResponse: "review"
+    }));
+
+    await runPlanner(specPath, store, runId);
+
+    const run = await store.getRun(runId);
+    expect(run?.tasks[0]?.name).toBe("Reviewed Task");
   });
 
   test("injects loaded skills into planning system context", async () => {

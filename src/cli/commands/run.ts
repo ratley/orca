@@ -9,7 +9,7 @@ import { InvalidArgumentError, type Command } from "commander";
 import { createCodexSession } from "../../agents/codex/session.js";
 import { ensureCodexMultiAgent } from "../../core/codex-config.js";
 import { resolveConfig } from "../../core/config-loader.js";
-import { runPlanner } from "../../core/planner.js";
+import { InvalidPlanError, runPlanner } from "../../core/planner.js";
 import { runTaskRunner } from "../../core/task-runner.js";
 import { createOpenclawHookHandler, detectOpenclawAvailability } from "../../hooks/adapters/openclaw.js";
 import { createStdoutHookHandler } from "../../hooks/adapters/stdout.js";
@@ -33,6 +33,7 @@ export interface RunCommandOptions {
   onMilestone?: string;
   onTaskComplete?: string;
   onTaskFail?: string;
+  onInvalidPlan?: string;
   onComplete?: string;
   onError?: string;
 }
@@ -41,6 +42,7 @@ const ALL_HOOKS: HookName[] = [
   "onMilestone",
   "onTaskComplete",
   "onTaskFail",
+  "onInvalidPlan",
   "onComplete",
   "onError"
 ];
@@ -48,6 +50,7 @@ const VALID_HOOK_NAMES = new Set<HookName>([
   "onMilestone",
   "onTaskComplete",
   "onTaskFail",
+  "onInvalidPlan",
   "onComplete",
   "onError"
 ]);
@@ -90,6 +93,7 @@ function buildCliCommandHooks(options: RunCommandOptions): Partial<Record<HookNa
     ...(options.onMilestone ? { onMilestone: options.onMilestone } : {}),
     ...(options.onTaskComplete ? { onTaskComplete: options.onTaskComplete } : {}),
     ...(options.onTaskFail ? { onTaskFail: options.onTaskFail } : {}),
+    ...(options.onInvalidPlan ? { onInvalidPlan: options.onInvalidPlan } : {}),
     ...(options.onComplete ? { onComplete: options.onComplete } : {}),
     ...(options.onError ? { onError: options.onError } : {})
   };
@@ -167,12 +171,6 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
     const store = createStore();
     await store.createRun(runId, specPath);
 
-    await runPlanner(specPath, store, runId, effectiveConfig);
-    await store.updateRun(runId, {
-      mode: "run",
-      overallStatus: "running"
-    });
-
     const cliCommandHooks = buildCliCommandHooks(options);
     const dispatcher = new HookDispatcher({
       commandHooks: {
@@ -219,6 +217,30 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
     const emitHook = async (event: HookEvent): Promise<void> => {
       await dispatcher.dispatch(event);
     };
+
+    try {
+      await runPlanner(specPath, store, runId, effectiveConfig);
+    } catch (error) {
+      if (error instanceof InvalidPlanError) {
+        await emitHook({
+          runId: runId as HookEvent["runId"],
+          hook: "onInvalidPlan",
+          message: `invalid-plan:${error.stage}`,
+          timestamp: new Date().toISOString(),
+          error: error.message,
+          metadata: {
+            stage: error.stage
+          }
+        });
+      }
+
+      throw error;
+    }
+
+    await store.updateRun(runId, {
+      mode: "run",
+      overallStatus: "running"
+    });
 
     const executor = effectiveConfig?.executor ?? "codex";
     if (executor === "codex") {
@@ -326,6 +348,7 @@ export function registerRunCommand(program: Command): void {
     .option("--on-milestone <cmd>", "Shell hook command for onMilestone")
     .option("--on-task-complete <cmd>", "Shell hook command for onTaskComplete")
     .option("--on-task-fail <cmd>", "Shell hook command for onTaskFail")
+    .option("--on-invalid-plan <cmd>", "Shell hook command for onInvalidPlan")
     .option("--on-complete <cmd>", "Shell hook command for onComplete")
     .option("--on-error <cmd>", "Shell hook command for onError")
     .action(async (goal: string | undefined, commandOptions: RunCommandOptions) => {

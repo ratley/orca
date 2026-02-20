@@ -74,8 +74,13 @@ function coerceConfig(candidate: unknown): OrcaConfig {
 
   if ("executor" in candidate && candidate.executor !== undefined) {
     if (candidate.executor !== "claude" && candidate.executor !== "codex") {
+      const executorDisplay =
+        typeof candidate.executor === "string"
+          ? candidate.executor
+          : (JSON.stringify(candidate.executor) ?? describeType(candidate.executor));
+
       throw new Error(
-        `Config.executor must be 'claude' or 'codex', got ${String(candidate.executor)}`
+        `Config.executor must be 'claude' or 'codex', got ${executorDisplay}`
       );
     }
   }
@@ -109,6 +114,26 @@ function coerceConfig(candidate: unknown): OrcaConfig {
       }
 
       parseCodexEffort(candidate.codex.effort);
+    }
+  }
+
+  if ("review" in candidate && candidate.review !== undefined) {
+    if (!isObject(candidate.review)) {
+      throw new Error(`Config.review must be an object, got ${describeType(candidate.review)}`);
+    }
+
+    if ("enabled" in candidate.review && candidate.review.enabled !== undefined && typeof candidate.review.enabled !== "boolean") {
+      throw new Error(`Config.review.enabled must be a boolean, got ${describeType(candidate.review.enabled)}`);
+    }
+
+    if ("onInvalid" in candidate.review && candidate.review.onInvalid !== undefined) {
+      if (candidate.review.onInvalid !== "fail" && candidate.review.onInvalid !== "warn_skip") {
+        const onInvalidDisplay =
+          typeof candidate.review.onInvalid === "string"
+            ? candidate.review.onInvalid
+            : (JSON.stringify(candidate.review.onInvalid) ?? describeType(candidate.review.onInvalid));
+        throw new Error(`Config.review.onInvalid must be 'fail' or 'warn_skip', got ${onInvalidDisplay}`);
+      }
     }
   }
 
@@ -160,6 +185,10 @@ export function mergeConfigs(...configs: Array<OrcaConfig | undefined>): OrcaCon
 
     if (merged.pr !== undefined || config.pr !== undefined) {
       merged.pr = { ...merged.pr, ...config.pr };
+    }
+
+    if (merged.review !== undefined || config.review !== undefined) {
+      merged.review = { ...merged.review, ...config.review };
     }
 
     if (merged.hooks !== undefined || config.hooks !== undefined) {

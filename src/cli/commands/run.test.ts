@@ -33,9 +33,22 @@ async function loadRunModule(): Promise<{
   runTaskRunnerMock: ReturnType<typeof mock>;
   createCodexSessionMock: ReturnType<typeof mock>;
   ensureCodexMultiAgentMock: ReturnType<typeof mock>;
+  hookDispatchMock: ReturnType<typeof mock>;
+  InvalidPlanErrorCtor: new (stage: "planner" | "review", message: string) => Error;
 }> {
   const runPlannerMock = mock(async () => {});
   const runTaskRunnerMock = mock(async () => {});
+  const hookDispatchMock = mock(async () => {});
+
+  class TestInvalidPlanError extends Error {
+    stage: "planner" | "review";
+
+    constructor(stage: "planner" | "review", message: string) {
+      super(message);
+      this.stage = stage;
+      this.name = "InvalidPlanError";
+    }
+  }
   const { resolveConfig: realResolveConfig } = await import(`../../core/config-loader.js?real=${Math.random()}`);
   const resolveConfigMock = mock((configPath?: string) => realResolveConfig(configPath));
   const ensureCodexMultiAgentMock = mock(async () => ({
@@ -50,7 +63,8 @@ async function loadRunModule(): Promise<{
   }));
 
   mock.module("../../core/planner.js", () => ({
-    runPlanner: runPlannerMock
+    runPlanner: runPlannerMock,
+    InvalidPlanError: TestInvalidPlanError
   }));
   mock.module("../../core/task-runner.js", () => ({
     runTaskRunner: runTaskRunnerMock
@@ -71,7 +85,9 @@ async function loadRunModule(): Promise<{
   mock.module("../../hooks/dispatcher.js", () => ({
     HookDispatcher: class {
       on(): void {}
-      async dispatch(): Promise<void> {}
+      async dispatch(event: unknown): Promise<void> {
+        await (hookDispatchMock as (value: unknown) => Promise<void>)(event);
+      }
     }
   }));
   mock.module("../../utils/ids.js", () => ({
@@ -79,7 +95,15 @@ async function loadRunModule(): Promise<{
   }));
 
   const runModule = await import(`./run.js?test=${Math.random()}`);
-  return { runModule, runPlannerMock, runTaskRunnerMock, createCodexSessionMock, ensureCodexMultiAgentMock };
+  return {
+    runModule,
+    runPlannerMock,
+    runTaskRunnerMock,
+    createCodexSessionMock,
+    ensureCodexMultiAgentMock,
+    hookDispatchMock,
+    InvalidPlanErrorCtor: TestInvalidPlanError
+  };
 }
 
 async function parseRun(
@@ -148,6 +172,25 @@ describe("run command executor flags", () => {
         claudeOnly: true
       })
     ).rejects.toThrow("--codex-only and --claude-only are mutually exclusive");
+  });
+
+  test("dispatches onInvalidPlan hook when planner rejects invalid graph", async () => {
+    const { runModule, runPlannerMock, hookDispatchMock, runTaskRunnerMock, InvalidPlanErrorCtor } = await loadRunModule();
+
+    runPlannerMock.mockImplementationOnce(async () => {
+      throw new InvalidPlanErrorCtor("review", "Review output invalid. cycle");
+    });
+
+    await parseRun(runModule, ["run", "--task", "x"]);
+    expect(process.exitCode).toBe(1);
+    const invalidPlanEvent = hookDispatchMock.mock.calls.find(
+      (call) => (call[0] as { hook?: string })?.hook === "onInvalidPlan"
+    )?.[0] as { hook: string; message: string; error?: string; metadata?: { stage?: string } } | undefined;
+
+    expect(invalidPlanEvent?.message).toBe("invalid-plan:review");
+    expect(invalidPlanEvent?.error).toContain("cycle");
+    expect(invalidPlanEvent?.metadata?.stage).toBe("review");
+    expect(runTaskRunnerMock).not.toHaveBeenCalled();
   });
 
   test("applies --codex-effort to effective codex config", async () => {

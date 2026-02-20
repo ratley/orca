@@ -1,7 +1,15 @@
 import { query, type Query } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 
-import type { OrcaConfig, PlanResult, Task, TaskExecutionResult } from "../../types/index.js";
+import type {
+  OrcaConfig,
+  PlanResult,
+  Task,
+  TaskExecutionResult,
+  TaskGraphReviewOperation,
+  TaskGraphReviewResult
+} from "../../types/index.js";
+import { TaskGraphReviewPayloadSchema } from "../../core/task-graph-review.js";
 import type { ClaudeEffort } from "../../types/effort.js";
 import { parseAgentJson } from "../../utils/agent-json.js";
 
@@ -117,6 +125,25 @@ const EXECUTION_OUTPUT_FORMAT = {
   schema: EXECUTION_OUTPUT_SCHEMA,
 };
 
+const REVIEW_OUTPUT_SCHEMA: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["changes"],
+  properties: {
+    changes: {
+      type: "array",
+      items: {
+        type: "object"
+      }
+    }
+  }
+};
+
+const REVIEW_OUTPUT_FORMAT = {
+  type: "json_schema" as const,
+  schema: REVIEW_OUTPUT_SCHEMA,
+};
+
 function buildPlanningPrompt(spec: string, systemContext: string): string {
   return [
     systemContext,
@@ -148,6 +175,30 @@ function buildTaskExecutionPrompt(
     "Use the configured structured output schema only.",
     "If you cannot complete the task, set outcome=failed and provide a concise error.",
   ].join("\n\n");
+}
+
+function buildTaskGraphReviewPrompt(tasks: Task[], systemContext: string): string {
+  return [
+    systemContext,
+    "You are Orca's pre-execution task-graph reviewer.",
+    "Return only structured review operations in the configured schema.",
+    "Allowed operations: update_task (name/description/acceptance_criteria), add_task, remove_task, add_dependency, remove_dependency.",
+    "Return an empty changes array if no edits are needed.",
+    "Current task graph JSON:",
+    JSON.stringify(tasks, null, 2)
+  ].join("\n\n");
+}
+
+function parseStructuredTaskGraphReviewPayload(payload: unknown, rawResponse = ""): TaskGraphReviewResult {
+  const result = TaskGraphReviewPayloadSchema.safeParse(payload);
+  if (!result.success) {
+    throw formatSchemaError("Claude structured review payload failed schema validation", result.error);
+  }
+
+  return {
+    changes: result.data.changes as TaskGraphReviewOperation[],
+    rawResponse
+  };
 }
 
 function extractAssistantText(message: unknown): string | null {
@@ -310,7 +361,7 @@ function shouldAllowTextJsonFallback(config?: OrcaConfig): boolean {
   return env === "1" || env === "true";
 }
 
-function throwMissingStructuredOutput(kind: "planner" | "task execution"): never {
+function throwMissingStructuredOutput(kind: "planner" | "task execution" | "review"): never {
   throw new Error(
     `Claude structured_output missing for ${kind}. Refusing freeform JSON parsing on critical path. ` +
       "Set ORCA_CLAUDE_ALLOW_TEXT_JSON_FALLBACK=1 (or config.claude.allowTextJsonFallback=true) to temporarily enable fallback.",
@@ -342,6 +393,29 @@ export async function planSpec(spec: string, systemContext: string, config?: Orc
       tasks: parseTaskArray(rawResponse),
       rawResponse,
     };
+  } finally {
+    claudeQuery.close();
+  }
+}
+
+export async function reviewTaskGraph(
+  tasks: Task[],
+  systemContext: string,
+  config?: OrcaConfig,
+): Promise<TaskGraphReviewResult> {
+  const claudeQuery = query({
+    prompt: buildTaskGraphReviewPrompt(tasks, systemContext),
+    options: buildClaudeQueryOptions(config, REVIEW_OUTPUT_FORMAT),
+  });
+
+  try {
+    const { rawResponse, structuredOutput } = await collectSessionResult(claudeQuery);
+
+    if (structuredOutput === undefined) {
+      throwMissingStructuredOutput("review");
+    }
+
+    return parseStructuredTaskGraphReviewPayload(structuredOutput, rawResponse);
   } finally {
     claudeQuery.close();
   }

@@ -1,8 +1,8 @@
-function tryParseJson(input: string): unknown | null {
+function tryParseJson(input: string): unknown {
   try {
     return JSON.parse(input);
   } catch {
-    return null;
+    return undefined;
   }
 }
 
@@ -66,7 +66,7 @@ function extractFirstJsonObjectOrArray(text: string): string | null {
         depth -= 1;
         if (depth === 0) {
           const candidate = text.slice(start, end + 1).trim();
-          if (tryParseJson(candidate) !== null) {
+          if (tryParseJson(candidate) !== undefined) {
             return candidate;
           }
           break;
@@ -93,7 +93,7 @@ export function parseAgentJson(raw: string): unknown {
 
   for (const candidate of candidates) {
     const parsed = tryParseJson(candidate);
-    if (parsed !== null) {
+    if (parsed !== undefined) {
       return parsed;
     }
   }
