@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
-import { mergeConfigs, resolveConfigFromPaths } from "./config-loader.js";
+import { mergeConfigs, resolveConfig, resolveConfigFromPaths } from "./config-loader.js";
 
 describe("config-loader", () => {
   let tempDir: string;
@@ -24,6 +24,18 @@ describe("config-loader", () => {
       process.env.HOME = originalHome;
     }
     await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  test("resolveConfig prefers project ts config over project js config when both exist", async () => {
+    process.chdir(tempDir);
+    process.env.HOME = tempDir;
+
+    await fs.writeFile(path.join(tempDir, "orca.config.js"), "export default { runsDir: 'from-js' };\n", "utf8");
+    await fs.writeFile(path.join(tempDir, "orca.config.ts"), "export default { runsDir: 'from-ts' };\n", "utf8");
+
+    const resolved = await resolveConfig();
+
+    expect(resolved?.runsDir).toBe("from-ts");
   });
 
   test("resolveConfigFromPaths returns undefined when no configs exist", async () => {
@@ -64,6 +76,58 @@ describe("config-loader", () => {
         cliPath
       )
     ).rejects.toThrow("Config.executor must be 'claude' or 'codex', got invalid-executor");
+  });
+
+  test("resolveConfigFromPaths rejects unknown hookCommands keys", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(cliPath, "export default { hookCommands: { onMystery: 'echo nope' } };\n", "utf8");
+
+    await expect(
+      resolveConfigFromPaths(
+        path.join(tempDir, "missing-global.js"),
+        path.join(tempDir, "missing-project.js"),
+        cliPath
+      )
+    ).rejects.toThrow("Unknown hook key in Config.hookCommands: onMystery");
+  });
+
+  test("resolveConfigFromPaths rejects unknown hooks keys", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(cliPath, "export default { hooks: { onMystery: async () => {} } };\n", "utf8");
+
+    await expect(
+      resolveConfigFromPaths(
+        path.join(tempDir, "missing-global.js"),
+        path.join(tempDir, "missing-project.js"),
+        cliPath
+      )
+    ).rejects.toThrow("Unknown hook key in Config.hooks: onMystery");
+  });
+
+  test("resolveConfigFromPaths validates legacy review.enabled", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(cliPath, "export default { review: { enabled: 'invalid' } };\n", "utf8");
+
+    await expect(
+      resolveConfigFromPaths(
+        path.join(tempDir, "missing-global.js"),
+        path.join(tempDir, "missing-project.js"),
+        cliPath
+      )
+    ).rejects.toThrow("Config.review.enabled must be a boolean");
+  });
+
+  test("resolveConfigFromPaths validates legacy review.onInvalid", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(cliPath, "export default { review: { onInvalid: 'invalid' } };\n", "utf8");
+
+    await expect(
+      resolveConfigFromPaths(
+        path.join(tempDir, "missing-global.js"),
+        path.join(tempDir, "missing-project.js"),
+        cliPath
+      )
+    ).rejects.toThrow("Config.review.onInvalid must be 'fail' or 'warn_skip'");
   });
 
   test("resolveConfigFromPaths accepts executor 'claude'", async () => {
@@ -231,5 +295,34 @@ describe("config-loader", () => {
     const merged = mergeConfigs(globalConfig, projectConfig, cliConfig);
 
     expect(merged?.executor).toBe("claude");
+  });
+
+  test("mergeConfigs deeply merges review plan/execution settings", () => {
+    const globalConfig = {
+      review: {
+        plan: { enabled: true, onInvalid: "fail" as const },
+        execution: { enabled: true, maxCycles: 2, validator: { auto: true } }
+      }
+    };
+    const projectConfig = {
+      review: {
+        execution: { onFindings: "auto_fix" as const, validator: { commands: ["npm run test"] } }
+      }
+    };
+
+    const merged = mergeConfigs(globalConfig, projectConfig);
+
+    expect(merged?.review).toEqual({
+      plan: { enabled: true, onInvalid: "fail" },
+      execution: {
+        enabled: true,
+        maxCycles: 2,
+        onFindings: "auto_fix",
+        validator: {
+          auto: true,
+          commands: ["npm run test"]
+        }
+      }
+    });
   });
 });

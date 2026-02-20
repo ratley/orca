@@ -13,13 +13,14 @@ describe("createStdoutHookHandler", () => {
       message: "task finished",
       timestamp: "2026-02-19T00:00:00.000Z",
       taskId: "t1",
+      taskName: "task one",
       metadata: { retries: 1 }
     };
 
     const handler = createStdoutHookHandler("[test-hook]", (line) => {
       lines.push(line);
     });
-    await handler(event);
+    await handler(event, { cwd: process.cwd(), pid: process.pid, invokedAt: new Date().toISOString() });
 
     expect(lines).toHaveLength(1);
 

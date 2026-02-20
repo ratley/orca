@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { buildConfigModule, detectPackageManager, resolveApiKey } from "./setup.js";
+import { buildConfigModule, buildProjectConfigTemplate, detectPackageManager, resolveApiKey } from "./setup.js";
 
 describe("resolveApiKey", () => {
   const originalAnthropic = process.env.ANTHROPIC_API_KEY;
@@ -237,6 +237,18 @@ describe("detectPackageManager", () => {
     const manager = detectPackageManager(() => false);
 
     expect(manager).toBeNull();
+  });
+});
+
+describe("buildProjectConfigTemplate", () => {
+  test("includes typed function hooks and stdin command-hook guidance", () => {
+    const template = buildProjectConfigTemplate();
+
+    expect(template).toContain("HookEventMap");
+    expect(template).toContain("hooks:");
+    expect(template).toContain("onTaskComplete: async (event)");
+    expect(template).toContain("event payload JSON to stdin");
+    expect(template).toContain("hookCommands:");
   });
 });
 

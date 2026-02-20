@@ -5,7 +5,19 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { parseClaudeEffort, parseCodexEffort } from "../types/effort.js";
-import type { OrcaConfig } from "../types/index.js";
+import type { HookName, OrcaConfig } from "../types/index.js";
+
+const KNOWN_HOOK_NAMES: HookName[] = [
+  "onMilestone",
+  "onTaskComplete",
+  "onTaskFail",
+  "onInvalidPlan",
+  "onFindings",
+  "onComplete",
+  "onError"
+];
+
+const knownHookNameSet = new Set<string>(KNOWN_HOOK_NAMES);
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -48,6 +60,12 @@ function coerceConfig(candidate: unknown): OrcaConfig {
     }
 
     for (const [hookName, handler] of Object.entries(candidate.hooks)) {
+      if (!knownHookNameSet.has(hookName)) {
+        throw new Error(
+          `Unknown hook key in Config.hooks: ${hookName}. Allowed hooks: ${KNOWN_HOOK_NAMES.join(", ")}`
+        );
+      }
+
       if (typeof handler !== "function") {
         throw new Error(
           `Config.hooks.${hookName} must be a function, got ${describeType(handler)}`
@@ -64,6 +82,12 @@ function coerceConfig(candidate: unknown): OrcaConfig {
     }
 
     for (const [hookName, command] of Object.entries(candidate.hookCommands)) {
+      if (!knownHookNameSet.has(hookName)) {
+        throw new Error(
+          `Unknown hook key in Config.hookCommands: ${hookName}. Allowed hooks: ${KNOWN_HOOK_NAMES.join(", ")}`
+        );
+      }
+
       if (typeof command !== "string") {
         throw new Error(
           `Config.hookCommands.${hookName} must be a string, got ${describeType(command)}`
@@ -122,6 +146,7 @@ function coerceConfig(candidate: unknown): OrcaConfig {
       throw new Error(`Config.review must be an object, got ${describeType(candidate.review)}`);
     }
 
+    // legacy compatibility: allow top-level review.enabled / review.onInvalid
     if ("enabled" in candidate.review && candidate.review.enabled !== undefined && typeof candidate.review.enabled !== "boolean") {
       throw new Error(`Config.review.enabled must be a boolean, got ${describeType(candidate.review.enabled)}`);
     }
@@ -133,6 +158,80 @@ function coerceConfig(candidate: unknown): OrcaConfig {
             ? candidate.review.onInvalid
             : (JSON.stringify(candidate.review.onInvalid) ?? describeType(candidate.review.onInvalid));
         throw new Error(`Config.review.onInvalid must be 'fail' or 'warn_skip', got ${onInvalidDisplay}`);
+      }
+    }
+
+    if ("plan" in candidate.review && candidate.review.plan !== undefined) {
+      if (!isObject(candidate.review.plan)) {
+        throw new Error(`Config.review.plan must be an object, got ${describeType(candidate.review.plan)}`);
+      }
+
+      if ("enabled" in candidate.review.plan && candidate.review.plan.enabled !== undefined && typeof candidate.review.plan.enabled !== "boolean") {
+        throw new Error(`Config.review.plan.enabled must be a boolean, got ${describeType(candidate.review.plan.enabled)}`);
+      }
+
+      if ("onInvalid" in candidate.review.plan && candidate.review.plan.onInvalid !== undefined) {
+        if (candidate.review.plan.onInvalid !== "fail" && candidate.review.plan.onInvalid !== "warn_skip") {
+          const onInvalidDisplay =
+            typeof candidate.review.plan.onInvalid === "string"
+              ? candidate.review.plan.onInvalid
+              : (JSON.stringify(candidate.review.plan.onInvalid) ?? describeType(candidate.review.plan.onInvalid));
+          throw new Error(`Config.review.plan.onInvalid must be 'fail' or 'warn_skip', got ${onInvalidDisplay}`);
+        }
+      }
+    }
+
+    if ("execution" in candidate.review && candidate.review.execution !== undefined) {
+      if (!isObject(candidate.review.execution)) {
+        throw new Error(`Config.review.execution must be an object, got ${describeType(candidate.review.execution)}`);
+      }
+
+      if ("enabled" in candidate.review.execution && candidate.review.execution.enabled !== undefined && typeof candidate.review.execution.enabled !== "boolean") {
+        throw new Error(`Config.review.execution.enabled must be a boolean, got ${describeType(candidate.review.execution.enabled)}`);
+      }
+
+      if ("maxCycles" in candidate.review.execution && candidate.review.execution.maxCycles !== undefined) {
+        if (typeof candidate.review.execution.maxCycles !== "number" || !Number.isInteger(candidate.review.execution.maxCycles) || candidate.review.execution.maxCycles < 1) {
+          const maxCyclesDisplay = typeof candidate.review.execution.maxCycles === "number"
+            ? candidate.review.execution.maxCycles
+            : (JSON.stringify(candidate.review.execution.maxCycles) ?? describeType(candidate.review.execution.maxCycles));
+          throw new Error(`Config.review.execution.maxCycles must be an integer >= 1, got ${maxCyclesDisplay}`);
+        }
+      }
+
+      if ("onFindings" in candidate.review.execution && candidate.review.execution.onFindings !== undefined) {
+        if (candidate.review.execution.onFindings !== "auto_fix" && candidate.review.execution.onFindings !== "report_only" && candidate.review.execution.onFindings !== "fail") {
+          const display = typeof candidate.review.execution.onFindings === "string"
+            ? candidate.review.execution.onFindings
+            : (JSON.stringify(candidate.review.execution.onFindings) ?? describeType(candidate.review.execution.onFindings));
+          throw new Error(`Config.review.execution.onFindings must be 'auto_fix', 'report_only', or 'fail', got ${display}`);
+        }
+      }
+
+      if ("prompt" in candidate.review.execution && candidate.review.execution.prompt !== undefined && typeof candidate.review.execution.prompt !== "string") {
+        throw new Error(`Config.review.execution.prompt must be a string, got ${describeType(candidate.review.execution.prompt)}`);
+      }
+
+      if ("validator" in candidate.review.execution && candidate.review.execution.validator !== undefined) {
+        if (!isObject(candidate.review.execution.validator)) {
+          throw new Error(`Config.review.execution.validator must be an object, got ${describeType(candidate.review.execution.validator)}`);
+        }
+
+        if ("auto" in candidate.review.execution.validator && candidate.review.execution.validator.auto !== undefined && typeof candidate.review.execution.validator.auto !== "boolean") {
+          throw new Error(`Config.review.execution.validator.auto must be a boolean, got ${describeType(candidate.review.execution.validator.auto)}`);
+        }
+
+        if ("commands" in candidate.review.execution.validator && candidate.review.execution.validator.commands !== undefined) {
+          if (!Array.isArray(candidate.review.execution.validator.commands)) {
+            throw new Error(`Config.review.execution.validator.commands must be an array, got ${describeType(candidate.review.execution.validator.commands)}`);
+          }
+
+          for (const command of candidate.review.execution.validator.commands) {
+            if (typeof command !== "string") {
+              throw new Error(`Config.review.execution.validator.commands entries must be strings, got ${describeType(command)}`);
+            }
+          }
+        }
       }
     }
   }
@@ -188,7 +287,22 @@ export function mergeConfigs(...configs: Array<OrcaConfig | undefined>): OrcaCon
     }
 
     if (merged.review !== undefined || config.review !== undefined) {
-      merged.review = { ...merged.review, ...config.review };
+      merged.review = {
+        ...merged.review,
+        ...config.review,
+        plan: {
+          ...merged.review?.plan,
+          ...config.review?.plan
+        },
+        execution: {
+          ...merged.review?.execution,
+          ...config.review?.execution,
+          validator: {
+            ...merged.review?.execution?.validator,
+            ...config.review?.execution?.validator
+          }
+        }
+      };
     }
 
     if (merged.hooks !== undefined || config.hooks !== undefined) {
@@ -239,14 +353,14 @@ export async function resolveConfig(cliConfigPath?: string): Promise<OrcaConfig 
   const projectJsConfigPath = path.join(process.cwd(), "orca.config.js");
   const projectTsConfigPath = path.join(process.cwd(), "orca.config.ts");
 
-  let projectConfigPath = projectJsConfigPath;
+  let projectConfigPath = projectTsConfigPath;
   try {
-    await access(projectJsConfigPath, fsConstants.R_OK);
+    await access(projectTsConfigPath, fsConstants.R_OK);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       throw error;
     }
-    projectConfigPath = projectTsConfigPath;
+    projectConfigPath = projectJsConfigPath;
   }
 
   return resolveConfigFromPaths(globalConfigPath, projectConfigPath, cliConfigPath);

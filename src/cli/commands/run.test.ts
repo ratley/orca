@@ -9,10 +9,12 @@ type ResumeModule = typeof import("./resume.js");
 
 let tempDir = "";
 const originalRunsDir = process.env.ORCA_RUNS_DIR;
+const originalSkipValidators = process.env.ORCA_SKIP_VALIDATORS;
 
 beforeEach(async () => {
   tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-run-command-test-"));
   process.env.ORCA_RUNS_DIR = path.join(tempDir, "runs");
+  process.env.ORCA_SKIP_VALIDATORS = "1";
   process.exitCode = 0;
 });
 
@@ -23,6 +25,11 @@ afterEach(async () => {
     delete process.env.ORCA_RUNS_DIR;
   } else {
     process.env.ORCA_RUNS_DIR = originalRunsDir;
+  }
+  if (originalSkipValidators === undefined) {
+    delete process.env.ORCA_SKIP_VALIDATORS;
+  } else {
+    process.env.ORCA_SKIP_VALIDATORS = originalSkipValidators;
   }
   await rm(tempDir, { recursive: true, force: true });
 });
@@ -37,7 +44,24 @@ async function loadRunModule(): Promise<{
   InvalidPlanErrorCtor: new (stage: "planner" | "review", message: string) => Error;
 }> {
   const runPlannerMock = mock(async () => {});
-  const runTaskRunnerMock = mock(async () => {});
+  const runTaskRunnerMock = mock(async (options: { runId: string; store: { updateRun: (runId: string, patch: unknown) => Promise<void> } }) => {
+    await options.store.updateRun(options.runId, {
+      tasks: [
+        {
+          id: "t1",
+          name: "task",
+          description: "task",
+          dependencies: [],
+          acceptance_criteria: ["done"],
+          status: "done",
+          retries: 0,
+          maxRetries: 3,
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString()
+        }
+      ]
+    });
+  });
   const hookDispatchMock = mock(async () => {});
 
   class TestInvalidPlanError extends Error {
@@ -58,6 +82,7 @@ async function loadRunModule(): Promise<{
   const createCodexSessionMock = mock(async () => ({
     consultTaskGraph: async () => ({ issues: [], ok: true }),
     executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
+    runPrompt: async () => '{"summary":"clean","findings":[],"fixed":false}',
     reviewChanges: async () => "review",
     disconnect: async () => {}
   }));
@@ -266,6 +291,149 @@ describe("run command executor flags", () => {
     await expect(
       parseRun(runModule, ["run", "--task", "x", "--codex-only=false"])
     ).rejects.toThrow();
+  });
+
+  test("legacy review.enabled=false disables post-execution review", async () => {
+    const { runModule, createCodexSessionMock } = await loadRunModule();
+    const runPromptMock = mock(async () => '{"summary":"found","findings":["lint"],"fixed":true}');
+    const reviewChangesMock = mock(async () => "review");
+    createCodexSessionMock.mockImplementationOnce(async () => ({
+      consultTaskGraph: async () => ({ issues: [], ok: true }),
+      executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
+      runPrompt: runPromptMock,
+      reviewChanges: reviewChangesMock,
+      disconnect: async () => {}
+    }));
+
+    const configPath = path.join(tempDir, "orca.config.js");
+    await writeFile(configPath, "export default { review: { enabled: false } };\n", "utf8");
+
+    await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
+    expect(runPromptMock).not.toHaveBeenCalled();
+    expect(reviewChangesMock).not.toHaveBeenCalled();
+  });
+
+  test("dispatches onFindings hook when post-execution review reports findings", async () => {
+    const { runModule, createCodexSessionMock, hookDispatchMock } = await loadRunModule();
+    createCodexSessionMock.mockImplementationOnce(async () => ({
+      consultTaskGraph: async () => ({ issues: [], ok: true }),
+      executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
+      runPrompt: async () => '{"summary":"needs fixes","findings":["lint"],"fixed":false}',
+      reviewChanges: async () => "review",
+      disconnect: async () => {}
+    }));
+
+    const configPath = path.join(tempDir, "orca.config.js");
+    await writeFile(configPath, "export default { review: { execution: { validator: { auto: false } } } };\n", "utf8");
+
+    await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
+
+    const findingsEvent = hookDispatchMock.mock.calls.find(
+      (call) => (call[0] as { hook?: string })?.hook === "onFindings"
+    )?.[0] as { metadata?: { findingsCount?: number; cycleIndex?: number } } | undefined;
+
+    expect(findingsEvent?.metadata?.findingsCount).toBe(1);
+    expect(findingsEvent?.metadata?.cycleIndex).toBe(1);
+  });
+
+  test("auto_fix loop stops when clean", async () => {
+    const { runModule, createCodexSessionMock } = await loadRunModule();
+    const runPromptMock = mock(async () => '{"summary":"clean","findings":[],"fixed":false}');
+    runPromptMock.mockImplementationOnce(async () => '{"summary":"fixed","findings":["lint"],"fixed":true}');
+    createCodexSessionMock.mockImplementationOnce(async () => ({
+      consultTaskGraph: async () => ({ issues: [], ok: true }),
+      executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
+      runPrompt: runPromptMock,
+      reviewChanges: async () => "review",
+      disconnect: async () => {}
+    }));
+
+    const configPath = path.join(tempDir, "orca.config.js");
+    await writeFile(configPath, "export default { review: { execution: { onFindings: 'auto_fix', maxCycles: 4, validator: { auto: false } } } };\n", "utf8");
+
+    await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
+    expect(runPromptMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("maxCycles cap enforced", async () => {
+    const { runModule, createCodexSessionMock } = await loadRunModule();
+    const runPromptMock = mock(async () => '{"summary":"still findings","findings":["lint"],"fixed":true}');
+    createCodexSessionMock.mockImplementationOnce(async () => ({
+      consultTaskGraph: async () => ({ issues: [], ok: true }),
+      executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
+      runPrompt: runPromptMock,
+      reviewChanges: async () => "review",
+      disconnect: async () => {}
+    }));
+
+    const configPath = path.join(tempDir, "orca.config.js");
+    await writeFile(configPath, "export default { review: { execution: { onFindings: 'auto_fix', maxCycles: 2, validator: { auto: false } } } };\n", "utf8");
+
+    await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
+    expect(runPromptMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("fail mode stops after first findings and marks run failed", async () => {
+    const { runModule, createCodexSessionMock } = await loadRunModule();
+    const runPromptMock = mock(async () => '{"summary":"found","findings":["lint"],"fixed":true}');
+    createCodexSessionMock.mockImplementationOnce(async () => ({
+      consultTaskGraph: async () => ({ issues: [], ok: true }),
+      executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
+      runPrompt: runPromptMock,
+      reviewChanges: async () => "review",
+      disconnect: async () => {}
+    }));
+
+    const configPath = path.join(tempDir, "orca.config.js");
+    await writeFile(configPath, "export default { review: { execution: { onFindings: 'fail', maxCycles: 3, validator: { auto: false } } } };\n", "utf8");
+
+    await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
+    expect(runPromptMock).toHaveBeenCalledTimes(1);
+
+    const statusPath = path.join(tempDir, "runs", "run-test-1000-abcd", "status.json");
+    const status = JSON.parse(await readFile(statusPath, "utf8")) as { overallStatus?: string };
+    expect(status.overallStatus).toBe("failed");
+  });
+
+  test("report_only mode does not auto-fix", async () => {
+    const { runModule, createCodexSessionMock } = await loadRunModule();
+    const runPromptMock = mock(async () => '{"summary":"found","findings":["lint"],"fixed":true}');
+    createCodexSessionMock.mockImplementationOnce(async () => ({
+      consultTaskGraph: async () => ({ issues: [], ok: true }),
+      executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
+      runPrompt: runPromptMock,
+      reviewChanges: async () => "review",
+      disconnect: async () => {}
+    }));
+
+    const configPath = path.join(tempDir, "orca.config.js");
+    await writeFile(configPath, "export default { review: { execution: { onFindings: 'report_only', maxCycles: 3, validator: { auto: false } } } };\n", "utf8");
+
+    await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
+    expect(runPromptMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("invalid reviewer JSON is treated as findings and dispatches onFindings", async () => {
+    const { runModule, createCodexSessionMock, hookDispatchMock } = await loadRunModule();
+    createCodexSessionMock.mockImplementationOnce(async () => ({
+      consultTaskGraph: async () => ({ issues: [], ok: true }),
+      executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
+      runPrompt: async () => "not-json",
+      reviewChanges: async () => "review",
+      disconnect: async () => {}
+    }));
+
+    const configPath = path.join(tempDir, "orca.config.js");
+    await writeFile(configPath, "export default { review: { execution: { onFindings: 'report_only', validator: { auto: false } } } };\n", "utf8");
+
+    await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
+
+    const findingsEvent = hookDispatchMock.mock.calls.find(
+      (call) => (call[0] as { hook?: string })?.hook === "onFindings"
+    )?.[0] as { message?: string; metadata?: { findingsCount?: number } } | undefined;
+
+    expect(findingsEvent?.metadata?.findingsCount).toBe(1);
+    expect(findingsEvent?.message).toContain("invalid JSON");
   });
 });
 

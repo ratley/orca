@@ -13,7 +13,7 @@ function makeEvent(overrides: Partial<HookEvent> = {}): HookEvent {
     message: "hook-message",
     timestamp: new Date().toISOString(),
     ...overrides
-  };
+  } as HookEvent;
 }
 
 describe("HookDispatcher", () => {
@@ -43,24 +43,40 @@ describe("HookDispatcher", () => {
     expect(calls).toEqual(["first", "second"]);
   });
 
-  test("dispatches shell command hooks using ORCA_* environment variables", async () => {
+  test("provides deterministic handler context", async () => {
+    let observed: { cwd: string; pid: number; invokedAt: string } | undefined;
+    const dispatcher = new HookDispatcher();
+
+    dispatcher.on("onMilestone", async (_event, context) => {
+      observed = context;
+    });
+
+    await dispatcher.dispatch(makeEvent());
+
+    expect(observed?.cwd).toBe(process.cwd());
+    expect(observed?.pid).toBe(process.pid);
+    expect(typeof observed?.invokedAt).toBe("string");
+  });
+
+  test("dispatches shell command hooks via stdin payload JSON", async () => {
     const outputPath = path.join(tempDir, "hook-output.txt");
     const dispatcher = new HookDispatcher({
       commandHooks: {
-        onMilestone: `if [ "{runId}" = "$ORCA_RUN_ID" ]; then printf '%s|%s|%s|%s|%s|%s' "$ORCA_MSG" "$ORCA_RUN_ID" "$ORCA_TASK_ID" "$ORCA_HOOK" "$ORCA_ERROR" "$ORCA_STAGE" > "${outputPath}"; fi`
+        onFindings: `node -e 'const fs=require("node:fs"); let input=""; process.stdin.on("data",(d)=>input+=d); process.stdin.on("end",()=>{ const p=JSON.parse(input||"{}"); fs.writeFileSync("${outputPath}", [p.hook,p.message,p.runId,p.taskId,p.metadata?.stage,p.metadata?.findingsCount,p.metadata?.findingsSummary,p.metadata?.cycleIndex,String(process.env.ORCA_HOOK),String(process.env.ORCA_MSG),String(process.env.ORCA_RUN_ID),String(process.env.ORCA_TASK_ID),String(process.env.ORCA_TASK_NAME),String(process.env.ORCA_ERROR)].join("|")); });'`
       }
     });
 
     await dispatcher.dispatch(
       makeEvent({
+        hook: "onFindings",
         message: "hello $(whoami) && keep-literal",
         taskId: "task-9",
-        metadata: { stage: "review" }
+        metadata: { stage: "review", findingsCount: 2, findingsSummary: "fix lint", cycleIndex: 1 }
       })
     );
 
     const output = await fs.readFile(outputPath, "utf8");
-    expect(output).toBe("hello $(whoami) && keep-literal|run-1000-abcd|task-9|onMilestone||review");
+    expect(output).toBe("onFindings|hello $(whoami) && keep-literal|run-1000-abcd|task-9|review|2|fix lint|1|undefined|undefined|undefined|undefined|undefined|undefined");
   });
 
   test("handler error triggers onError", async () => {
@@ -82,7 +98,7 @@ describe("HookDispatcher", () => {
     expect(errors[0]?.error).toContain("broken handler");
   });
 
-  test("onError handler failure does not retrigger onError", async () => {
+  test("onError handler failure does not retrigger onError and does not reject dispatch", async () => {
     let onErrorCalls = 0;
     const dispatcher = new HookDispatcher();
 
@@ -95,7 +111,7 @@ describe("HookDispatcher", () => {
       throw new Error("onError failed");
     });
 
-    await expect(dispatcher.dispatch(makeEvent())).rejects.toThrow("onError failed");
+    await expect(dispatcher.dispatch(makeEvent())).resolves.toBeUndefined();
     expect(onErrorCalls).toBe(1);
   });
 
@@ -122,7 +138,7 @@ describe("HookDispatcher", () => {
     const dispatcher = new HookDispatcher({
       commandHooks: {
         onMilestone: "exit 1",
-        onError: `printf '%s|%s|%s' "$ORCA_MSG" "$ORCA_RUN_ID" "$ORCA_TASK_ID" > "${outputPath}"`
+        onError: `node -e 'const fs=require("node:fs"); let input=""; process.stdin.on("data",(d)=>input+=d); process.stdin.on("end",()=>{ const p=JSON.parse(input||"{}"); fs.writeFileSync("${outputPath}", [p.message,p.runId,p.taskId].join("|")); });'`
       }
     });
 
@@ -134,5 +150,21 @@ describe("HookDispatcher", () => {
 
     const output = await fs.readFile(outputPath, "utf8");
     expect(output).toContain("Hook dispatch failed for onMilestone|run-1000-abcd|task-7");
+  });
+
+  test("early command exit with large payload does not crash dispatch", async () => {
+    const dispatcher = new HookDispatcher({
+      commandHooks: {
+        onMilestone: "node -e 'process.exit(0)'"
+      }
+    });
+
+    await expect(
+      dispatcher.dispatch(
+        makeEvent({
+          message: "x".repeat(2 * 1024 * 1024)
+        })
+      )
+    ).resolves.toBeUndefined();
   });
 });

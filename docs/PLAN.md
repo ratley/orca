@@ -303,12 +303,12 @@ export interface OrcaConfig {
 
 ### Configuration Inputs
 - `orca.config.ts` programmatic handlers (`async (event) => { ... }`).
-- CLI command hooks: e.g. `--on-milestone 'curl -X POST $WEBHOOK_URL -d {msg}'`.
+- CLI command hooks: e.g. `--on-milestone 'node -e '\''let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const p=JSON.parse(s);console.log(p.message);})'\'''`.
 - Both can coexist; execution order should be deterministic (programmatic first, CLI second).
 
 ### Default Routing Behavior
 1. If OpenClaw env is detected, default hook action:
-- `openclaw system event --text {msg} --mode now`
+- `openclaw system event --text "$(node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const p=JSON.parse(s); process.stdout.write(p.message);})')" --mode now`
 2. Otherwise:
 - log structured event to stdout.
 
@@ -322,7 +322,7 @@ OpenClaw detection contract:
 - Hook failures never mutate task outcomes.
 - Each hook invocation is wrapped in timeout + error capture.
 - Hook errors emit `onError` (guarded to avoid recursion loops).
-- Shell hooks receive a sanitized payload (`{msg}`, `{runId}`, `{taskId}`).
+- Shell hooks receive the full payload as stdin JSON; parse JSON and branch on `hook`.
 
 ## 8. Codex Consultation Pattern
 
@@ -441,7 +441,7 @@ Run-targeting requirement for concurrent safety:
 ### Hook Flags (examples)
 ```bash
 orca run --spec ./specs/myfeature.md \
-  --on-milestone 'curl -X POST $WEBHOOK_URL -d {msg}'
+  --on-milestone 'node -e '\''let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const p=JSON.parse(s);console.log(p.message);})'\'''
 ```
 
 ## 12. PR Flow (Optional, Hook-Based)

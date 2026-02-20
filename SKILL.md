@@ -33,23 +33,40 @@ orca pr publish [--last] Publish (un-draft) an existing draft PR
 orca pr status [--last]  Check PR and CI status
 ```
 
-## Config (~/.orca/config.js or ./orca.config.js)
+## Config (~/.orca/config.js, ./orca.config.js, or ./orca.config.ts)
 
-```js
+```ts
 export default {
   executor: "codex",           // "codex" (default) or "claude"
   sessionLogs: "./session-logs",
   hooks: {
-    onComplete: "your-notify-command",
+    onFindings: async (event) => {
+      console.log(`findings:${event.metadata?.findingsCount} cycle:${event.metadata?.cycleIndex}`);
+    }
+  },
+  hookCommands: {
+    onComplete: "your-notify-command", // reads event JSON from stdin
     onError: "your-error-command",
   },
+  review: {
+    plan: { enabled: true, onInvalid: "fail" },
+    execution: {
+      enabled: true,
+      maxCycles: 2,
+      onFindings: "auto_fix",   // auto_fix | report_only | fail
+      validator: { auto: true }
+    }
+  },
   codex: { multiAgent: false },
-}
+};
 ```
 
 ## Notes
 
 - Codex executor requires `~/.codex/auth.json`
 - Must be run inside a git repo
+- Function hooks are primary (`hooks`) and receive `(event, context)` with deterministic context `{ cwd, pid, invokedAt }`
+- Hook commands still work, but they now receive structured event JSON on stdin (no `ORCA_*` hook env payload)
+- Hook smoke harness: run `npm run smoke:hooks`
 - Run ID format: `<slug>-<unix-ms>-<hex4>`  (e.g. cobalt-summit-1708123456789-a3f2)
 - Use `orca answer` to unblock a waiting run

@@ -17,7 +17,8 @@
     "lint:type-aware": "oxlint --type-aware --type-check --deny-warnings src/ --ignore-pattern \"**/*.test.ts\"",
     "typecheck:native": "tsgo --noEmit",
     "typecheck:tsc": "tsc --noEmit",
-    "validate": "npm run lint && npm run lint:type-aware && npm run typecheck && npm run test && npm run build"
+    "validate": "npm run lint && npm run lint:type-aware && npm run typecheck && npm run test && npm run build",
+    "smoke:hooks": "npm run build && node ./specs/smoke/hooks/run-hooks-smoke.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.47",

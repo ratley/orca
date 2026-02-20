@@ -259,6 +259,7 @@ export async function createCodexSession(
   executeTask: (task: Task, runId: string, systemContext?: string) => Promise<TaskExecutionResult>;
   consultTaskGraph: (tasks: Task[]) => Promise<ConsultationResult>;
   reviewChanges: (threadId?: string) => Promise<string>;
+  runPrompt: (prompt: string) => Promise<string>;
   disconnect: () => Promise<void>;
   threadId: string;
 }> {
@@ -421,6 +422,22 @@ export async function createCodexSession(
       });
 
       return result.reviewText;
+    },
+
+    async runPrompt(prompt: string): Promise<string> {
+      const effort = getEffort(config);
+      const result = effort
+        ? await client.runTurn({
+            threadId,
+            effort,
+            input: [{ type: "text", text: prompt }],
+          })
+        : await client.runTurn({
+            threadId,
+            input: [{ type: "text", text: prompt }],
+          });
+
+      return extractAgentText(result);
     },
 
     async disconnect(): Promise<void> {

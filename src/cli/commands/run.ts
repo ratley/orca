@@ -1,8 +1,10 @@
 import { constants as fsConstants } from "node:fs";
-import { access, unlink, writeFile } from "node:fs/promises";
+import { exec as execCallback } from "node:child_process";
+import { access, readFile, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { promisify } from "node:util";
 
 import { InvalidArgumentError, type Command } from "commander";
 
@@ -15,9 +17,26 @@ import { createOpenclawHookHandler, detectOpenclawAvailability } from "../../hoo
 import { createStdoutHookHandler } from "../../hooks/adapters/stdout.js";
 import { HookDispatcher } from "../../hooks/dispatcher.js";
 import { RunStore } from "../../state/store.js";
-import type { HookEvent, HookName, OrcaConfig } from "../../types/index.js";
+import type { HookEvent, HookHandler, HookName, OrcaConfig } from "../../types/index.js";
 import { parseClaudeEffort, parseCodexEffort, type ClaudeEffort, type CodexEffort } from "../../types/effort.js";
 import { generateRunId } from "../../utils/ids.js";
+
+const exec = promisify(execCallback);
+
+type FindingsMode = "auto_fix" | "report_only" | "fail";
+
+interface ValidationResult {
+  command: string;
+  exitCode: number;
+  output: string;
+}
+
+interface ExecutionReviewResult {
+  findings: string[];
+  summary: string;
+  fixed: boolean;
+  rawResponse: string;
+}
 
 export interface RunCommandOptions {
   spec?: string;
@@ -34,6 +53,7 @@ export interface RunCommandOptions {
   onTaskComplete?: string;
   onTaskFail?: string;
   onInvalidPlan?: string;
+  onFindings?: string;
   onComplete?: string;
   onError?: string;
 }
@@ -43,6 +63,7 @@ const ALL_HOOKS: HookName[] = [
   "onTaskComplete",
   "onTaskFail",
   "onInvalidPlan",
+  "onFindings",
   "onComplete",
   "onError"
 ];
@@ -51,6 +72,7 @@ const VALID_HOOK_NAMES = new Set<HookName>([
   "onTaskComplete",
   "onTaskFail",
   "onInvalidPlan",
+  "onFindings",
   "onComplete",
   "onError"
 ]);
@@ -85,6 +107,10 @@ function computeFinalStatus(overallStatus: string, allTasksDone: boolean): "comp
     return "cancelled";
   }
 
+  if (overallStatus === "failed") {
+    return "failed";
+  }
+
   return allTasksDone ? "completed" : "failed";
 }
 
@@ -94,6 +120,7 @@ function buildCliCommandHooks(options: RunCommandOptions): Partial<Record<HookNa
     ...(options.onTaskComplete ? { onTaskComplete: options.onTaskComplete } : {}),
     ...(options.onTaskFail ? { onTaskFail: options.onTaskFail } : {}),
     ...(options.onInvalidPlan ? { onInvalidPlan: options.onInvalidPlan } : {}),
+    ...(options.onFindings ? { onFindings: options.onFindings } : {}),
     ...(options.onComplete ? { onComplete: options.onComplete } : {}),
     ...(options.onError ? { onError: options.onError } : {})
   };
@@ -122,6 +149,100 @@ function applyExecutorOverrideForRun(
   }
 
   return nextConfig;
+}
+
+function getExecutionReviewConfig(config?: OrcaConfig): {
+  enabled: boolean;
+  maxCycles: number;
+  onFindings: FindingsMode;
+  validatorAuto: boolean;
+  validatorCommands?: string[];
+  prompt?: string;
+} {
+  const review = (config?.review ?? {}) as OrcaConfig["review"] & { enabled?: boolean };
+  const executionConfig = review.execution;
+  const skipValidators = process.env.ORCA_SKIP_VALIDATORS === "1";
+  return {
+    enabled: executionConfig?.enabled ?? review.enabled ?? true,
+    maxCycles: executionConfig?.maxCycles ?? 2,
+    onFindings: executionConfig?.onFindings ?? "auto_fix",
+    validatorAuto: skipValidators ? false : (executionConfig?.validator?.auto ?? true),
+    ...(executionConfig?.validator?.commands !== undefined ? { validatorCommands: executionConfig.validator.commands } : {}),
+    ...(executionConfig?.prompt !== undefined ? { prompt: executionConfig.prompt } : {})
+  };
+}
+
+async function detectValidatorCommands(): Promise<string[]> {
+  try {
+    const packageJson = JSON.parse(await readFile(path.join(process.cwd(), "package.json"), "utf8")) as { scripts?: Record<string, string> };
+    const scripts = packageJson.scripts ?? {};
+    if (typeof scripts.validate === "string") {
+      return ["npm run validate"];
+    }
+
+    const fallbacks = ["lint", "typecheck", "test", "build"].filter((name) => typeof scripts[name] === "string");
+    return fallbacks.map((name) => `npm run ${name}`);
+  } catch {
+    return [];
+  }
+}
+
+async function runValidatorCommands(commands: string[]): Promise<ValidationResult[]> {
+  const results: ValidationResult[] = [];
+  for (const command of commands) {
+    try {
+      const { stdout, stderr } = await exec(command, { cwd: process.cwd() });
+      results.push({ command, exitCode: 0, output: `${stdout}${stderr}`.trim() });
+    } catch (error) {
+      const failed = error as { stdout?: string; stderr?: string; code?: number };
+      results.push({
+        command,
+        exitCode: typeof failed.code === "number" ? failed.code : 1,
+        output: `${failed.stdout ?? ""}${failed.stderr ?? ""}`.trim()
+      });
+    }
+  }
+
+  return results;
+}
+
+function buildPostExecutionReviewPrompt(cycleIndex: number, validationResults: ValidationResult[], extraPrompt?: string): string {
+  return [
+    "You are Orca's post-execution reviewer.",
+    "Inspect uncommitted repository changes and validation command output.",
+    "If there are fixable findings, apply fixes directly in the workspace before responding.",
+    "Respond with JSON only using this exact shape:",
+    '{"summary":"...","findings":["..."],"fixed":true|false}',
+    `Cycle: ${cycleIndex}`,
+    "Validation output:",
+    JSON.stringify(validationResults, null, 2),
+    ...(extraPrompt ? ["Additional reviewer instructions:", extraPrompt] : [])
+  ].join("\n\n");
+}
+
+function parseExecutionReviewResult(raw: string): ExecutionReviewResult {
+  const match = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const candidate = (match?.[1] ?? raw).trim();
+
+  try {
+    const parsed = JSON.parse(candidate) as { summary?: unknown; findings?: unknown; fixed?: unknown };
+    const findings = Array.isArray(parsed.findings) ? parsed.findings.filter((item): item is string => typeof item === "string") : [];
+
+    return {
+      findings,
+      summary: typeof parsed.summary === "string" ? parsed.summary : (findings.length > 0 ? findings.join("; ") : "No findings."),
+      fixed: parsed.fixed === true,
+      rawResponse: raw
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      findings: [`review-response-parse-error: ${message}`],
+      summary: `Post-execution reviewer returned invalid JSON (${message})`,
+      fixed: false,
+      rawResponse: raw
+    };
+  }
 }
 
 export async function runCommandHandler(options: RunCommandOptions): Promise<void> {
@@ -197,20 +318,21 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
     }
 
     if (orcaConfig?.hooks) {
-      for (const [hookName, handler] of Object.entries(orcaConfig.hooks)) {
-        if (!isHookName(hookName)) {
-          console.error(`Warning: ignoring unknown hook name in config: ${hookName}`);
+      for (const [hookNameRaw, handler] of Object.entries(orcaConfig.hooks)) {
+        if (!isHookName(hookNameRaw)) {
+          console.error(`Warning: ignoring unknown hook name in config: ${hookNameRaw}`);
           continue;
         }
 
         if (typeof handler !== "function") {
           console.error(
-            `Warning: ignoring invalid hook handler for ${hookName}; expected function, got ${typeof handler}`
+            `Warning: ignoring invalid hook handler for ${hookNameRaw}; expected function, got ${typeof handler}`
           );
           continue;
         }
 
-        dispatcher.on(hookName, handler);
+        const hookName = hookNameRaw as HookName;
+        dispatcher.on(hookName, handler as HookHandler<typeof hookName>);
       }
     }
 
@@ -286,9 +408,71 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
             codexSession.executeTask(task, taskRunId, systemContext),
         });
 
-        const reviewText = await codexSession.reviewChanges();
-        console.log("Codex post-execution review:");
-        console.log(reviewText);
+        const reviewConfig = getExecutionReviewConfig(effectiveConfig);
+        const finalSummaries: string[] = [];
+        const runAfterExecution = await store.getRun(runId);
+
+        if (reviewConfig.enabled && (runAfterExecution?.tasks.length ?? 0) > 0) {
+          const configured = reviewConfig.validatorCommands?.filter((item) => item.trim().length > 0) ?? [];
+          const validatorCommands = configured.length > 0
+            ? configured
+            : (reviewConfig.validatorAuto ? await detectValidatorCommands() : []);
+
+          for (let cycleIndex = 1; cycleIndex <= reviewConfig.maxCycles; cycleIndex += 1) {
+            const validationResults = await runValidatorCommands(validatorCommands);
+            const prompt = buildPostExecutionReviewPrompt(cycleIndex, validationResults, reviewConfig.prompt);
+            const rawReview = await codexSession.runPrompt(prompt);
+            const reviewResult = parseExecutionReviewResult(rawReview);
+            finalSummaries.push(`cycle ${cycleIndex}: ${reviewResult.summary}`);
+
+            if (reviewResult.findings.length === 0) {
+              break;
+            }
+
+            await emitHook({
+              runId: runId as HookEvent["runId"],
+              hook: "onFindings",
+              message: reviewResult.summary,
+              timestamp: new Date().toISOString(),
+              metadata: {
+                findingsCount: reviewResult.findings.length,
+                findingsSummary: reviewResult.summary,
+                cycleIndex
+              }
+            });
+
+            if (reviewConfig.onFindings === "report_only") {
+              break;
+            }
+
+            if (reviewConfig.onFindings === "fail") {
+              await store.updateRun(runId, { overallStatus: "failed" });
+              break;
+            }
+
+            if (!reviewResult.fixed) {
+              break;
+            }
+          }
+        }
+
+        let fallbackReview = "";
+        if (reviewConfig.enabled) {
+          fallbackReview = await codexSession.reviewChanges();
+        }
+
+        console.log("Codex post-execution final review summary:");
+        if (finalSummaries.length > 0) {
+          for (const summary of finalSummaries) {
+            console.log(`- ${summary}`);
+          }
+        } else {
+          console.log("- Post-execution review loop disabled.");
+        }
+
+        if (fallbackReview.length > 0) {
+          console.log(fallbackReview);
+        }
       } finally {
         await codexSession.disconnect();
       }
@@ -349,6 +533,7 @@ export function registerRunCommand(program: Command): void {
     .option("--on-task-complete <cmd>", "Shell hook command for onTaskComplete")
     .option("--on-task-fail <cmd>", "Shell hook command for onTaskFail")
     .option("--on-invalid-plan <cmd>", "Shell hook command for onInvalidPlan")
+    .option("--on-findings <cmd>", "Shell hook command for onFindings")
     .option("--on-complete <cmd>", "Shell hook command for onComplete")
     .option("--on-error <cmd>", "Shell hook command for onError")
     .action(async (goal: string | undefined, commandOptions: RunCommandOptions) => {

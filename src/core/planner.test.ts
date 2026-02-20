@@ -159,6 +159,28 @@ describe("runPlanner task graph validation", () => {
     }
   });
 
+  test("legacy review.onInvalid=warn_skip still skips invalid review output", async () => {
+    const tasks: Task[] = [
+      { ...baseTask, id: "t1", dependencies: [] },
+      { ...baseTask, id: "t2", dependencies: ["t1"] }
+    ];
+
+    setPlanSpecForTests(async () => ({ tasks, rawResponse: JSON.stringify(tasks) }));
+    setReviewTaskGraphForTests(async () => ({
+      changes: [{ op: "add_dependency", taskId: "t1", dependsOn: "t2" }],
+      rawResponse: "review"
+    }));
+
+    await runPlanner(specPath, store, runId, {
+      review: {
+        onInvalid: "warn_skip"
+      } as never
+    });
+
+    const run = await store.getRun(runId);
+    expect(run?.tasks).toEqual(tasks);
+  });
+
   test("execution path uses reviewed graph from store", async () => {
     setPlanSpecForTests(async () => ({ tasks: baseTasks, rawResponse: JSON.stringify(baseTasks) }));
     setReviewTaskGraphForTests(async () => ({

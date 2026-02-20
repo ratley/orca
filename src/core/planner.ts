@@ -159,12 +159,21 @@ function buildSystemContext(skills: LoadedSkill[], instructions: ProjectInstruct
   return sections.join("\n\n");
 }
 
+function getPlanReviewConfig(config: OrcaConfig | undefined): { enabled: boolean; onInvalid: "fail" | "warn_skip" } {
+  const review = (config?.review ?? {}) as OrcaConfig["review"] & { enabled?: boolean; onInvalid?: "fail" | "warn_skip" };
+  return {
+    enabled: review.plan?.enabled ?? review.enabled ?? true,
+    onInvalid: review.plan?.onInvalid ?? review.onInvalid ?? "fail"
+  };
+}
+
 async function runTaskGraphReview(
   tasks: Task[],
   systemContext: string,
   config: OrcaConfig | undefined,
 ): Promise<{ finalTasks: Task[]; review: TaskGraphReviewResult | null }> {
-  if (config?.review?.enabled === false) {
+  const planReviewConfig = getPlanReviewConfig(config);
+  if (!planReviewConfig.enabled) {
     return { finalTasks: tasks, review: null };
   }
 
@@ -175,7 +184,7 @@ async function runTaskGraphReview(
   try {
     review = await reviewFn(tasks, systemContext, config);
   } catch (error) {
-    if (config?.review?.onInvalid === "warn_skip") {
+    if (planReviewConfig.onInvalid === "warn_skip") {
       logger.warn(`Review output invalid; skipping review changes (${error instanceof Error ? error.message : String(error)})`);
       return { finalTasks: tasks, review: null };
     }
@@ -219,12 +228,13 @@ export async function runPlanner(
     throw new InvalidPlanError("planner", error instanceof Error ? error.message : String(error));
   }
 
+  const planReviewConfig = getPlanReviewConfig(config);
   let finalTasks = result.tasks;
   try {
     const reviewed = await runTaskGraphReview(result.tasks, systemContext, config);
     finalTasks = reviewed.finalTasks;
   } catch (error) {
-    if (config?.review?.onInvalid === "warn_skip") {
+    if (planReviewConfig.onInvalid === "warn_skip") {
       logger.warn(`Review changes rejected; proceeding with planner graph (${error instanceof Error ? error.message : String(error)})`);
       finalTasks = result.tasks;
     } else if (error instanceof InvalidPlanError) {

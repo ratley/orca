@@ -57,17 +57,8 @@ export interface RunStatus {
   };
 }
 
-export type HookName =
-  | "onMilestone"
-  | "onTaskComplete"
-  | "onTaskFail"
-  | "onInvalidPlan"
-  | "onComplete"
-  | "onError";
-
-export interface HookEvent {
+export interface BaseHookEvent {
   runId: RunId;
-  hook: HookName;
   message: string;
   timestamp: string;
   taskId?: string;
@@ -76,7 +67,30 @@ export interface HookEvent {
   metadata?: Record<string, string | number | boolean | null>;
 }
 
-export type HookHandler = (event: HookEvent) => Promise<void>;
+export interface HookEventMap {
+  onMilestone: BaseHookEvent & { hook: "onMilestone" };
+  onTaskComplete: BaseHookEvent & { hook: "onTaskComplete"; taskId: string; taskName: string };
+  onTaskFail: BaseHookEvent & { hook: "onTaskFail"; taskId: string; taskName: string; error: string };
+  onInvalidPlan: BaseHookEvent & { hook: "onInvalidPlan"; error: string };
+  onFindings: BaseHookEvent & { hook: "onFindings" };
+  onComplete: BaseHookEvent & { hook: "onComplete" };
+  onError: BaseHookEvent & { hook: "onError"; error: string };
+}
+
+export type HookName = keyof HookEventMap;
+
+export type HookEvent = HookEventMap[HookName];
+
+export interface HookHandlerContext {
+  cwd: string;
+  pid: number;
+  invokedAt: string;
+}
+
+export type HookHandler<K extends HookName = HookName> = (
+  event: HookEventMap[K],
+  context: HookHandlerContext
+) => Promise<void> | void;
 
 // Shared agent result types (used by both claude and codex session adapters)
 export interface PlanResult {
@@ -147,14 +161,34 @@ export interface OrcaConfig {
     timeoutMs?: number;
     multiAgent?: boolean;
   };
-  hooks?: Partial<Record<HookName, HookHandler>>;
+  hooks?: { [K in HookName]?: HookHandler<K> };
   hookCommands?: Partial<Record<HookName, string>>;
   pr?: {
     enabled?: boolean;
     requireConfirmation?: boolean;
   };
   review?: {
+    /** @deprecated Use review.plan.enabled */
     enabled?: boolean;
+    /** @deprecated Use review.plan.onInvalid */
     onInvalid?: "fail" | "warn_skip";
+    plan?: {
+      enabled?: boolean;
+      onInvalid?: "fail" | "warn_skip";
+    };
+    execution?: {
+      enabled?: boolean;
+      maxCycles?: number;
+      onFindings?: "auto_fix" | "report_only" | "fail";
+      validator?: {
+        auto?: boolean;
+        commands?: string[];
+      };
+      prompt?: string;
+    };
   };
+}
+
+export function defineOrcaConfig(config: OrcaConfig): OrcaConfig {
+  return config;
 }

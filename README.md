@@ -32,7 +32,23 @@ After planning, Orca runs a structured review pass that can edit the task graph 
 - add/remove task
 - add/remove dependency
 
-The edited graph is re-validated as a DAG. If review output is invalid, Orca fails with an actionable error by default. You can configure `review.onInvalid: "warn_skip"` to log a warning and continue with the original planner graph.
+The edited graph is re-validated as a DAG. If review output is invalid, Orca fails with an actionable error by default. You can configure `review.plan.onInvalid: "warn_skip"` to log a warning and continue with the original planner graph.
+
+### Post-execution review / fix cycles
+
+After task execution, Orca can run deterministic validation commands, then ask Codex to review findings and optionally auto-fix issues in bounded cycles.
+
+- `review.execution.enabled` (default `true`)
+- `review.execution.maxCycles` (default `2`)
+- `review.execution.onFindings`:
+  - `auto_fix` (default): apply fixes and continue until clean or max cycles
+  - `report_only`: report findings and stop
+  - `fail`: mark run failed when findings exist
+- `review.execution.validator.auto` (default `true`): auto-detect validator commands from `package.json`
+- `review.execution.validator.commands` (optional explicit command list)
+- `review.execution.prompt` (optional custom reviewer instruction)
+
+When using the Codex executor, Orca prints a final post-execution review summary.
 
 ## Spec And Plan Files
 
@@ -89,13 +105,25 @@ Orca auto-discovers config in this order:
 
 Later entries override earlier ones.
 
-```js
-// orca.config.js
+```ts
+// orca.config.ts
 export default {
   runsDir: "./.orca/runs",
   sessionLogs: "./session-logs",
+
+  // Function hooks are first-class and strongly typed per hook.
+  hooks: {
+    onTaskComplete: async (event, context) => {
+      console.log(`task done: ${event.taskId} (${event.taskName}) from pid ${context.pid}`);
+    },
+    onError: async (event) => {
+      console.error(event.error);
+    }
+  },
+
+  // Command hooks remain supported; payload is sent as stdin JSON.
   hookCommands: {
-    onTaskComplete: "echo task done: $ORCA_TASK_NAME",
+    onTaskComplete: "node -e 'let s=\"\";process.stdin.on(\"data\",d=>s+=d);process.stdin.on(\"end\",()=>{const p=JSON.parse(s);console.log(`task done: ${p.taskId}`);})'",
     onComplete: "echo run complete",
     onError: "echo run failed"
   },
@@ -104,8 +132,20 @@ export default {
     multiAgent: true,              // enable codex multi-agent (see below)
   },
   review: {
-    enabled: true,                 // default true
-    onInvalid: "fail"             // or "warn_skip"
+    plan: {
+      enabled: true,               // default true
+      onInvalid: "fail"           // or "warn_skip"
+    },
+    execution: {
+      enabled: true,               // default true
+      maxCycles: 2,                // default 2
+      onFindings: "auto_fix",     // "auto_fix" | "report_only" | "fail"
+      validator: {
+        auto: true,                // default true
+        // commands: ["npm run validate"]
+      },
+      // prompt: "Prefer minimal safe fixes"
+    }
   }
 };
 ```
@@ -150,6 +190,7 @@ Global:
 - `--on-task-complete <cmd>`
 - `--on-task-fail <cmd>`
 - `--on-invalid-plan <cmd>`
+- `--on-findings <cmd>`
 - `--on-complete <cmd>`
 - `--on-error <cmd>`
 
@@ -206,6 +247,8 @@ Global:
 - `--check` (API key lookup order: CLI flag → process env → `~/.openclaw/openclaw.json` `env.vars` → `~/.claude/.env` → `~/.config/claude/.env`)
 - `--global`
 - `--project`
+- `--project-config-template`
+- `--skip-project-config`
 
 `orca help`:
 
@@ -220,10 +263,23 @@ Hook names:
 - `onTaskComplete`
 - `onTaskFail`
 - `onInvalidPlan`
+- `onFindings`
 - `onComplete`
 - `onError`
 
-Run hooks from CLI with `--on-...` flags or from config via `hookCommands` / `hooks`.
+Run hooks from CLI with `--on-...` flags or from config via `hooks` / `hookCommands`.
+Unknown hook keys in config are rejected at load time with an explicit allowed-hook list.
+
+Hook contract:
+- Function hooks (`config.hooks`) are the primary path and are strongly typed per hook event.
+- Every function hook receives `(event, context)` where `context` is deterministic: `{ cwd, pid, invokedAt }`.
+- Command hooks (`--on-...` and `config.hookCommands`) receive the full event payload as JSON over stdin.
+- Orca no longer injects hook payload via `ORCA_*` env vars.
+
+Migration note:
+- If your hook commands previously read any `ORCA_*` hook env payload (`ORCA_HOOK_PAYLOAD_JSON`, `ORCA_MSG`, `ORCA_RUN_ID`, etc.), switch them to parse stdin JSON instead.
+- Existing CLI hook flags are preserved (`--on-milestone`, `--on-error`, etc.); only payload transport changed.
+- Smoke-test the hook contract (function + command + concurrency): `npm run smoke:hooks`.
 
 ### Run ID Format
 
