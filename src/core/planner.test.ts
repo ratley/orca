@@ -13,6 +13,19 @@ describe("runPlanner task graph validation", () => {
   let store: RunStore;
   const runId = "planner-1000-abcd";
 
+  const baseTask: Task = {
+    id: "t1",
+    name: "Task 1",
+    description: "desc",
+    dependencies: [],
+    acceptance_criteria: ["a"],
+    status: "pending",
+    retries: 0,
+    maxRetries: 3
+  };
+
+  const baseTasks: Task[] = [baseTask];
+
   beforeEach(async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "orca-planner-test-"));
     specPath = path.join(tempDir, "spec.md");
@@ -28,16 +41,7 @@ describe("runPlanner task graph validation", () => {
 
   test("rejects duplicate IDs", async () => {
     const tasks: Task[] = [
-      {
-        id: "t1",
-        name: "Task 1",
-        description: "desc",
-        dependencies: [],
-        acceptance_criteria: ["a"],
-        status: "pending",
-        retries: 0,
-        maxRetries: 3
-      },
+      baseTask,
       {
         id: "t1",
         name: "Task 2",
@@ -58,14 +62,8 @@ describe("runPlanner task graph validation", () => {
   test("rejects missing dependency IDs", async () => {
     const tasks: Task[] = [
       {
-        id: "t1",
-        name: "Task 1",
-        description: "desc",
-        dependencies: ["missing"],
-        acceptance_criteria: ["a"],
-        status: "pending",
-        retries: 0,
-        maxRetries: 3
+        ...baseTask,
+        dependencies: ["missing"]
       }
     ];
 
@@ -77,14 +75,8 @@ describe("runPlanner task graph validation", () => {
   test("rejects cycles", async () => {
     const tasks: Task[] = [
       {
-        id: "t1",
-        name: "Task 1",
-        description: "desc",
-        dependencies: ["t2"],
-        acceptance_criteria: ["a"],
-        status: "pending",
-        retries: 0,
-        maxRetries: 3
+        ...baseTask,
+        dependencies: ["t2"]
       },
       {
         id: "t2",
@@ -114,23 +106,10 @@ describe("runPlanner task graph validation", () => {
       "utf8"
     );
 
-    const tasks: Task[] = [
-      {
-        id: "t1",
-        name: "Task 1",
-        description: "desc",
-        dependencies: [],
-        acceptance_criteria: ["a"],
-        status: "pending",
-        retries: 0,
-        maxRetries: 3
-      }
-    ];
-
     let capturedSystemContext = "";
     setPlanSpecForTests(async (_spec, systemContext) => {
       capturedSystemContext = systemContext;
-      return { tasks, rawResponse: JSON.stringify(tasks) };
+      return { tasks: baseTasks, rawResponse: JSON.stringify(baseTasks) };
     });
 
     await runPlanner(specPath, store, runId, { skills: [skillDir] });
@@ -140,5 +119,88 @@ describe("runPlanner task graph validation", () => {
     expect(capturedSystemContext).toContain("Helps planning");
     expect(capturedSystemContext).toContain("## Skill Body");
     expect(capturedSystemContext).toContain("Use this.");
+  });
+
+  test("injects AGENTS.md when present", async () => {
+    await fs.writeFile(path.join(tempDir, "AGENTS.md"), "Follow AGENTS guidance", "utf8");
+
+    let capturedSystemContext = "";
+    setPlanSpecForTests(async (_spec, systemContext) => {
+      capturedSystemContext = systemContext;
+      return { tasks: baseTasks, rawResponse: JSON.stringify(baseTasks) };
+    });
+
+    await runPlanner(specPath, store, runId);
+
+    expect(capturedSystemContext).toContain("## Project Instructions");
+    expect(capturedSystemContext).toContain("### AGENTS.md (");
+    expect(capturedSystemContext).toContain("Follow AGENTS guidance");
+    expect(capturedSystemContext).not.toContain("### CLAUDE.md (");
+  });
+
+  test("injects CLAUDE.md when present", async () => {
+    await fs.writeFile(path.join(tempDir, "CLAUDE.md"), "Follow CLAUDE guidance", "utf8");
+
+    let capturedSystemContext = "";
+    setPlanSpecForTests(async (_spec, systemContext) => {
+      capturedSystemContext = systemContext;
+      return { tasks: baseTasks, rawResponse: JSON.stringify(baseTasks) };
+    });
+
+    await runPlanner(specPath, store, runId);
+
+    expect(capturedSystemContext).toContain("## Project Instructions");
+    expect(capturedSystemContext).toContain("### CLAUDE.md (");
+    expect(capturedSystemContext).toContain("Follow CLAUDE guidance");
+    expect(capturedSystemContext).not.toContain("### AGENTS.md (");
+  });
+
+  test("injects AGENTS.md before CLAUDE.md when both are present", async () => {
+    await fs.writeFile(path.join(tempDir, "AGENTS.md"), "AGENTS content", "utf8");
+    await fs.writeFile(path.join(tempDir, "CLAUDE.md"), "CLAUDE content", "utf8");
+
+    let capturedSystemContext = "";
+    setPlanSpecForTests(async (_spec, systemContext) => {
+      capturedSystemContext = systemContext;
+      return { tasks: baseTasks, rawResponse: JSON.stringify(baseTasks) };
+    });
+
+    await runPlanner(specPath, store, runId);
+
+    const agentsIdx = capturedSystemContext.indexOf("### AGENTS.md (");
+    const claudeIdx = capturedSystemContext.indexOf("### CLAUDE.md (");
+    expect(agentsIdx).toBeGreaterThan(-1);
+    expect(claudeIdx).toBeGreaterThan(-1);
+    expect(agentsIdx).toBeLessThan(claudeIdx);
+  });
+
+  test("does not inject project instructions when neither file is present", async () => {
+    let capturedSystemContext = "";
+    setPlanSpecForTests(async (_spec, systemContext) => {
+      capturedSystemContext = systemContext;
+      return { tasks: baseTasks, rawResponse: JSON.stringify(baseTasks) };
+    });
+
+    await runPlanner(specPath, store, runId);
+
+    expect(capturedSystemContext).toBe("You are Orca planner.");
+    expect(capturedSystemContext).not.toContain("## Project Instructions");
+  });
+
+  test("caps and marks truncated project instruction content", async () => {
+    const longContent = "a".repeat(4_500);
+    await fs.writeFile(path.join(tempDir, "AGENTS.md"), longContent, "utf8");
+
+    let capturedSystemContext = "";
+    setPlanSpecForTests(async (_spec, systemContext) => {
+      capturedSystemContext = systemContext;
+      return { tasks: baseTasks, rawResponse: JSON.stringify(baseTasks) };
+    });
+
+    await runPlanner(specPath, store, runId);
+
+    expect(capturedSystemContext).toContain("(truncated to 4000 characters)");
+    expect(capturedSystemContext).toContain("a".repeat(4_000));
+    expect(capturedSystemContext).not.toContain("a".repeat(4_100));
   });
 });
