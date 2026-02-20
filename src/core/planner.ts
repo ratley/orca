@@ -45,22 +45,31 @@ export function setReviewTaskGraphForTests(fn: ReviewTaskGraphFn | null): void {
   testReviewTaskGraphOverride = fn;
 }
 
-function resolvePlanSpecImpl(config?: OrcaConfig): PlanSpecFn {
-  if (testPlanSpecOverride) {
-    return testPlanSpecOverride;
+function resolveExecutorImpl<T>(
+  override: T | null,
+  config: OrcaConfig | undefined,
+  claudeImpl: T,
+  codexImpl: T
+): T {
+  if (override) {
+    return override;
   }
 
   const executor = config?.executor ?? "codex";
-  return executor === "claude" ? planSpecWithClaude : planSpecWithCodex;
+  return executor === "claude" ? claudeImpl : codexImpl;
+}
+
+function resolvePlanSpecImpl(config?: OrcaConfig): PlanSpecFn {
+  return resolveExecutorImpl(testPlanSpecOverride, config, planSpecWithClaude, planSpecWithCodex);
 }
 
 function resolveReviewTaskGraphImpl(config?: OrcaConfig): ReviewTaskGraphFn {
-  if (testReviewTaskGraphOverride) {
-    return testReviewTaskGraphOverride;
-  }
-
-  const executor = config?.executor ?? "codex";
-  return executor === "claude" ? reviewTaskGraphWithClaude : reviewTaskGraphWithCodex;
+  return resolveExecutorImpl(
+    testReviewTaskGraphOverride,
+    config,
+    reviewTaskGraphWithClaude,
+    reviewTaskGraphWithCodex
+  );
 }
 
 function formatSkillsSection(skills: LoadedSkill[]): string {
