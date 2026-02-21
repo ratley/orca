@@ -116,6 +116,7 @@ async function resolveProjectContextDir(specPath: string): Promise<string> {
 async function loadProjectInstructions(specPath: string): Promise<ProjectInstruction[]> {
   const projectDir = await resolveProjectContextDir(specPath);
   const instructions: ProjectInstruction[] = [];
+  const seenCanonicalPaths = new Set<string>();
 
   for (const fileName of PROJECT_INSTRUCTION_FILES) {
     const filePath = path.join(projectDir, fileName);
@@ -123,6 +124,12 @@ async function loadProjectInstructions(specPath: string): Promise<ProjectInstruc
       continue;
     }
 
+    const canonicalPath = await fs.realpath(filePath);
+    if (seenCanonicalPaths.has(canonicalPath)) {
+      continue;
+    }
+
+    seenCanonicalPaths.add(canonicalPath);
     const rawContent = await fs.readFile(filePath, "utf8");
     const content = rawContent.slice(0, PROJECT_INSTRUCTION_CHAR_CAP);
     instructions.push({

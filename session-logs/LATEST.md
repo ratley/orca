@@ -1,16 +1,17 @@
 ---
-date: 2026-02-20T16:20:00-08:00
-session: auto-npm-publish-on-tag
+date: 2026-02-20T17:09:46-08:00
+session: planner-instruction-realpath-dedupe
 agent: subagent
 ---
 
 ## Task
-Implement secure automatic npm publish on `v*` tag push with manual dispatch fallback.
+Deduplicate AGENTS.md and CLAUDE.md project-instruction injection when both resolve to the same underlying file.
 
 ## Scope lock
-- No package/runtime code changes.
-- Keep release tracking workflow behavior intact.
+- Preserve AGENTS-first deterministic order for distinct files.
+- Preserve nearest-.git project-root resolution and truncation marker behavior.
 
 ## Checks run
-- `npm run validate`
-- Codex diff review (`No actionable issues found.`)
+- `bun test src/core/planner.test.ts`
+- `npm run lint`
+- `codex exec` diff review (`No correctness issues found.`)

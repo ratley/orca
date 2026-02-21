@@ -275,6 +275,24 @@ describe("runPlanner task graph validation", () => {
     expect(agentsIdx).toBeLessThan(claudeIdx);
   });
 
+  test("dedupes project instructions when CLAUDE.md symlinks to AGENTS.md", async () => {
+    const agentsPath = path.join(tempDir, "AGENTS.md");
+    await fs.writeFile(agentsPath, "Shared guidance", "utf8");
+    await fs.symlink(agentsPath, path.join(tempDir, "CLAUDE.md"));
+
+    let capturedSystemContext = "";
+    setPlanSpecForTests(async (_spec, systemContext) => {
+      capturedSystemContext = systemContext;
+      return { tasks: baseTasks, rawResponse: JSON.stringify(baseTasks) };
+    });
+
+    await runPlanner(specPath, store, runId);
+
+    expect(capturedSystemContext).toContain("### AGENTS.md (");
+    expect(capturedSystemContext).not.toContain("### CLAUDE.md (");
+    expect(capturedSystemContext.match(/### AGENTS\.md \(/g)?.length).toBe(1);
+  });
+
   test("does not inject project instructions when neither file is present", async () => {
     let capturedSystemContext = "";
     setPlanSpecForTests(async (_spec, systemContext) => {

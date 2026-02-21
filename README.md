@@ -307,6 +307,8 @@ During planning, Orca automatically injects project instruction files when prese
 
 Files are discovered from the project root (nearest `.git` from the spec/task context) and injected in that order.
 
+If both filenames resolve to the same underlying file (for example, `CLAUDE.md` symlinked to `AGENTS.md`), Orca injects that content only once and keeps the first entry in order (`AGENTS.md`).
+
 ### Project Skills
 
 Orca auto-loads skills in this precedence order (first matching skill name wins):
