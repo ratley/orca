@@ -1,7 +1,15 @@
-name: Manual npm Publish
+name: npm Publish
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Optional tag to validate against (e.g. v1.2.3). Defaults to v<package.json version>."
+        required: false
+        type: string
 
 jobs:
   publish:
@@ -11,6 +19,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -18,15 +28,66 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
 
-      - name: Ensure default branch
+      - name: Resolve release context and enforce safety checks
+        id: release
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          TAG_INPUT: ${{ inputs.tag }}
+          GITHUB_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          if [[ "${GITHUB_REF_NAME}" != "${DEFAULT_BRANCH}" ]]; then
-            echo "Publish is only allowed from default branch (${DEFAULT_BRANCH}); got ${GITHUB_REF_NAME}."
+
+          semver_tag_pattern='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
+          local_checkout_version="$(node -p "require('./package.json').version")"
+
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            tag="$REF_NAME"
+            release_sha="$GITHUB_SHA"
+          else
+            tag="${TAG_INPUT:-}"
+            if [[ -z "$tag" ]]; then
+              tag="v${local_checkout_version}"
+            fi
+
+            if ! git fetch --no-tags origin "refs/tags/$tag:refs/tags/$tag"; then
+              echo "Manual publish requires an existing remote tag; could not fetch tag: $tag"
+              exit 1
+            fi
+            release_sha="$(git rev-list -n1 "$tag")"
+          fi
+
+          package_json="$(git show "$release_sha:package.json")"
+          package_name="$(printf '%s' "$package_json" | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>console.log(JSON.parse(d).name));')"
+          package_version="$(printf '%s' "$package_json" | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>console.log(JSON.parse(d).version));')"
+
+          if ! [[ "$tag" =~ $semver_tag_pattern ]]; then
+            echo "Tag must be semver-like (vX.Y.Z with optional prerelease/build metadata); got: $tag"
             exit 1
           fi
+
+          expected_version="${tag#v}"
+          if [[ "$package_version" != "$expected_version" ]]; then
+            echo "package.json version ($package_version) does not match tag version ($expected_version)."
+            exit 1
+          fi
+
+          git fetch origin "$DEFAULT_BRANCH"
+          if ! git merge-base --is-ancestor "$release_sha" "origin/$DEFAULT_BRANCH"; then
+            echo "Release commit $release_sha is not reachable from origin/$DEFAULT_BRANCH."
+            exit 1
+          fi
+
+          {
+            echo "package_name=$package_name"
+            echo "package_version=$package_version"
+            echo "tag=$tag"
+            echo "release_sha=$release_sha"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check out release commit
+        run: git checkout --detach "${{ steps.release.outputs.release_sha }}"
 
       - name: Install dependencies
         run: npm ci
@@ -34,7 +95,36 @@ jobs:
       - name: Validate
         run: npm run validate
 
+      - name: Check npm for existing version
+        id: npm_check
+        env:
+          PACKAGE_NAME: ${{ steps.release.outputs.package_name }}
+          PACKAGE_VERSION: ${{ steps.release.outputs.package_version }}
+        run: |
+          set -euo pipefail
+
+          lookup_output="$(mktemp)"
+          if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version >"$lookup_output" 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "${PACKAGE_NAME}@${PACKAGE_VERSION} already exists on npm; publish will be skipped."
+            exit 0
+          fi
+
+          if grep -q "E404" "$lookup_output"; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "npm registry lookup failed unexpectedly:"
+          cat "$lookup_output"
+          exit 1
+
       - name: Publish to npm
+        if: steps.npm_check.outputs.exists != 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish
+
+      - name: Publish skipped
+        if: steps.npm_check.outputs.exists == 'true'
+        run: echo "No-op: version already published to npm."

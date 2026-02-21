@@ -376,13 +376,21 @@ Orca includes a lightweight GitHub Actions workflow at `.github/workflows/releas
 
 This workflow is for release tracking/changelogs only. It does not publish to npm.
 
-## Manual npm publish workflow (GitHub Actions)
+## npm publish automation (GitHub Actions)
 
-Orca also includes a manual publish workflow at `.github/workflows/publish.yml`.
+Orca includes a publish workflow at `.github/workflows/publish.yml`.
 
-- Trigger: manual only (`workflow_dispatch`)
+- Primary trigger: push a tag matching `v*` (for example `v1.2.3` or `v1.2.3-rc.1`)
+- Optional fallback: manual `workflow_dispatch`
 - Required secret: `NPM_TOKEN`
-- Behavior: checkout → Node setup (npm registry auth) → ensure default branch → `npm ci` → `npm run validate` → `npm publish`
+- Behavior: checkout → Node setup (npm registry auth) → safety checks → `npm ci` → `npm run validate` → publish if version is not already on npm
+
+Safety checks enforced before publish:
+
+1. Tag must be SemVer-like (`vX.Y.Z` with optional prerelease/build metadata)
+2. Release commit must be reachable from the repository default branch
+3. `package.json` version must match the tag version (without the leading `v`)
+4. If the version already exists on npm, publish is skipped as a safe no-op
 
 ### Safe setup
 
@@ -393,10 +401,10 @@ Orca also includes a manual publish workflow at `.github/workflows/publish.yml`.
 
 ### Safe run flow
 
-1. Confirm you are ready to publish the current version in `package.json`.
-2. Open **Actions → Manual npm Publish → Run workflow**.
-3. Run only from the branch/commit you intend to release.
-4. Verify the package on npm after the workflow completes.
+1. Bump `package.json` to the intended release version.
+2. Create and push a matching tag, for example: `git tag v1.2.3 && git push origin v1.2.3`.
+3. Verify the package on npm after the workflow completes.
+4. If needed, run the same workflow manually from **Actions → npm Publish → Run workflow** as a fallback (use an existing tag so the workflow publishes that exact tagged commit).
 
 ## Package manager + lockfile policy
 

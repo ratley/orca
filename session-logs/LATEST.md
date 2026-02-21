@@ -1,16 +1,16 @@
 ---
-date: 2026-02-20T15:20:00-08:00
-session: github-release-tracking-workflow
+date: 2026-02-20T16:20:00-08:00
+session: auto-npm-publish-on-tag
 agent: subagent
 ---
 
 ## Task
-Add a lightweight GitHub Actions workflow to track GitHub Releases/changelogs on tag push.
+Implement secure automatic npm publish on `v*` tag push with manual dispatch fallback.
 
 ## Scope lock
-- Track releases only (no npm publish automation changes).
-- Keep manual npm publish flow unchanged.
+- No package/runtime code changes.
+- Keep release tracking workflow behavior intact.
 
 ## Checks run
 - `npm run validate`
-- Codex staged-diff review
+- Codex diff review (`No actionable issues found.`)
