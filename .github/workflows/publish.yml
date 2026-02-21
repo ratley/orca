@@ -127,4 +127,4 @@ jobs:
 
       - name: Publish skipped
         if: steps.npm_check.outputs.exists == 'true'
-        run: echo "No-op: version already published to npm."
+        run: 'echo "No-op: version already published to npm."'
