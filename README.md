@@ -111,7 +111,9 @@ Later entries override earlier ones.
 
 ```ts
 // orca.config.ts
-export default {
+import { defineOrcaConfig } from "orcastrator";
+
+export default defineOrcaConfig({
   runsDir: "./.orca/runs",
   sessionLogs: "./session-logs",
 
@@ -154,7 +156,7 @@ export default {
       // prompt: "Prefer minimal safe fixes"
     }
   }
-};
+});
 ```
 
 ### Multi-agent mode

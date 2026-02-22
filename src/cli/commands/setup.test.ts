@@ -244,7 +244,8 @@ describe("buildProjectConfigTemplate", () => {
   test("includes typed function hooks and stdin command-hook guidance", () => {
     const template = buildProjectConfigTemplate();
 
-    expect(template).toContain("HookEventMap");
+    expect(template).toContain('import { defineOrcaConfig } from "orcastrator";');
+    expect(template).toContain("const config = defineOrcaConfig({");
     expect(template).toContain("hooks:");
     expect(template).toContain("onTaskComplete: async (event)");
     expect(template).toContain("event payload JSON to stdin");

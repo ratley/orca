@@ -1,17 +1,18 @@
 ---
-date: 2026-02-20T17:09:46-08:00
-session: planner-instruction-realpath-dedupe
+date: 2026-02-22T02:40:00-08:00
+session: typing-hardening-hooks-exports
 agent: subagent
 ---
 
 ## Task
-Deduplicate AGENTS.md and CLAUDE.md project-instruction injection when both resolve to the same underlying file.
+Package-grade typing hardening for hook/event contracts and public type exports.
 
 ## Scope lock
-- Preserve AGENTS-first deterministic order for distinct files.
-- Preserve nearest-.git project-root resolution and truncation marker behavior.
+- Remove duplicate drift-prone hook type declarations from setup template.
+- Emit declarations and expose stable package type exports.
+- Keep changes scoped to typing/contracts and related docs.
 
 ## Checks run
-- `bun test src/core/planner.test.ts`
-- `npm run lint`
-- `codex exec` diff review (`No correctness issues found.`)
+- `bun test`
+- `npm run build`
+- `npm run smoke:hooks`
