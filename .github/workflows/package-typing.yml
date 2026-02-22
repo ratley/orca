@@ -1,0 +1,38 @@
+name: Package Typing Checks
+
+on:
+  pull_request:
+    paths:
+      - "src/types/**"
+      - "src/index.ts"
+      - "src/cli/commands/setup.ts"
+      - "src/cli/commands/setup.test.ts"
+      - "scripts/smoke-consumer-types.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig*.json"
+      - ".github/workflows/package-typing.yml"
+  workflow_dispatch:
+
+jobs:
+  package-typing:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Validate package typing surface
+        run: npm run validate:package-types

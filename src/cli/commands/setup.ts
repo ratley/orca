@@ -314,49 +314,9 @@ function buildMergedConfigModule(config: OrcaConfig): string {
 }
 
 export function buildProjectConfigTemplate(): string {
-  return `type HookName =
-  | "onMilestone"
-  | "onTaskComplete"
-  | "onTaskFail"
-  | "onInvalidPlan"
-  | "onFindings"
-  | "onComplete"
-  | "onError";
+  return `import { defineOrcaConfig } from "orcastrator";
 
-type BaseHookEvent = {
-  runId: string;
-  message: string;
-  timestamp: string;
-  taskId?: string;
-  taskName?: string;
-  error?: string;
-  metadata?: Record<string, string | number | boolean | null>;
-};
-
-type HookEventMap = {
-  onMilestone: BaseHookEvent & { hook: "onMilestone" };
-  onTaskComplete: BaseHookEvent & { hook: "onTaskComplete"; taskId: string; taskName: string };
-  onTaskFail: BaseHookEvent & { hook: "onTaskFail"; taskId: string; taskName: string; error: string };
-  onInvalidPlan: BaseHookEvent & { hook: "onInvalidPlan"; error: string };
-  onFindings: BaseHookEvent & { hook: "onFindings" };
-  onComplete: BaseHookEvent & { hook: "onComplete" };
-  onError: BaseHookEvent & { hook: "onError"; error: string };
-};
-
-type HookHandlerContext = {
-  cwd: string;
-  pid: number;
-  invokedAt: string;
-};
-
-type HookHandler<K extends HookName> = (event: HookEventMap[K], context: HookHandlerContext) => Promise<void> | void;
-
-type OrcaConfigTemplate = {
-  hooks?: { [K in HookName]?: HookHandler<K> };
-  hookCommands?: Partial<Record<HookName, string>>;
-};
-
-const config = {
+const config = defineOrcaConfig({
   // Function hooks are the primary DX. Each hook gets a strongly-typed event + deterministic context.
   hooks: {
     // Fires for run lifecycle milestones (planning/execution/review transitions).
@@ -410,7 +370,7 @@ const config = {
   hookCommands: {
     // onMilestone: "node ./scripts/on-milestone.js"
   }
-} satisfies OrcaConfigTemplate;
+});
 
 export default config;
 `;
