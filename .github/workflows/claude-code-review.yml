@@ -1,0 +1,85 @@
+name: Claude Code Review
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to review when manually triggered"
+        required: true
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  claude-review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run Claude Code Review (structured)
+        id: claude-review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+
+            You are reviewing a PR for Orca, a TypeScript CLI package.
+            Focus only on correctness, regressions, and security/runtime breakage.
+
+            RULES:
+            1. "No issues found" is valid and preferred when true.
+            2. Review the diff as source of truth; ignore stale PR descriptions.
+            3. Do not report style-only suggestions.
+            4. For each finding, include exact file:line + concrete failure scenario.
+            5. Use only these severities:
+               - CRITICAL: production breakage, security, data loss
+               - BUG: incorrect behavior users will hit
+               - RISK: concrete reproducible failure scenario with current code paths
+
+            Return valid JSON matching schema:
+            - result: "NO_ISSUES" or "HAS_FINDINGS"
+            - comment_body: full human PR comment markdown
+
+            If no issues: "No issues found. [one sentence summary of what the PR does]."
+            If issues: list findings by severity with file:line and quoted code.
+
+          claude_args: |
+            --model claude-opus-4-6
+            --allowed-tools "Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"
+            --json-schema '{"type":"object","properties":{"result":{"type":"string","enum":["NO_ISSUES","HAS_FINDINGS"]},"comment_body":{"type":"string"}},"required":["result","comment_body"]}'
+
+      - name: Post review comment (for humans)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          STRUCTURED: ${{ steps.claude-review.outputs.structured_output }}
+        run: |
+          echo "$STRUCTURED" | jq -r '.comment_body' > body.txt
+          gh pr comment "$PR_NUMBER" --body-file body.txt
+
+      - name: Gate PR on Claude result (deterministic)
+        env:
+          STRUCTURED: ${{ steps.claude-review.outputs.structured_output }}
+        run: |
+          result="$(echo "$STRUCTURED" | jq -r '.result')"
+          if [ "$result" != "NO_ISSUES" ]; then
+            echo "Claude review gate failed: result=$result"
+            exit 1
+          fi
+          echo "Claude review gate passed: NO_ISSUES"
