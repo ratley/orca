@@ -4,3 +4,4 @@ dist
 *.local
 .npmrc
 tmp/
+session-logs/
