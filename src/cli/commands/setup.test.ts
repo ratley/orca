@@ -4,24 +4,30 @@ import path from "node:path";
 
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { buildConfigModule, buildProjectConfigTemplate, detectPackageManager, resolveApiKey } from "./setup.js";
+import {
+  buildConfigModule,
+  buildProjectConfigTemplate,
+  detectPackageManager,
+  readClaudeCodeKeychain,
+  resolveApiKey
+} from "./setup.js";
 
 describe("resolveApiKey", () => {
-  const originalAnthropic = process.env.ANTHROPIC_API_KEY;
-  const originalOpenai = process.env.OPENAI_API_KEY;
+  const originalAnthropic = process.env.ORCA_ANTHROPIC_API_KEY;
+  const originalOpenai = process.env.ORCA_OPENAI_API_KEY;
   let tempDir: string | undefined;
 
   afterEach(async () => {
     if (originalAnthropic === undefined) {
-      delete process.env.ANTHROPIC_API_KEY;
+      delete process.env.ORCA_ANTHROPIC_API_KEY;
     } else {
-      process.env.ANTHROPIC_API_KEY = originalAnthropic;
+      process.env.ORCA_ANTHROPIC_API_KEY = originalAnthropic;
     }
 
     if (originalOpenai === undefined) {
-      delete process.env.OPENAI_API_KEY;
+      delete process.env.ORCA_OPENAI_API_KEY;
     } else {
-      process.env.OPENAI_API_KEY = originalOpenai;
+      process.env.ORCA_OPENAI_API_KEY = originalOpenai;
     }
 
     if (tempDir) {
@@ -31,23 +37,37 @@ describe("resolveApiKey", () => {
   });
 
   test("returns flag value when provided", () => {
-    process.env.ANTHROPIC_API_KEY = "env-value";
+    process.env.ORCA_ANTHROPIC_API_KEY = "env-value";
 
     const resolved = resolveApiKey("flag-value", "ANTHROPIC_API_KEY");
 
     expect(resolved).toBe("flag-value");
   });
 
-  test("returns env var when flag is absent", () => {
-    process.env.ANTHROPIC_API_KEY = "env-value";
+  test("returns ORCA env var when flag is absent", () => {
+    process.env.ORCA_ANTHROPIC_API_KEY = "env-value";
 
     const resolved = resolveApiKey(undefined, "ANTHROPIC_API_KEY");
 
     expect(resolved).toBe("env-value");
   });
 
+  test("ignores generic OPENAI_API_KEY env var", async () => {
+    process.env.OPENAI_API_KEY = "generic-openai-value";
+    delete process.env.ORCA_OPENAI_API_KEY;
+
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-setup-test-"));
+    const resolved = resolveApiKey(undefined, "OPENAI_API_KEY", {
+      homedir: tempDir,
+      openclawConfigPath: path.join(tempDir, ".openclaw", "openclaw.json")
+    });
+
+    expect(resolved).toBeUndefined();
+    delete process.env.OPENAI_API_KEY;
+  });
+
   test("returns OpenClaw env var when shell env is absent", async () => {
-    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.ORCA_ANTHROPIC_API_KEY;
 
     tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-setup-test-"));
     const openclawDir = path.join(tempDir, ".openclaw");
@@ -65,7 +85,7 @@ describe("resolveApiKey", () => {
   });
 
   test("treats OpenClaw 1Password refs as configured", async () => {
-    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.ORCA_ANTHROPIC_API_KEY;
 
     tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-setup-test-"));
     const openclawDir = path.join(tempDir, ".openclaw");
@@ -83,7 +103,7 @@ describe("resolveApiKey", () => {
   });
 
   test("returns value from ~/.claude/.env fallback", async () => {
-    delete process.env.OPENAI_API_KEY;
+    delete process.env.ORCA_OPENAI_API_KEY;
 
     tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-setup-test-"));
     const claudeDir = path.join(tempDir, ".claude");
@@ -103,7 +123,7 @@ describe("resolveApiKey", () => {
   });
 
   test("returns value from ~/.config/claude/.env fallback", async () => {
-    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.ORCA_ANTHROPIC_API_KEY;
 
     tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-setup-test-"));
     const claudeConfigDir = path.join(tempDir, ".config", "claude");
@@ -123,7 +143,7 @@ describe("resolveApiKey", () => {
   });
 
   test("returns value from ~/.codex/auth.json fallback for OPENAI_API_KEY", async () => {
-    delete process.env.OPENAI_API_KEY;
+    delete process.env.ORCA_OPENAI_API_KEY;
 
     tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-setup-test-"));
     const codexDir = path.join(tempDir, ".codex");
@@ -143,7 +163,7 @@ describe("resolveApiKey", () => {
   });
 
   test("ignores project-local .env", async () => {
-    delete process.env.OPENAI_API_KEY;
+    delete process.env.ORCA_OPENAI_API_KEY;
 
     tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-setup-test-"));
     await writeFile(
@@ -161,7 +181,7 @@ describe("resolveApiKey", () => {
   });
 
   test("supports quoted .env values and ignores comments", async () => {
-    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.ORCA_ANTHROPIC_API_KEY;
 
     tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-setup-test-"));
     const claudeDir = path.join(tempDir, ".claude");
@@ -181,7 +201,7 @@ describe("resolveApiKey", () => {
   });
 
   test("respects precedence across supported sources", async () => {
-    process.env.ANTHROPIC_API_KEY = "env-value";
+    process.env.ORCA_ANTHROPIC_API_KEY = "env-value";
 
     tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-setup-test-"));
 
@@ -211,7 +231,7 @@ describe("resolveApiKey", () => {
     });
     expect(withEnv).toBe("env-value");
 
-    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.ORCA_ANTHROPIC_API_KEY;
 
     const withOpenclaw = resolveApiKey(undefined, "ANTHROPIC_API_KEY", {
       homedir: tempDir,
@@ -221,16 +241,31 @@ describe("resolveApiKey", () => {
   });
 
   test("returns undefined when no source provides a key", async () => {
-    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.ORCA_OPENAI_API_KEY;
 
     tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-setup-test-"));
 
-    const resolved = resolveApiKey(undefined, "ANTHROPIC_API_KEY", {
+    const resolved = resolveApiKey(undefined, "OPENAI_API_KEY", {
       homedir: tempDir,
       openclawConfigPath: path.join(tempDir, ".openclaw", "openclaw.json")
     });
 
     expect(resolved).toBeUndefined();
+  });
+});
+
+describe("readClaudeCodeKeychain", () => {
+  test("never throws and returns undefined outside darwin", () => {
+    const value = readClaudeCodeKeychain();
+
+    if (process.platform === "darwin") {
+      if (value !== undefined) {
+        expect(typeof value).toBe("string");
+      }
+      return;
+    }
+
+    expect(value).toBeUndefined();
   });
 });
 

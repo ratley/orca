@@ -7,7 +7,7 @@ import readline from "node:readline/promises";
 import { pathToFileURL } from "node:url";
 
 import chalk from "chalk";
-import type { Command } from "commander";
+import { InvalidArgumentError, type Command } from "commander";
 
 import type { OrcaConfig } from "../../types/index.js";
 
@@ -15,8 +15,10 @@ export interface SetupCommandOptions {
   anthropicKey?: string;
   openaiKey?: string;
   check?: boolean;
+  auto?: boolean;
   global?: boolean;
   project?: boolean;
+  executor?: "codex" | "claude";
   projectConfigTemplate?: boolean;
   skipProjectConfig?: boolean;
 }
@@ -93,7 +95,7 @@ type ResolveApiKeyOptions = {
   homedir?: string;
 };
 
-type ApiKeySource = "flag" | "env" | "openclaw" | "dotenv" | "codexAuthJson";
+type ApiKeySource = "flag" | "env" | "openclaw" | "dotenv" | "codexAuthJson" | "claudeCodeKeychain";
 
 type ResolvedApiKey = {
   value: string;
@@ -105,16 +107,30 @@ function formatApiKeySource(source: ApiKeySource | "prompt"): string {
     case "flag":
       return "--key flag";
     case "env":
-      return "environment variable";
+      return "ORCA_* environment variable";
     case "openclaw":
       return "~/.openclaw/openclaw.json";
     case "dotenv":
       return "~/.claude/.env or ~/.config/claude/.env";
     case "codexAuthJson":
       return "~/.codex/auth.json";
+    case "claudeCodeKeychain":
+      return "macOS keychain (Claude Code-credentials)";
     default:
       return "interactive prompt";
   }
+}
+
+function getOrcaEnvVarName(envVarName: string): string | undefined {
+  if (envVarName === "ANTHROPIC_API_KEY") {
+    return "ORCA_ANTHROPIC_API_KEY";
+  }
+
+  if (envVarName === "OPENAI_API_KEY") {
+    return "ORCA_OPENAI_API_KEY";
+  }
+
+  return undefined;
 }
 
 function resolveApiKeyWithSource(
@@ -127,9 +143,12 @@ function resolveApiKeyWithSource(
     return { value: flagValue.trim(), source: "flag" };
   }
 
-  const envValue = process.env[envVarName];
-  if (envValue && envValue.trim().length > 0) {
-    return { value: envValue.trim(), source: "env" };
+  const orcaEnvVarName = getOrcaEnvVarName(envVarName);
+  if (orcaEnvVarName) {
+    const envValue = process.env[orcaEnvVarName];
+    if (envValue && envValue.trim().length > 0) {
+      return { value: envValue.trim(), source: "env" };
+    }
   }
 
   const options =
@@ -154,6 +173,13 @@ function resolveApiKeyWithSource(
     const codexAuthValue = readCodexAuthJson(homedir);
     if (codexAuthValue) {
       return { value: codexAuthValue, source: "codexAuthJson" };
+    }
+  }
+
+  if (envVarName === "ANTHROPIC_API_KEY") {
+    const keychainValue = readClaudeCodeKeychain();
+    if (keychainValue) {
+      return { value: keychainValue, source: "claudeCodeKeychain" };
     }
   }
 
@@ -238,6 +264,34 @@ export function readCodexAuthJson(homedir: string = os.homedir()): string | unde
 
     if (typeof key === "string" && key.trim().length > 0) {
       return key.trim();
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
+}
+
+export function readClaudeCodeKeychain(): string | undefined {
+  if (process.platform !== "darwin") {
+    return undefined;
+  }
+
+  try {
+    const raw = execSync('security find-generic-password -s "Claude Code-credentials" -w', {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"]
+    }).trim();
+
+    const parsed = JSON.parse(raw) as {
+      claudeAiOauth?: {
+        accessToken?: unknown;
+      };
+    };
+
+    const token = parsed.claudeAiOauth?.accessToken;
+    if (typeof token === "string" && token.trim().length > 0) {
+      return token.trim();
     }
   } catch {
     return undefined;
@@ -331,6 +385,14 @@ function unescapeDoubleQuoted(value: string): string {
 
 function unescapeSingleQuoted(value: string): string {
   return value.replace(/\\'/g, "'").replace(/\\\\/g, "\\");
+}
+
+function parseExecutorOption(value: string): "codex" | "claude" {
+  if (value === "codex" || value === "claude") {
+    return value;
+  }
+
+  throw new InvalidArgumentError("executor must be one of: codex, claude");
 }
 
 export function detectPackageManager(
@@ -526,13 +588,15 @@ async function loadExistingConfig(configPath: string): Promise<OrcaConfig | unde
 
 async function saveConfig(
   configPath: string,
-  keys: ApiKeyConfig
+  keys: ApiKeyConfig,
+  executor?: "codex" | "claude"
 ): Promise<void> {
   const existing = await loadExistingConfig(configPath);
   const merged: OrcaConfig = {
     ...existing,
     ...(keys.anthropicApiKey !== undefined ? { anthropicApiKey: keys.anthropicApiKey } : {}),
-    ...(keys.openaiApiKey !== undefined ? { openaiApiKey: keys.openaiApiKey } : {})
+    ...(keys.openaiApiKey !== undefined ? { openaiApiKey: keys.openaiApiKey } : {}),
+    ...(executor !== undefined ? { executor } : {})
   };
 
   const moduleText = buildConfigModule({
@@ -650,7 +714,8 @@ export async function setupCommandHandler(options: SetupCommandOptions): Promise
 
   const explicitTarget = parseSaveTarget(options);
   const checkMode = Boolean(options.check);
-  const canPrompt = supportsPrompting() && !checkMode;
+  const autoMode = Boolean(options.auto);
+  const canPrompt = supportsPrompting() && !checkMode && !autoMode;
   const rl = canPrompt
     ? readline.createInterface({
         input: process.stdin,
@@ -753,20 +818,27 @@ export async function setupCommandHandler(options: SetupCommandOptions): Promise
     }
 
     if (!checkMode && (anthropicApiKey || openaiApiKey)) {
-      const target = rl ? await chooseSaveTarget(rl, explicitTarget) : explicitTarget ?? "global";
+      const target = autoMode ? "global" : (rl ? await chooseSaveTarget(rl, explicitTarget) : explicitTarget ?? "global");
       if (target !== "skip") {
         const configPath = getConfigPath(target);
-        await saveConfig(configPath, {
-          ...(anthropicApiKey !== undefined ? { anthropicApiKey } : {}),
-          ...(openaiApiKey !== undefined ? { openaiApiKey } : {})
-        });
+        const resolvedExecutor = options.executor ?? (openaiApiKey ? "codex" : undefined);
+
+        await saveConfig(
+          configPath,
+          {
+            ...(anthropicApiKey !== undefined ? { anthropicApiKey } : {}),
+            ...(openaiApiKey !== undefined ? { openaiApiKey } : {})
+          },
+          resolvedExecutor
+        );
 
         const printedPath = target === "global" ? "~/.orca/config.js" : "./orca.config.js";
-        console.log(chalk.green(`✓ Config saved to ${printedPath}`));
+        const executorNote = resolvedExecutor ? ` (executor: ${resolvedExecutor})` : "";
+        console.log(chalk.green(`✓ Config saved to ${printedPath}${executorNote}`));
       }
     }
 
-    if (!checkMode) {
+    if (!checkMode && !autoMode) {
       await maybeWriteProjectTemplate(options, rl);
     }
 
@@ -789,7 +861,9 @@ export async function setupCommandHandler(options: SetupCommandOptions): Promise
       return;
     }
 
-    if (!anthropicApiKey || !openaiApiKey) {
+    if (autoMode) {
+      process.exitCode = anthropicApiKey || openaiApiKey ? 0 : 1;
+    } else if (!anthropicApiKey || !openaiApiKey) {
       process.exitCode = 1;
     }
   } finally {
@@ -801,11 +875,13 @@ export function registerSetupCommand(program: Command): void {
   program
     .command("setup")
     .description("Run first-time setup and environment checks")
-    .option("--anthropic-key <key>", "Provide ANTHROPIC_API_KEY directly")
-    .option("--openai-key <key>", "Provide OPENAI_API_KEY directly")
+    .option("--anthropic-key <key>", "Provide Anthropic API key directly")
+    .option("--openai-key <key>", "Provide OpenAI API key directly")
     .option("--check", "Run non-interactive validation checks")
+    .option("--auto", "Run fully non-interactive setup and write ~/.orca/config.js when keys are detected")
     .option("--global", "Save config to ~/.orca/config.js")
     .option("--project", "Save config to ./orca.config.js")
+    .option("--executor <value>", "Set executor in written config (codex|claude)", parseExecutorOption)
     .option("--project-config-template", "Write a typed project hook template to ./orca.config.ts")
     .option("--skip-project-config", "Do not prompt to generate a project config template")
     .action(async (commandOptions: SetupCommandOptions) => {
