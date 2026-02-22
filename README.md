@@ -45,6 +45,7 @@ After task execution, Orca can run deterministic validation commands, then ask C
   - `report_only`: report findings and stop
   - `fail`: mark run failed when findings exist
 - `review.execution.validator.auto` (default `true`): auto-detect validator commands from `package.json`
+  - Caveat: `ORCA_SKIP_VALIDATORS=1` forces this to `false` at runtime
 - `review.execution.validator.commands` (optional explicit command list)
 - `review.execution.prompt` (optional custom reviewer instruction)
 
@@ -96,7 +97,12 @@ orca pr create --run <run-id>
 orca pr publish --run <run-id>
 orca pr status --run <run-id>
 
-orca pr publish --config ./orca.config.js
+orca pr publish --last
+orca pr publish --config ./orca.config.js   # accepted, currently unused by PR command resolution
+
+# Non-TTY requires explicit run selection
+orca pr publish --run <run-id>
+orca pr publish --last
 ```
 
 ## Config
@@ -104,7 +110,7 @@ orca pr publish --config ./orca.config.js
 Orca auto-discovers config in this order:
 
 1. `~/.orca/config.js`
-2. `./orca.config.js` or `./orca.config.ts`
+2. Project config: `./orca.config.ts` (preferred when both exist) or `./orca.config.js`
 3. `--config <path>` (if passed)
 
 Later entries override earlier ones.
@@ -114,10 +120,31 @@ Later entries override earlier ones.
 import { defineOrcaConfig } from "orcastrator";
 
 export default defineOrcaConfig({
+  executor: "codex",
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+  openaiApiKey: process.env.OPENAI_API_KEY,
   runsDir: "./.orca/runs",
   sessionLogs: "./session-logs",
-
-  // Function hooks are first-class and strongly typed per hook.
+  skills: ["./.orca/skills"],
+  maxRetries: 1,
+  claude: {
+    model: "claude-sonnet-4-20250514",
+    effort: "medium",
+    useV2Preview: true,
+    maxTurnsPerTask: 12,
+    allowTextJsonFallback: false
+  },
+  codex: {
+    enabled: true,
+    model: "gpt-5.3-codex",
+    effort: "medium",
+    command: "codex",
+    timeoutMs: 300000,
+    multiAgent: false,
+    perCwdExtraUserRoots: [
+      { cwd: process.cwd(), extraUserRoots: ["/tmp/shared-skills"] }
+    ]
+  },
   hooks: {
     onTaskComplete: async (event, context) => {
       console.log(`task done: ${event.taskId} (${event.taskName}) from pid ${context.pid}`);
@@ -126,31 +153,29 @@ export default defineOrcaConfig({
       console.error(event.error);
     }
   },
-
-  // Command hooks remain supported; payload is sent as stdin JSON.
   hookCommands: {
-    onTaskComplete: "node -e 'let s=\"\";process.stdin.on(\"data\",d=>s+=d);process.stdin.on(\"end\",()=>{const p=JSON.parse(s);console.log(`task done: ${p.taskId}`);})'",
+    onTaskComplete: "node ./scripts/on-task-complete.mjs",
     onComplete: "echo run complete",
     onError: "echo run failed"
   },
-  codex: {
-    model: "gpt-5.3-codex",       // override the codex model
-    multiAgent: true,              // enable codex multi-agent (see below)
-    perCwdExtraUserRoots: [        // optional app-server skill roots per cwd (skills/list)
-      { cwd: process.cwd(), extraUserRoots: ["/tmp/shared-skills"] }
-    ]
+  pr: {
+    enabled: true,
+    requireConfirmation: true
   },
   review: {
+    // Deprecated compatibility aliases (prefer review.plan.*):
+    // enabled: true,
+    // onInvalid: "fail",
     plan: {
-      enabled: true,               // default true
-      onInvalid: "fail"           // or "warn_skip"
+      enabled: true,
+      onInvalid: "fail"
     },
     execution: {
-      enabled: true,               // default true
-      maxCycles: 2,                // default 2
-      onFindings: "auto_fix",     // "auto_fix" | "report_only" | "fail"
+      enabled: true,
+      maxCycles: 2,
+      onFindings: "auto_fix",
       validator: {
-        auto: true,                // default true
+        auto: true,
         // commands: ["npm run validate"]
       },
       // prompt: "Prefer minimal safe fixes"
@@ -158,6 +183,18 @@ export default defineOrcaConfig({
   }
 });
 ```
+
+### Config field reference (OrcaConfig)
+
+Top-level: `executor`, `anthropicApiKey`, `openaiApiKey`, `runsDir`, `sessionLogs`, `skills`, `maxRetries`, `hooks`, `hookCommands`, `pr`, `review`, `claude`, `codex`.
+
+- `pr.enabled`, `pr.requireConfirmation`
+- `maxRetries` is part of `OrcaConfig`; current planner-generated task retries remain fixed in task graph contracts
+- `claude.model`, `claude.effort`, `claude.useV2Preview`, `claude.maxTurnsPerTask`, `claude.allowTextJsonFallback`
+- `codex.enabled`, `codex.model`, `codex.effort`, `codex.command`, `codex.timeoutMs`, `codex.multiAgent`, `codex.perCwdExtraUserRoots`
+- `review.plan.enabled`, `review.plan.onInvalid`
+- `review.execution.enabled`, `review.execution.maxCycles`, `review.execution.onFindings`, `review.execution.validator.auto`, `review.execution.validator.commands`, `review.execution.prompt`
+- Deprecated compatibility aliases: `review.enabled`, `review.onInvalid` (still accepted; prefer `review.plan.*`)
 
 ### Multi-agent mode
 
@@ -207,6 +244,8 @@ Global:
 
 - `--spec <path>`
 - `--config <path>`
+- `--on-milestone <cmd>`
+- `--on-error <cmd>`
 
 `orca status`:
 
@@ -243,9 +282,16 @@ Global:
 
 - `--run <run-id>`
 - `--last`
-- `--config <path>`
+- `--config <path>` (accepted for compatibility; currently unused by PR command run resolution)
 
 `orca pr publish`:
+
+- `--run <run-id>`
+- `--last`
+- `--config <path>` (accepted for compatibility; currently unused by PR command run resolution)
+- If neither `--run` nor `--last` is provided: interactive run picker in TTY; non-TTY requires `--run` or `--last`
+
+`orca skills`:
 
 - `--config <path>`
 
@@ -274,7 +320,7 @@ Hook names:
 - `onInvalidPlan`
 - `onFindings`
 - `onComplete`
-- `onError`
+- `onError` (fires on run failures and hook-dispatch failures)
 
 Run hooks from CLI with `--on-...` flags or from config via `hooks` / `hookCommands`.
 Unknown hook keys in config are rejected at load time with an explicit allowed-hook list.
