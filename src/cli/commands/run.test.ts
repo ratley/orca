@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 import { createRunCommandTestHarness } from "./run-command.test-harness.js";
@@ -8,6 +9,46 @@ type ResumeModule = typeof import("./resume.js");
 
 const harness = createRunCommandTestHarness("orca-run-command-test-");
 const { loadRunModule, parseRun, getTempDir } = harness;
+
+describe("first-run config initialization", () => {
+  test("creates ~/.orca/config.js when no global or project config exists", async () => {
+    const { runModule } = await loadRunModule();
+    const fakeHome = await mkdtemp(path.join(os.tmpdir(), "orca-home-"));
+    const originalCwd = process.cwd();
+    const tempProjectDir = await mkdtemp(path.join(os.tmpdir(), "orca-project-"));
+
+    try {
+      process.chdir(tempProjectDir);
+      await runModule.maybeCreateFirstRunGlobalConfig(fakeHome);
+
+      const written = await readFile(path.join(fakeHome, ".orca", "config.js"), "utf8");
+      expect(written).toContain('executor: "codex"');
+    } finally {
+      process.chdir(originalCwd);
+      await rm(fakeHome, { recursive: true, force: true });
+      await rm(tempProjectDir, { recursive: true, force: true });
+    }
+  });
+
+  test("does not create global config when project config already exists", async () => {
+    const { runModule } = await loadRunModule();
+    const fakeHome = await mkdtemp(path.join(os.tmpdir(), "orca-home-"));
+    const originalCwd = process.cwd();
+    const tempProjectDir = await mkdtemp(path.join(os.tmpdir(), "orca-project-"));
+
+    try {
+      process.chdir(tempProjectDir);
+      await writeFile(path.join(tempProjectDir, "orca.config.ts"), "export default { executor: 'claude' };\n", "utf8");
+      await runModule.maybeCreateFirstRunGlobalConfig(fakeHome);
+
+      await expect(readFile(path.join(fakeHome, ".orca", "config.js"), "utf8")).rejects.toBeDefined();
+    } finally {
+      process.chdir(originalCwd);
+      await rm(fakeHome, { recursive: true, force: true });
+      await rm(tempProjectDir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("run command executor flags", () => {
   test("parses --codex-only and overrides resolved executor", async () => {

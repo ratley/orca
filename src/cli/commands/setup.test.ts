@@ -122,6 +122,26 @@ describe("resolveApiKey", () => {
     expect(resolved).toBe("linux-config-value");
   });
 
+  test("returns value from ~/.codex/auth.json fallback for OPENAI_API_KEY", async () => {
+    delete process.env.OPENAI_API_KEY;
+
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-setup-test-"));
+    const codexDir = path.join(tempDir, ".codex");
+    await mkdir(codexDir, { recursive: true });
+    await writeFile(
+      path.join(codexDir, "auth.json"),
+      JSON.stringify({ auth_mode: "api_key", OPENAI_API_KEY: "sk-codex-value" }),
+      "utf8"
+    );
+
+    const resolved = resolveApiKey(undefined, "OPENAI_API_KEY", {
+      homedir: tempDir,
+      openclawConfigPath: path.join(tempDir, ".openclaw", "openclaw.json")
+    });
+
+    expect(resolved).toBe("sk-codex-value");
+  });
+
   test("ignores project-local .env", async () => {
     delete process.env.OPENAI_API_KEY;
 

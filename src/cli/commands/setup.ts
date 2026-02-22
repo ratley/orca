@@ -93,19 +93,43 @@ type ResolveApiKeyOptions = {
   homedir?: string;
 };
 
-export function resolveApiKey(
+type ApiKeySource = "flag" | "env" | "openclaw" | "dotenv" | "codexAuthJson";
+
+type ResolvedApiKey = {
+  value: string;
+  source: ApiKeySource;
+};
+
+function formatApiKeySource(source: ApiKeySource | "prompt"): string {
+  switch (source) {
+    case "flag":
+      return "--key flag";
+    case "env":
+      return "environment variable";
+    case "openclaw":
+      return "~/.openclaw/openclaw.json";
+    case "dotenv":
+      return "~/.claude/.env or ~/.config/claude/.env";
+    case "codexAuthJson":
+      return "~/.codex/auth.json";
+    default:
+      return "interactive prompt";
+  }
+}
+
+function resolveApiKeyWithSource(
   flagValue: string | undefined,
   envVarName: string,
   openclawConfigPathOrOptions?: string | ResolveApiKeyOptions,
   maybeOptions?: ResolveApiKeyOptions
-): string | undefined {
+): ResolvedApiKey | undefined {
   if (flagValue && flagValue.trim().length > 0) {
-    return flagValue.trim();
+    return { value: flagValue.trim(), source: "flag" };
   }
 
   const envValue = process.env[envVarName];
   if (envValue && envValue.trim().length > 0) {
-    return envValue.trim();
+    return { value: envValue.trim(), source: "env" };
   }
 
   const options =
@@ -116,17 +140,33 @@ export function resolveApiKey(
   const homedir = options.homedir ?? os.homedir();
   const openclawValue = readOpenclawEnvVar(envVarName, options.openclawConfigPath, homedir);
   if (openclawValue) {
-    return openclawValue;
+    return { value: openclawValue, source: "openclaw" };
   }
 
   const dotenvValue = readDotEnvFallback(envVarName, {
     homedir
   });
   if (dotenvValue) {
-    return dotenvValue;
+    return { value: dotenvValue, source: "dotenv" };
+  }
+
+  if (envVarName === "OPENAI_API_KEY") {
+    const codexAuthValue = readCodexAuthJson(homedir);
+    if (codexAuthValue) {
+      return { value: codexAuthValue, source: "codexAuthJson" };
+    }
   }
 
   return undefined;
+}
+
+export function resolveApiKey(
+  flagValue: string | undefined,
+  envVarName: string,
+  openclawConfigPathOrOptions?: string | ResolveApiKeyOptions,
+  maybeOptions?: ResolveApiKeyOptions
+): string | undefined {
+  return resolveApiKeyWithSource(flagValue, envVarName, openclawConfigPathOrOptions, maybeOptions)?.value;
 }
 
 function readOpenclawEnvVar(
@@ -184,6 +224,23 @@ function readDotEnvFallback(
     if (value !== undefined) {
       return value;
     }
+  }
+
+  return undefined;
+}
+
+export function readCodexAuthJson(homedir: string = os.homedir()): string | undefined {
+  const authPath = path.join(homedir, ".codex", "auth.json");
+
+  try {
+    const parsed = JSON.parse(readFileSync(authPath, "utf8")) as { OPENAI_API_KEY?: unknown };
+    const key = parsed.OPENAI_API_KEY;
+
+    if (typeof key === "string" && key.trim().length > 0) {
+      return key.trim();
+    }
+  } catch {
+    return undefined;
   }
 
   return undefined;
@@ -602,8 +659,10 @@ export async function setupCommandHandler(options: SetupCommandOptions): Promise
     : null;
 
   const results: CheckResult[] = [];
-  let anthropicApiKey = resolveApiKey(options.anthropicKey, "ANTHROPIC_API_KEY");
-  let openaiApiKey = resolveApiKey(options.openaiKey, "OPENAI_API_KEY");
+  const initialAnthropic = resolveApiKeyWithSource(options.anthropicKey, "ANTHROPIC_API_KEY");
+  const initialOpenai = resolveApiKeyWithSource(options.openaiKey, "OPENAI_API_KEY");
+  let anthropicApiKey = initialAnthropic?.value;
+  let openaiApiKey = initialOpenai?.value;
 
   try {
     if (!checkMode && rl) {
@@ -611,8 +670,10 @@ export async function setupCommandHandler(options: SetupCommandOptions): Promise
     }
 
     if (anthropicApiKey) {
-      results.push({ name: "ANTHROPIC_API_KEY", status: "pass", detail: checkMode ? "set" : "found" });
-      if (!checkMode) console.log(chalk.green("✓ Anthropic API key found"));
+      const anthropicSource = formatApiKeySource(initialAnthropic?.source ?? "prompt");
+      const anthropicDetail = checkMode ? `set (${anthropicSource})` : `found (${anthropicSource})`;
+      results.push({ name: "ANTHROPIC_API_KEY", status: "pass", detail: anthropicDetail });
+      if (!checkMode) console.log(chalk.green(`✓ Anthropic API key found (${anthropicSource})`));
     } else {
       results.push({ name: "ANTHROPIC_API_KEY", status: "warn", detail: "not set" });
       if (!checkMode) console.log(chalk.yellow("! ANTHROPIC_API_KEY not set"));
@@ -623,8 +684,10 @@ export async function setupCommandHandler(options: SetupCommandOptions): Promise
     }
 
     if (openaiApiKey) {
-      results.push({ name: "OPENAI_API_KEY", status: "pass", detail: checkMode ? "set" : "found" });
-      if (!checkMode) console.log(chalk.green("✓ OpenAI API key found"));
+      const openaiSource = formatApiKeySource(initialOpenai?.source ?? "prompt");
+      const openaiDetail = checkMode ? `set (${openaiSource})` : `found (${openaiSource})`;
+      results.push({ name: "OPENAI_API_KEY", status: "pass", detail: openaiDetail });
+      if (!checkMode) console.log(chalk.green(`✓ OpenAI API key found (${openaiSource})`));
     } else {
       results.push({ name: "OPENAI_API_KEY", status: "warn", detail: "not set" });
       if (!checkMode) console.log(chalk.yellow("! OPENAI_API_KEY not set"));

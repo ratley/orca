@@ -1,6 +1,6 @@
 import { constants as fsConstants } from "node:fs";
 import { exec as execCallback } from "node:child_process";
-import { access, readFile, unlink, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -109,6 +109,33 @@ function parseClaudeEffortOption(value: string): ClaudeEffort {
 function createStore(): RunStore {
   const runsDir = process.env.ORCA_RUNS_DIR;
   return runsDir ? new RunStore(runsDir) : new RunStore();
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath, fsConstants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function maybeCreateFirstRunGlobalConfig(homedir: string = os.homedir()): Promise<void> {
+  const globalConfigPath = path.join(homedir, ".orca", "config.js");
+  const projectJsConfigPath = path.join(process.cwd(), "orca.config.js");
+  const projectTsConfigPath = path.join(process.cwd(), "orca.config.ts");
+
+  const hasAnyConfig = (await pathExists(globalConfigPath))
+    || (await pathExists(projectJsConfigPath))
+    || (await pathExists(projectTsConfigPath));
+
+  if (hasAnyConfig) {
+    return;
+  }
+
+  await mkdir(path.dirname(globalConfigPath), { recursive: true });
+  await writeFile(globalConfigPath, "export default {\n  executor: \"codex\"\n};\n", "utf8");
+  console.log("✓ Created ~/.orca/config.js (first run defaults)");
 }
 
 function computeFinalStatus(overallStatus: string, allTasksDone: boolean): "completed" | "failed" | "cancelled" {
@@ -353,6 +380,7 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
       throw new Error(`Spec file not found or not readable: ${specPath}`);
     });
 
+    await maybeCreateFirstRunGlobalConfig();
     const orcaConfig = await resolveConfig(options.config);
     const effectiveConfig = applyExecutorOverrideForRun(orcaConfig, options);
 
