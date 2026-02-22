@@ -32,7 +32,7 @@ After planning, Orca runs a structured review pass that can edit the task graph 
 - add/remove task
 - add/remove dependency
 
-The edited graph is re-validated as a DAG. If review output is invalid, Orca fails with an actionable error by default. You can configure `review.plan.onInvalid: "warn_skip"` to log a warning and continue with the original planner graph.
+By default, Orca applies valid review improvements and continues execution. The edited graph is re-validated as a DAG. If the review stage output is invalid, Orca fails with an actionable error (`review.plan.onInvalid: "fail"`). Set `review.plan.onInvalid: "warn_skip"` to log a warning and continue with the original planner graph instead.
 
 ### Post-execution review / fix cycles
 
