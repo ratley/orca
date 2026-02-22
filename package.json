@@ -30,7 +30,12 @@
     "typecheck:native": "tsgo --noEmit",
     "typecheck:tsc": "tsc --noEmit",
     "validate": "npm run lint && npm run lint:type-aware && npm run typecheck && npm run test && npm run build",
-    "smoke:hooks": "npm run build && node ./specs/smoke/hooks/run-hooks-smoke.mjs"
+    "smoke:hooks": "npm run build && node ./specs/smoke/hooks/run-hooks-smoke.mjs",
+    "type:check": "tsc -p tsconfig.json --noEmit",
+    "pkg:lint": "publint",
+    "pkg:attw": "attw -P . --profile esm-only",
+    "consumer:smoke": "node ./scripts/smoke-consumer-types.mjs",
+    "validate:package-types": "npm run build && npm run type:check && npm run pkg:lint && npm run pkg:attw && npm run consumer:smoke"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.47",
@@ -47,7 +52,9 @@
     "oxlint": "^1.49.0",
     "typescript": "^5.8.2",
     "@typescript/native-preview": "^7.0.0-dev.20260219.1",
-    "oxlint-tsgolint": "^0.14.1"
+    "oxlint-tsgolint": "^0.14.1",
+    "publint": "^0.3.15",
+    "@arethetypeswrong/cli": "^0.17.4"
   },
   "lint-staged": {
     "*.ts": [
