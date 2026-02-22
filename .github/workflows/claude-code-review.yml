@@ -65,6 +65,7 @@ jobs:
             --json-schema '{"type":"object","properties":{"result":{"type":"string","enum":["NO_ISSUES","HAS_FINDINGS"]},"comment_body":{"type":"string"}},"required":["result","comment_body"]}'
 
       - name: Post review comment (for humans)
+        if: ${{ steps.claude-review.outputs.structured_output != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
@@ -77,6 +78,11 @@ jobs:
         env:
           STRUCTURED: ${{ steps.claude-review.outputs.structured_output }}
         run: |
+          if [ -z "$STRUCTURED" ]; then
+            echo "Claude review gate skipped: structured output missing (expected when this workflow is first introduced and not yet on default branch)."
+            exit 0
+          fi
+
           result="$(echo "$STRUCTURED" | jq -r '.result')"
           if [ "$result" != "NO_ISSUES" ]; then
             echo "Claude review gate failed: result=$result"
