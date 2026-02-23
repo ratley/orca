@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { parseClaudeEffort, parseCodexEffort } from "../types/effort.js";
+import { parseCodexEffort } from "../types/effort.js";
 import type { HookName, OrcaConfig } from "../types/index.js";
 
 const KNOWN_HOOK_NAMES: HookName[] = [
@@ -97,31 +97,15 @@ function coerceConfig(candidate: unknown): OrcaConfig {
   }
 
   if ("executor" in candidate && candidate.executor !== undefined) {
-    if (candidate.executor !== "claude" && candidate.executor !== "codex") {
+    if (candidate.executor !== "codex") {
       const executorDisplay =
         typeof candidate.executor === "string"
           ? candidate.executor
           : (JSON.stringify(candidate.executor) ?? describeType(candidate.executor));
 
       throw new Error(
-        `Config.executor must be 'claude' or 'codex', got ${executorDisplay}`
+        `Config.executor must be 'codex', got ${executorDisplay}`
       );
-    }
-  }
-
-  if ("claude" in candidate && candidate.claude !== undefined) {
-    if (!isObject(candidate.claude)) {
-      throw new Error(`Config.claude must be an object, got ${describeType(candidate.claude)}`);
-    }
-
-    if ("effort" in candidate.claude && candidate.claude.effort !== undefined) {
-      if (typeof candidate.claude.effort !== "string") {
-        throw new Error(
-          `Config.claude.effort must be a string, got ${describeType(candidate.claude.effort)}`
-        );
-      }
-
-      parseClaudeEffort(candidate.claude.effort);
     }
   }
 
@@ -292,8 +276,8 @@ export async function loadConfig(configPath?: string): Promise<OrcaConfig | unde
 
 const TOP_LEVEL_SCALARS: Array<keyof Pick<
   OrcaConfig,
-  "runsDir" | "sessionLogs" | "maxRetries" | "anthropicApiKey" | "openaiApiKey" | "executor"
->> = ["runsDir", "sessionLogs", "maxRetries", "anthropicApiKey", "openaiApiKey", "executor"];
+  "runsDir" | "sessionLogs" | "maxRetries" | "openaiApiKey" | "executor"
+>> = ["runsDir", "sessionLogs", "maxRetries", "openaiApiKey", "executor"];
 
 export function mergeConfigs(...configs: Array<OrcaConfig | undefined>): OrcaConfig | undefined {
   const presentConfigs = configs.filter((config): config is OrcaConfig => config !== undefined);
@@ -308,10 +292,6 @@ export function mergeConfigs(...configs: Array<OrcaConfig | undefined>): OrcaCon
       if (key in config) {
         (merged as Record<string, unknown>)[key] = (config as Record<string, unknown>)[key];
       }
-    }
-
-    if (merged.claude !== undefined || config.claude !== undefined) {
-      merged.claude = { ...merged.claude, ...config.claude };
     }
 
     if (merged.codex !== undefined || config.codex !== undefined) {

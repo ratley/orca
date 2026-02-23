@@ -120,20 +120,12 @@ Later entries override earlier ones.
 import { defineOrcaConfig } from "orcastrator";
 
 export default defineOrcaConfig({
-  executor: "codex",
-  anthropicApiKey: process.env.ANTHROPIC_API_KEY,
-  openaiApiKey: process.env.OPENAI_API_KEY,
+  executor: "codex",  openaiApiKey: process.env.OPENAI_API_KEY,
   runsDir: "./.orca/runs",
   sessionLogs: "./session-logs",
   skills: ["./.orca/skills"],
   maxRetries: 1,
-  claude: {
-    model: "claude-sonnet-4-20250514",
-    effort: "medium",
-    useV2Preview: true,
-    maxTurnsPerTask: 12,
-    allowTextJsonFallback: false
-  },
+
   codex: {
     enabled: true,
     model: "gpt-5.3-codex",
@@ -186,11 +178,10 @@ export default defineOrcaConfig({
 
 ### Config field reference (OrcaConfig)
 
-Top-level: `executor`, `anthropicApiKey`, `openaiApiKey`, `runsDir`, `sessionLogs`, `skills`, `maxRetries`, `hooks`, `hookCommands`, `pr`, `review`, `claude`, `codex`.
+Top-level: `executor`, `openaiApiKey`, `runsDir`, `sessionLogs`, `skills`, `maxRetries`, `hooks`, `hookCommands`, `pr`, `review`, `codex`.
 
 - `pr.enabled`, `pr.requireConfirmation`
 - `maxRetries` is part of `OrcaConfig`; current planner-generated task retries remain fixed in task graph contracts
-- `claude.model`, `claude.effort`, `claude.useV2Preview`, `claude.maxTurnsPerTask`, `claude.allowTextJsonFallback`
 - `codex.enabled`, `codex.model`, `codex.effort`, `codex.command`, `codex.timeoutMs`, `codex.multiAgent`, `codex.perCwdExtraUserRoots`
 - `review.plan.enabled`, `review.plan.onInvalid`
 - `review.execution.enabled`, `review.execution.maxCycles`, `review.execution.onFindings`, `review.execution.validator.auto`, `review.execution.validator.commands`, `review.execution.prompt`
@@ -229,9 +220,7 @@ Global:
 - `--plan <path>`
 - `--config <path>`
 - `--codex-only` (force Codex executor for this run)
-- `--claude-only` (force Claude executor for this run)
 - `--codex-effort <low|medium|high>`
-- `--claude-effort <low|medium|high|max>`
 - `--on-milestone <cmd>`
 - `--on-task-complete <cmd>`
 - `--on-task-fail <cmd>`
@@ -259,9 +248,7 @@ Global:
 - `--last`
 - `--config <path>`
 - `--codex-only`
-- `--claude-only`
 - `--codex-effort <low|medium|high>`
-- `--claude-effort <low|medium|high|max>`
 
 `orca cancel`:
 
@@ -297,15 +284,13 @@ Global:
 
 `orca setup`:
 
-- auto-detect is default (no `--auto`, no `--check`)
-- `--anthropic-key <key>` — override Anthropic API key (written to config)
+- auto-detect is default
 - `--openai-key <key>` — override OpenAI API key (written to config)
-- `--executor <codex|claude>` — explicitly set executor in written config
+- `--executor <codex>` — explicitly set executor in written config
 - `--ts` — write TS config output (`~/.orca/config.ts` / `./orca.config.ts`)
 - `--global` — save to global config (`~/.orca/config.js` by default, or `.ts` with `--ts`)
 - `--project` — save to project config (`./orca.config.js` by default, or `.ts` with `--ts`)
-- `--project-config-template` — write typed project hook template to `./orca.config.ts`
-- `--skip-project-config` — skip project config prompt
+- `--project-config-template` / `--skip-project-config` removed
 
 `orca help`:
 

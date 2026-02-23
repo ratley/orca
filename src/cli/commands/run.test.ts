@@ -5,8 +5,6 @@ import path from "node:path";
 
 import { createRunCommandTestHarness } from "./run-command.test-harness.js";
 
-type ResumeModule = typeof import("./resume.js");
-
 const harness = createRunCommandTestHarness("orca-run-command-test-");
 const { loadRunModule, parseRun, getTempDir } = harness;
 
@@ -38,7 +36,7 @@ describe("first-run config initialization", () => {
 
     try {
       process.chdir(tempProjectDir);
-      await writeFile(path.join(tempProjectDir, "orca.config.ts"), "export default { executor: 'claude' };\n", "utf8");
+      await writeFile(path.join(tempProjectDir, "orca.config.ts"), "export default { executor: 'codex' };\n", "utf8");
       await runModule.maybeCreateFirstRunGlobalConfig(fakeHome);
 
       await expect(readFile(path.join(fakeHome, ".orca", "config.js"), "utf8")).rejects.toBeDefined();
@@ -77,7 +75,7 @@ describe("run command executor flags", () => {
   test("parses --codex-only and overrides resolved executor", async () => {
     const { runModule, runPlannerMock, runTaskRunnerMock } = await loadRunModule();
     const configPath = path.join(getTempDir(), "orca.config.js");
-    const originalConfig = "export default { executor: 'claude' };\n";
+    const originalConfig = "export default { executor: 'codex' };\n";
     await writeFile(configPath, originalConfig, "utf8");
 
     await parseRun(runModule, ["run", "--task", "x", "--config", configPath, "--codex-only"]);
@@ -89,108 +87,17 @@ describe("run command executor flags", () => {
     expect(await readFile(configPath, "utf8")).toBe(originalConfig);
   });
 
-  test("parses --claude-only and overrides resolved executor", async () => {
-    const { runModule, runPlannerMock, runTaskRunnerMock, createCodexSessionMock, ensureCodexMultiAgentMock } =
-      await loadRunModule();
-    const configPath = path.join(getTempDir(), "orca.config.js");
-    const originalConfig = "export default { executor: 'codex' };\n";
-    await writeFile(configPath, originalConfig, "utf8");
-
-    await parseRun(runModule, ["run", "--task", "x", "--config", configPath, "--claude-only"]);
-
-    const plannerConfig = runPlannerMock.mock.calls[0]?.[3] as { executor?: string } | undefined;
-    const runnerArg = runTaskRunnerMock.mock.calls[0]?.[0] as { config?: { executor?: string } } | undefined;
-    expect(plannerConfig?.executor).toBe("claude");
-    expect(runnerArg?.config?.executor).toBe("claude");
-    expect(createCodexSessionMock).not.toHaveBeenCalled();
-    expect(ensureCodexMultiAgentMock).not.toHaveBeenCalled();
-    expect(await readFile(configPath, "utf8")).toBe(originalConfig);
-  });
-
   test("no executor flags keeps resolved config executor", async () => {
     const { runModule, runPlannerMock, runTaskRunnerMock } = await loadRunModule();
     const configPath = path.join(getTempDir(), "orca.config.js");
-    await writeFile(configPath, "export default { executor: 'claude' };\n", "utf8");
+    await writeFile(configPath, "export default { executor: 'codex' };\n", "utf8");
 
     await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
 
     const plannerConfig = runPlannerMock.mock.calls[0]?.[3] as { executor?: string } | undefined;
     const runnerArg = runTaskRunnerMock.mock.calls[0]?.[0] as { config?: { executor?: string } } | undefined;
-    expect(plannerConfig?.executor).toBe("claude");
-    expect(runnerArg?.config?.executor).toBe("claude");
-  });
-
-  test("throws on conflicting executor flags", async () => {
-    const { runModule } = await loadRunModule();
-    await expect(
-      runModule.runCommandHandler({
-        task: "x",
-        codexOnly: true,
-        claudeOnly: true
-      })
-    ).rejects.toThrow("--codex-only and --claude-only are mutually exclusive");
-  });
-
-  test("forces codex executor when nested inside Claude Code", async () => {
-    const { runModule, runPlannerMock, runTaskRunnerMock } = await loadRunModule();
-    const configPath = path.join(getTempDir(), "orca.config.js");
-    const originalNested = process.env.CLAUDE_CODE_SESSION_ID;
-    const originalOpenai = process.env.OPENAI_API_KEY;
-
-    try {
-      process.env.CLAUDE_CODE_SESSION_ID = "nested-session";
-      process.env.OPENAI_API_KEY = "sk-openai";
-      await writeFile(configPath, "export default { executor: 'claude' };\n", "utf8");
-
-      await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
-
-      const plannerConfig = runPlannerMock.mock.calls[0]?.[3] as { executor?: string } | undefined;
-      const runnerArg = runTaskRunnerMock.mock.calls[0]?.[0] as { config?: { executor?: string } } | undefined;
-      expect(plannerConfig?.executor).toBe("codex");
-      expect(runnerArg?.config?.executor).toBe("codex");
-    } finally {
-      if (originalNested === undefined) delete process.env.CLAUDE_CODE_SESSION_ID;
-      else process.env.CLAUDE_CODE_SESSION_ID = originalNested;
-
-      if (originalOpenai === undefined) delete process.env.OPENAI_API_KEY;
-      else process.env.OPENAI_API_KEY = originalOpenai;
-    }
-  });
-
-  test("exits with code 1 in nested Claude Code session when Codex is unavailable", async () => {
-    const { runModule, runPlannerMock, runTaskRunnerMock } = await loadRunModule();
-    const originalNested = process.env.CLAUDE_CODE_ENTRYPOINT;
-    const originalOpenai = process.env.OPENAI_API_KEY;
-    const originalOrcaOpenai = process.env.ORCA_OPENAI_API_KEY;
-    const originalHome = process.env.HOME;
-    const isolatedHome = await mkdtemp(path.join(os.tmpdir(), "orca-no-codex-home-"));
-
-    try {
-      process.env.CLAUDE_CODE_ENTRYPOINT = "nested-entrypoint";
-      delete process.env.OPENAI_API_KEY;
-      delete process.env.ORCA_OPENAI_API_KEY;
-      process.env.HOME = isolatedHome;
-
-      await parseRun(runModule, ["run", "--task", "x"]);
-
-      expect(process.exitCode).toBe(1);
-      expect(runPlannerMock).not.toHaveBeenCalled();
-      expect(runTaskRunnerMock).not.toHaveBeenCalled();
-    } finally {
-      if (originalNested === undefined) delete process.env.CLAUDE_CODE_ENTRYPOINT;
-      else process.env.CLAUDE_CODE_ENTRYPOINT = originalNested;
-
-      if (originalOpenai === undefined) delete process.env.OPENAI_API_KEY;
-      else process.env.OPENAI_API_KEY = originalOpenai;
-
-      if (originalOrcaOpenai === undefined) delete process.env.ORCA_OPENAI_API_KEY;
-      else process.env.ORCA_OPENAI_API_KEY = originalOrcaOpenai;
-
-      if (originalHome === undefined) delete process.env.HOME;
-      else process.env.HOME = originalHome;
-
-      await rm(isolatedHome, { recursive: true, force: true });
-    }
+    expect(plannerConfig?.executor).toBe("codex");
+    expect(runnerArg?.config?.executor).toBe("codex");
   });
 
   test("dispatches onInvalidPlan hook when planner rejects invalid graph", async () => {
@@ -225,58 +132,10 @@ describe("run command executor flags", () => {
     expect(runnerArg?.config?.codex?.effort).toBe("medium");
   });
 
-  test("applies --claude-effort to effective claude config", async () => {
-    const { runModule, runPlannerMock, runTaskRunnerMock } = await loadRunModule();
-
-    await parseRun(runModule, ["run", "--task", "x", "--claude-effort", "max"]);
-
-    const plannerConfig = runPlannerMock.mock.calls[0]?.[3] as { claude?: { effort?: string } } | undefined;
-    const runnerArg = runTaskRunnerMock.mock.calls[0]?.[0] as
-      | { config?: { claude?: { effort?: string } } }
-      | undefined;
-    expect(plannerConfig?.claude?.effort).toBe("max");
-    expect(runnerArg?.config?.claude?.effort).toBe("max");
-  });
-
-  test("both effort flags are accepted; active executor uses matching effort", async () => {
-    const { runModule, runPlannerMock, runTaskRunnerMock } = await loadRunModule();
-
-    await parseRun(runModule, [
-      "run",
-      "--task",
-      "x",
-      "--codex-only",
-      "--codex-effort",
-      "high",
-      "--claude-effort",
-      "low",
-    ]);
-
-    const plannerConfig = runPlannerMock.mock.calls[0]?.[3] as
-      | { executor?: string; codex?: { effort?: string }; claude?: { effort?: string } }
-      | undefined;
-    const runnerArg = runTaskRunnerMock.mock.calls[0]?.[0] as
-      | { config?: { executor?: string; codex?: { effort?: string }; claude?: { effort?: string } } }
-      | undefined;
-
-    expect(plannerConfig?.executor).toBe("codex");
-    expect(plannerConfig?.codex?.effort).toBe("high");
-    expect(plannerConfig?.claude?.effort).toBe("low");
-    expect(runnerArg?.config?.executor).toBe("codex");
-    expect(runnerArg?.config?.codex?.effort).toBe("high");
-  });
-
   test("rejects invalid codex effort", async () => {
     const { runModule } = await loadRunModule();
     await expect(parseRun(runModule, ["run", "--task", "x", "--codex-effort", "extreme"])).rejects.toThrow(
       "Codex effort must be one of",
-    );
-  });
-
-  test("rejects invalid claude effort", async () => {
-    const { runModule } = await loadRunModule();
-    await expect(parseRun(runModule, ["run", "--task", "x", "--claude-effort", "ultra"])).rejects.toThrow(
-      "Claude effort must be one of",
     );
   });
 
@@ -409,14 +268,4 @@ describe("run command executor flags", () => {
 });
 
 describe("resume command executor flags", () => {
-  test("throws on conflicting executor flags", async () => {
-    const resumeModule: ResumeModule = await import(`./resume.js?test=${Math.random()}`);
-    await expect(
-      resumeModule.resumeCommandHandler({
-        run: "run-test-1000-abcd",
-        codexOnly: true,
-        claudeOnly: true
-      })
-    ).rejects.toThrow("--codex-only and --claude-only are mutually exclusive");
-  });
 });

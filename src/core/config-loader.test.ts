@@ -86,7 +86,7 @@ describe("config-loader", () => {
         path.join(tempDir, "missing-project.js"),
         cliPath
       )
-    ).rejects.toThrow("Config.executor must be 'claude' or 'codex', got invalid-executor");
+    ).rejects.toThrow("Config.executor must be 'codex', got invalid-executor");
   });
 
   test("resolveConfigFromPaths rejects unknown hookCommands keys", async () => {
@@ -141,19 +141,6 @@ describe("config-loader", () => {
     ).rejects.toThrow("Config.review.onInvalid must be 'fail' or 'warn_skip'");
   });
 
-  test("resolveConfigFromPaths accepts executor 'claude'", async () => {
-    const cliPath = path.join(tempDir, "cli.config.js");
-    await fs.writeFile(cliPath, "export default { executor: 'claude' };\n", "utf8");
-
-    const resolved = await resolveConfigFromPaths(
-      path.join(tempDir, "missing-global.js"),
-      path.join(tempDir, "missing-project.js"),
-      cliPath
-    );
-
-    expect(resolved?.executor).toBe("claude");
-  });
-
   test("resolveConfigFromPaths accepts executor 'codex'", async () => {
     const cliPath = path.join(tempDir, "cli.config.js");
     await fs.writeFile(cliPath, "export default { executor: 'codex' };\n", "utf8");
@@ -178,19 +165,6 @@ describe("config-loader", () => {
         cliPath
       )
     ).rejects.toThrow("Codex effort must be one of");
-  });
-
-  test("resolveConfigFromPaths throws on invalid claude effort value", async () => {
-    const cliPath = path.join(tempDir, "cli.config.js");
-    await fs.writeFile(cliPath, "export default { claude: { effort: 'extreme' } };\n", "utf8");
-
-    await expect(
-      resolveConfigFromPaths(
-        path.join(tempDir, "missing-global.js"),
-        path.join(tempDir, "missing-project.js"),
-        cliPath
-      )
-    ).rejects.toThrow("Claude effort must be one of");
   });
 
   test("resolveConfigFromPaths validates codex.perCwdExtraUserRoots shape", async () => {
@@ -235,12 +209,12 @@ describe("config-loader", () => {
 
     await fs.writeFile(
       globalPath,
-      "export default { runsDir: 'global-runs', maxRetries: 2, skills: ['/skills/global', '/skills/shared'], claude: { model: 'claude-global' }, codex: { enabled: false, model: 'gpt-global' }, pr: { enabled: true, requireConfirmation: true }, hookCommands: { onError: 'echo global-error' } };\n",
+      "export default { runsDir: 'global-runs', maxRetries: 2, skills: ['/skills/global', '/skills/shared'], codex: { enabled: false, model: 'gpt-global' }, pr: { enabled: true, requireConfirmation: true }, hookCommands: { onError: 'echo global-error' } };\n",
       "utf8"
     );
     await fs.writeFile(
       projectPath,
-      "export default { runsDir: 'project-runs', sessionLogs: '/tmp/project-session-logs', skills: ['/skills/project', '/skills/shared'], claude: { useV2Preview: true }, codex: { model: 'gpt-project' }, pr: { requireConfirmation: false }, hookCommands: { onMilestone: 'echo project-milestone' } };\n",
+      "export default { runsDir: 'project-runs', sessionLogs: '/tmp/project-session-logs', skills: ['/skills/project', '/skills/shared'], codex: { model: 'gpt-project' }, pr: { requireConfirmation: false }, hookCommands: { onMilestone: 'echo project-milestone' } };\n",
       "utf8"
     );
 
@@ -251,11 +225,7 @@ describe("config-loader", () => {
       sessionLogs: "/tmp/project-session-logs",
       maxRetries: 2,
       skills: ["/skills/global", "/skills/shared", "/skills/project"],
-      claude: {
-        model: "claude-global",
-        useV2Preview: true
-      },
-      codex: {
+            codex: {
         enabled: false,
         model: "gpt-project"
       },
@@ -274,11 +244,8 @@ describe("config-loader", () => {
     const globalConfig = {
       runsDir: "global",
       maxRetries: 1,
-      sessionLogs: "global-logs",
-      anthropicApiKey: "global-key",
-      skills: ["global-skill", "shared-skill"],
-      claude: { model: "claude-global" },
-      codex: { enabled: false },
+      sessionLogs: "global-logs",      skills: ["global-skill", "shared-skill"],
+            codex: { enabled: false },
       pr: { enabled: true },
       hookCommands: { onError: "echo global-error" }
     };
@@ -288,8 +255,7 @@ describe("config-loader", () => {
       maxRetries: 2,
       sessionLogs: "project-logs",
       skills: ["project-skill", "shared-skill"],
-      claude: { useV2Preview: true },
-      codex: { model: "gpt-project" },
+            codex: { model: "gpt-project" },
       pr: { requireConfirmation: true },
       hookCommands: { onError: "echo project-error", onComplete: "echo project-complete" }
     };
@@ -300,8 +266,7 @@ describe("config-loader", () => {
       sessionLogs: "cli-logs",
       openaiApiKey: "cli-openai",
       skills: ["cli-skill", "project-skill"],
-      claude: { model: "claude-cli" },
-      codex: { enabled: true },
+            codex: { enabled: true },
       pr: { requireConfirmation: false },
       hookCommands: { onComplete: "echo cli-complete" }
     };
@@ -311,15 +276,9 @@ describe("config-loader", () => {
     expect(merged).toEqual({
       runsDir: "cli",
       sessionLogs: "cli-logs",
-      maxRetries: 3,
-      anthropicApiKey: "global-key",
-      openaiApiKey: "cli-openai",
+      maxRetries: 3,      openaiApiKey: "cli-openai",
       skills: ["global-skill", "shared-skill", "project-skill", "cli-skill"],
-      claude: {
-        model: "claude-cli",
-        useV2Preview: true
-      },
-      codex: {
+            codex: {
         enabled: true,
         model: "gpt-project"
       },
@@ -335,13 +294,13 @@ describe("config-loader", () => {
   });
 
   test("mergeConfigs merges executor with global < project < cli precedence", () => {
-    const globalConfig = { executor: "claude" as const };
-    const projectConfig = { executor: "codex" as const };
-    const cliConfig = { executor: "claude" as const };
+    const globalConfig = { executor: "codex" as const };
+    const projectConfig = undefined;
+    const cliConfig = { executor: "codex" as const };
 
     const merged = mergeConfigs(globalConfig, projectConfig, cliConfig);
 
-    expect(merged?.executor).toBe("claude");
+    expect(merged?.executor).toBe("codex");
   });
 
   test("mergeConfigs deeply merges review plan/execution settings", () => {

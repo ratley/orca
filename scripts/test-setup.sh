@@ -69,8 +69,7 @@ run_case() {
 
 run_case "neither executor" "" "--global" ".orca/config.js" "1"
 run_case "codex only" "OPENAI_API_KEY=sk-fake" "--global" ".orca/config.js" "0"
-run_case "claude only" "ANTHROPIC_API_KEY=sk-ant-fake" "--global" ".orca/config.js" "0"
-run_case "both" "OPENAI_API_KEY=sk-fake ANTHROPIC_API_KEY=sk-ant-fake" "--global" ".orca/config.js" "0"
+run_case "openai env" "OPENAI_API_KEY=sk-fake" "--global" ".orca/config.js" "0"
 run_case "ts config output" "OPENAI_API_KEY=sk-fake" "--global --ts" ".orca/config.ts" "0"
 
 run_project_case() {

@@ -21,7 +21,7 @@ function printSection(title: string, entries: HelpSectionEntry[]): void {
 }
 
 function printStyledHelpPage(): void {
-  console.log("orca — coordinated agent run harness");
+  console.log("orca — coordinated codex run harness");
   console.log("");
 
   printSection("RUNNING", [
@@ -47,35 +47,16 @@ function printStyledHelpPage(): void {
     { command: "orca pr status --run <id>", description: "check PR state and CI" }
   ]);
 
-  printSection("SETUP", [
-    { command: "orca setup", description: "first-time setup and environment checks" }
-  ]);
+  printSection("SETUP", [{ command: "orca setup", description: "first-time setup and Codex environment checks" }]);
 
   printSection("FLAGS", [
     { command: "-p, --prompt <text>", description: "inline task goal (alias: --task)" },
     { command: "--plan, --spec <path>", description: "path to spec or plan file" },
     { command: "--run <id>", description: "specify run by ID" },
     { command: "--last", description: "use the most recent run" },
-    {
-      command: "--config <path>",
-      description: "explicit config file (auto-discovered by default)"
-    },
-    {
-      command: "--codex-only",
-      description: "override executor to Codex for the current run"
-    },
-    {
-      command: "--claude-only",
-      description: "override executor to Claude for the current run"
-    },
-    {
-      command: "--codex-effort <value>",
-      description: "override Codex effort for the current run"
-    },
-    {
-      command: "--claude-effort <value>",
-      description: "override Claude effort for the current run"
-    },
+    { command: "--config <path>", description: "explicit config file (auto-discovered by default)" },
+    { command: "--codex-only", description: "override executor to Codex for the current run" },
+    { command: "--codex-effort <value>", description: "override Codex effort for the current run" },
     { command: "--full-auto", description: "skip all questions, proceed autonomously" },
     { command: "--on-complete <cmd>", description: "shell hook on run complete" },
     { command: "--on-error <cmd>", description: "shell hook on run error" },
@@ -85,41 +66,30 @@ function printStyledHelpPage(): void {
 }
 
 function findCommand(program: Command, pathText: string): Command | undefined {
-  const segments = pathText
-    .split(" ")
-    .map((segment) => segment.trim())
-    .filter((segment) => segment.length > 0);
-
+  const segments = pathText.split(" ").map((segment) => segment.trim()).filter((segment) => segment.length > 0);
   let current: Command | undefined = program;
   for (const segment of segments) {
     current = current.commands.find((command) => command.name() === segment);
-    if (!current) {
-      return undefined;
-    }
+    if (!current) return undefined;
   }
-
   return current;
 }
 
 export function registerHelpCommand(program: Command): void {
   program.addHelpCommand(false);
+  program.command("help [command]").description("display help for command").action((commandPath?: string) => {
+    if (!commandPath) {
+      printStyledHelpPage();
+      return;
+    }
 
-  program
-    .command("help [command]")
-    .description("display help for command")
-    .action((commandPath?: string) => {
-      if (!commandPath) {
-        printStyledHelpPage();
-        return;
-      }
+    const target = findCommand(program, commandPath);
+    if (!target) {
+      console.error(`error: unknown command '${commandPath}'`);
+      process.exitCode = 1;
+      return;
+    }
 
-      const target = findCommand(program, commandPath);
-      if (!target) {
-        console.error(`error: unknown command '${commandPath}'`);
-        process.exitCode = 1;
-        return;
-      }
-
-      target.outputHelp();
-    });
+    target.outputHelp();
+  });
 }

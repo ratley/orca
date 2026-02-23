@@ -1,7 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import { planSpec as planSpecWithClaude, reviewTaskGraph as reviewTaskGraphWithClaude } from "../agents/claude/session.js";
 import { planSpec as planSpecWithCodex, reviewTaskGraph as reviewTaskGraphWithCodex } from "../agents/codex/session.js";
 import type { OrcaConfig, Task, TaskGraphReviewResult } from "../types/index.js";
 import { logger } from "../utils/logger.js";
@@ -11,11 +10,11 @@ import { validateDAG } from "./dependency-graph.js";
 import { applyTaskGraphReviewChanges, summarizeReviewChanges } from "./task-graph-review.js";
 
 const DEFAULT_SYSTEM_CONTEXT = "You are Orca planner.";
-const PROJECT_INSTRUCTION_FILES = ["AGENTS.md", "CLAUDE.md"] as const;
+const PROJECT_INSTRUCTION_FILES = ["AGENTS.md"] as const;
 const PROJECT_INSTRUCTION_CHAR_CAP = 4_000;
 
-type PlanSpecFn = typeof planSpecWithClaude;
-type ReviewTaskGraphFn = typeof reviewTaskGraphWithClaude;
+type PlanSpecFn = typeof planSpecWithCodex;
+type ReviewTaskGraphFn = typeof reviewTaskGraphWithCodex;
 
 export class InvalidPlanError extends Error {
   readonly stage: "planner" | "review";
@@ -45,31 +44,12 @@ export function setReviewTaskGraphForTests(fn: ReviewTaskGraphFn | null): void {
   testReviewTaskGraphOverride = fn;
 }
 
-function resolveExecutorImpl<T>(
-  override: T | null,
-  config: OrcaConfig | undefined,
-  claudeImpl: T,
-  codexImpl: T
-): T {
-  if (override) {
-    return override;
-  }
-
-  const executor = config?.executor ?? "codex";
-  return executor === "claude" ? claudeImpl : codexImpl;
+function resolvePlanSpecImpl(_config?: OrcaConfig): PlanSpecFn {
+  return testPlanSpecOverride ?? planSpecWithCodex;
 }
 
-function resolvePlanSpecImpl(config?: OrcaConfig): PlanSpecFn {
-  return resolveExecutorImpl(testPlanSpecOverride, config, planSpecWithClaude, planSpecWithCodex);
-}
-
-function resolveReviewTaskGraphImpl(config?: OrcaConfig): ReviewTaskGraphFn {
-  return resolveExecutorImpl(
-    testReviewTaskGraphOverride,
-    config,
-    reviewTaskGraphWithClaude,
-    reviewTaskGraphWithCodex
-  );
+function resolveReviewTaskGraphImpl(_config?: OrcaConfig): ReviewTaskGraphFn {
+  return testReviewTaskGraphOverride ?? reviewTaskGraphWithCodex;
 }
 
 function formatSkillsSection(skills: LoadedSkill[]): string {
