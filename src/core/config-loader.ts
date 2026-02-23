@@ -385,9 +385,20 @@ export async function resolveConfigFromPaths(
 }
 
 export async function resolveConfig(cliConfigPath?: string): Promise<OrcaConfig | undefined> {
-  const globalConfigPath = path.join(os.homedir(), ".orca", "config.js");
+  const globalJsConfigPath = path.join(os.homedir(), ".orca", "config.js");
+  const globalTsConfigPath = path.join(os.homedir(), ".orca", "config.ts");
   const projectJsConfigPath = path.join(process.cwd(), "orca.config.js");
   const projectTsConfigPath = path.join(process.cwd(), "orca.config.ts");
+
+  let globalConfigPath = globalTsConfigPath;
+  try {
+    await access(globalTsConfigPath, fsConstants.R_OK);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+    globalConfigPath = globalJsConfigPath;
+  }
 
   let projectConfigPath = projectTsConfigPath;
   try {

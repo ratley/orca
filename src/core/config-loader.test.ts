@@ -38,6 +38,17 @@ describe("config-loader", () => {
     expect(resolved?.runsDir).toBe("from-ts");
   });
 
+  test("resolveConfigFromPaths loads a global ts config path", async () => {
+    process.chdir(tempDir);
+
+    const globalTsPath = path.join(tempDir, "global.config.ts");
+    await fs.writeFile(globalTsPath, "export default { runsDir: 'global-ts' };\n", "utf8");
+
+    const resolved = await resolveConfigFromPaths(globalTsPath, path.join(tempDir, "missing-project.js"));
+
+    expect(resolved?.runsDir).toBe("global-ts");
+  });
+
   test("resolveConfigFromPaths returns undefined when no configs exist", async () => {
     const resolved = await resolveConfigFromPaths(
       path.join(tempDir, "missing-global.js"),
