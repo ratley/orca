@@ -24,11 +24,13 @@ export function createRunCommandTestHarness(tempPrefix: string): RunCommandTestH
   let tempDir = "";
   const originalRunsDir = process.env.ORCA_RUNS_DIR;
   const originalSkipValidators = process.env.ORCA_SKIP_VALIDATORS;
+  const originalOpenaiApiKey = process.env.OPENAI_API_KEY;
 
   beforeEach(async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), tempPrefix));
     process.env.ORCA_RUNS_DIR = path.join(tempDir, "runs");
     process.env.ORCA_SKIP_VALIDATORS = "1";
+    process.env.OPENAI_API_KEY = "test-openai-key";
     process.exitCode = 0;
   });
 
@@ -44,6 +46,11 @@ export function createRunCommandTestHarness(tempPrefix: string): RunCommandTestH
       delete process.env.ORCA_SKIP_VALIDATORS;
     } else {
       process.env.ORCA_SKIP_VALIDATORS = originalSkipValidators;
+    }
+    if (originalOpenaiApiKey === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = originalOpenaiApiKey;
     }
     await rm(tempDir, { recursive: true, force: true });
   });
@@ -133,7 +140,6 @@ export function createRunCommandTestHarness(tempPrefix: string): RunCommandTestH
     void mock.module("../../utils/ids.js", () => ({
       generateRunId: () => "run-test-1000-abcd"
     }));
-
     const runModule = await import(`./run.js?test=${Math.random()}`);
     return {
       runModule,
