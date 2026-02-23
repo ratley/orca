@@ -39,6 +39,14 @@ function printStyledHelpPage(): void {
     { command: "orca cancel --run <id>", description: "cancel active run" }
   ]);
 
+  printSection("PULL REQUESTS", [
+    { command: "orca pr", description: "interactive — pick run + action" },
+    { command: "orca pr draft --run <id>", description: "create draft PR" },
+    { command: "orca pr create --run <id>", description: "create ready-for-review PR" },
+    { command: "orca pr publish --run <id>", description: "publish draft → ready for review" },
+    { command: "orca pr status --run <id>", description: "check PR state and CI" }
+  ]);
+
   printSection("SETUP", [{ command: "orca setup", description: "first-time setup and Codex environment checks" }]);
 
   printSection("FLAGS", [

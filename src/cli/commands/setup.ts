@@ -209,8 +209,6 @@ export function registerSetupCommand(program: Command): void {
     .option("--project", "Save config to ./orca.config.js (or ./orca.config.ts with --ts)")
     .option("--ts", "Write TypeScript config (.ts) with OrcaConfig satisfies syntax")
     .option("--executor <value>", "Set executor in written config (codex)", parseExecutorOption)
-    .option("--project-config-template", "Write a typed project hook template to ./orca.config.ts")
-    .option("--skip-project-config", "Do not prompt to generate a project config template")
     .action(async (commandOptions: SetupCommandOptions) => {
       await setupCommandHandler(commandOptions);
     });

@@ -290,8 +290,7 @@ Global:
 - `--ts` — write TS config output (`~/.orca/config.ts` / `./orca.config.ts`)
 - `--global` — save to global config (`~/.orca/config.js` by default, or `.ts` with `--ts`)
 - `--project` — save to project config (`./orca.config.js` by default, or `.ts` with `--ts`)
-- `--project-config-template` — write typed project hook template to `./orca.config.ts`
-- `--skip-project-config` — skip project config prompt
+- `--project-config-template` / `--skip-project-config` removed
 
 `orca help`:
 
