@@ -4,25 +4,54 @@ import path from "node:path";
 
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { buildConfigModule, buildProjectConfigTemplate, detectPackageManager, resolveApiKey } from "./setup.js";
+import {
+  buildConfigModule,
+  buildProjectConfigTemplate,
+  detectPackageManager,
+  readClaudeCodeKeychain,
+  resolveApiKey
+} from "./setup.js";
+
+/*
+Manual setup smoke tests:
+
+# Test: Codex only
+OPENAI_API_KEY=sk-test orca setup
+# Expected: executor: "codex" in ~/.orca/config.js
+
+# Test: Claude only
+ANTHROPIC_API_KEY=sk-ant-test orca setup
+# Expected: executor: "claude" in ~/.orca/config.js
+
+# Test: neither
+# (unset both keys, ensure no ~/.codex/auth.json, no keychain entry)
+orca setup
+# Expected: base config written, "! No executors detected" message, exit 1
+
+# Test: agent non-TTY
+echo "" | orca setup
+# Expected: non-interactive, same as above
+*/
 
 describe("resolveApiKey", () => {
   const originalAnthropic = process.env.ANTHROPIC_API_KEY;
   const originalOpenai = process.env.OPENAI_API_KEY;
+  const originalOrcaAnthropic = process.env.ORCA_ANTHROPIC_API_KEY;
+  const originalOrcaOpenai = process.env.ORCA_OPENAI_API_KEY;
   let tempDir: string | undefined;
 
   afterEach(async () => {
-    if (originalAnthropic === undefined) {
-      delete process.env.ANTHROPIC_API_KEY;
-    } else {
-      process.env.ANTHROPIC_API_KEY = originalAnthropic;
-    }
+    if (originalAnthropic === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = originalAnthropic;
 
-    if (originalOpenai === undefined) {
-      delete process.env.OPENAI_API_KEY;
-    } else {
-      process.env.OPENAI_API_KEY = originalOpenai;
-    }
+    if (originalOpenai === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = originalOpenai;
+
+    if (originalOrcaAnthropic === undefined) delete process.env.ORCA_ANTHROPIC_API_KEY;
+    else process.env.ORCA_ANTHROPIC_API_KEY = originalOrcaAnthropic;
+
+    if (originalOrcaOpenai === undefined) delete process.env.ORCA_OPENAI_API_KEY;
+    else process.env.ORCA_OPENAI_API_KEY = originalOrcaOpenai;
 
     if (tempDir) {
       await rm(tempDir, { recursive: true, force: true });
@@ -31,22 +60,34 @@ describe("resolveApiKey", () => {
   });
 
   test("returns flag value when provided", () => {
-    process.env.ANTHROPIC_API_KEY = "env-value";
+    process.env.ORCA_ANTHROPIC_API_KEY = "orca-env";
+    process.env.ANTHROPIC_API_KEY = "generic-env";
 
     const resolved = resolveApiKey("flag-value", "ANTHROPIC_API_KEY");
 
     expect(resolved).toBe("flag-value");
   });
 
-  test("returns env var when flag is absent", () => {
-    process.env.ANTHROPIC_API_KEY = "env-value";
+  test("ORCA env vars override generic env vars", () => {
+    process.env.ORCA_ANTHROPIC_API_KEY = "orca-env";
+    process.env.ANTHROPIC_API_KEY = "generic-env";
 
     const resolved = resolveApiKey(undefined, "ANTHROPIC_API_KEY");
 
-    expect(resolved).toBe("env-value");
+    expect(resolved).toBe("orca-env");
+  });
+
+  test("falls back to generic env vars", () => {
+    delete process.env.ORCA_OPENAI_API_KEY;
+    process.env.OPENAI_API_KEY = "generic-openai";
+
+    const resolved = resolveApiKey(undefined, "OPENAI_API_KEY");
+
+    expect(resolved).toBe("generic-openai");
   });
 
   test("returns OpenClaw env var when shell env is absent", async () => {
+    delete process.env.ORCA_ANTHROPIC_API_KEY;
     delete process.env.ANTHROPIC_API_KEY;
 
     tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-setup-test-"));
@@ -64,153 +105,31 @@ describe("resolveApiKey", () => {
     expect(resolved).toBe("gateway-value");
   });
 
-  test("treats OpenClaw 1Password refs as configured", async () => {
-    delete process.env.ANTHROPIC_API_KEY;
-
-    tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-setup-test-"));
-    const openclawDir = path.join(tempDir, ".openclaw");
-    await mkdir(openclawDir, { recursive: true });
-    const configPath = path.join(openclawDir, "openclaw.json");
-    await writeFile(
-      configPath,
-      JSON.stringify({ env: { vars: { ANTHROPIC_API_KEY: "op://Eve/Anthropic/credential" } } }),
-      "utf8"
-    );
-
-    const resolved = resolveApiKey(undefined, "ANTHROPIC_API_KEY", configPath);
-
-    expect(resolved).toBe("op://Eve/Anthropic/credential");
-  });
-
-  test("returns value from ~/.claude/.env fallback", async () => {
-    delete process.env.OPENAI_API_KEY;
-
-    tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-setup-test-"));
-    const claudeDir = path.join(tempDir, ".claude");
-    await mkdir(claudeDir, { recursive: true });
-    await writeFile(
-      path.join(claudeDir, ".env"),
-      "# comment\nOPENAI_API_KEY=claude-home-value\n",
-      "utf8"
-    );
-
-    const resolved = resolveApiKey(undefined, "OPENAI_API_KEY", {
-      homedir: tempDir,
-      openclawConfigPath: path.join(tempDir, ".openclaw", "openclaw.json")
-    });
-
-    expect(resolved).toBe("claude-home-value");
-  });
-
-  test("returns value from ~/.config/claude/.env fallback", async () => {
-    delete process.env.ANTHROPIC_API_KEY;
-
-    tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-setup-test-"));
-    const claudeConfigDir = path.join(tempDir, ".config", "claude");
-    await mkdir(claudeConfigDir, { recursive: true });
-    await writeFile(
-      path.join(claudeConfigDir, ".env"),
-      "ANTHROPIC_API_KEY=linux-config-value",
-      "utf8"
-    );
-
-    const resolved = resolveApiKey(undefined, "ANTHROPIC_API_KEY", {
-      homedir: tempDir,
-      openclawConfigPath: path.join(tempDir, ".openclaw", "openclaw.json")
-    });
-
-    expect(resolved).toBe("linux-config-value");
-  });
-
-  test("ignores project-local .env", async () => {
-    delete process.env.OPENAI_API_KEY;
-
-    tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-setup-test-"));
-    await writeFile(
-      path.join(tempDir, ".env"),
-      "OPENAI_API_KEY=project-env-value",
-      "utf8"
-    );
-
-    const resolved = resolveApiKey(undefined, "OPENAI_API_KEY", {
-      homedir: path.join(tempDir, "home-without-keys"),
-      openclawConfigPath: path.join(tempDir, ".openclaw", "openclaw.json")
-    });
-
-    expect(resolved).toBeUndefined();
-  });
-
-  test("supports quoted .env values and ignores comments", async () => {
-    delete process.env.ANTHROPIC_API_KEY;
-
-    tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-setup-test-"));
-    const claudeDir = path.join(tempDir, ".claude");
-    await mkdir(claudeDir, { recursive: true });
-    await writeFile(
-      path.join(claudeDir, ".env"),
-      "\n# line comment\nexport ANTHROPIC_API_KEY=\"quoted value\" # trailing comment\n",
-      "utf8"
-    );
-
-    const resolved = resolveApiKey(undefined, "ANTHROPIC_API_KEY", {
-      homedir: tempDir,
-      openclawConfigPath: path.join(tempDir, ".openclaw", "openclaw.json")
-    });
-
-    expect(resolved).toBe("quoted value");
-  });
-
-  test("respects precedence across supported sources", async () => {
-    process.env.ANTHROPIC_API_KEY = "env-value";
-
-    tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-setup-test-"));
-
-    const openclawDir = path.join(tempDir, ".openclaw");
-    await mkdir(openclawDir, { recursive: true });
-    const openclawConfigPath = path.join(openclawDir, "openclaw.json");
-    await writeFile(
-      openclawConfigPath,
-      JSON.stringify({ env: { vars: { ANTHROPIC_API_KEY: "gateway-value" } } }),
-      "utf8"
-    );
-
-    const claudeDir = path.join(tempDir, ".claude");
-    await mkdir(claudeDir, { recursive: true });
-    await writeFile(path.join(claudeDir, ".env"), "ANTHROPIC_API_KEY=claude-value\n", "utf8");
-    await writeFile(path.join(tempDir, ".env"), "ANTHROPIC_API_KEY=project-value\n", "utf8");
-
-    const withFlag = resolveApiKey("flag-value", "ANTHROPIC_API_KEY", {
-      homedir: tempDir,
-      openclawConfigPath
-    });
-    expect(withFlag).toBe("flag-value");
-
-    const withEnv = resolveApiKey(undefined, "ANTHROPIC_API_KEY", {
-      homedir: tempDir,
-      openclawConfigPath
-    });
-    expect(withEnv).toBe("env-value");
-
-    delete process.env.ANTHROPIC_API_KEY;
-
-    const withOpenclaw = resolveApiKey(undefined, "ANTHROPIC_API_KEY", {
-      homedir: tempDir,
-      openclawConfigPath
-    });
-    expect(withOpenclaw).toBe("gateway-value");
-  });
-
   test("returns undefined when no source provides a key", async () => {
-    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.ORCA_OPENAI_API_KEY;
+    delete process.env.OPENAI_API_KEY;
 
     tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-setup-test-"));
 
-    const resolved = resolveApiKey(undefined, "ANTHROPIC_API_KEY", {
+    const resolved = resolveApiKey(undefined, "OPENAI_API_KEY", {
       homedir: tempDir,
       openclawConfigPath: path.join(tempDir, ".openclaw", "openclaw.json")
     });
 
     expect(resolved).toBeUndefined();
+  });
+});
+
+describe("readClaudeCodeKeychain", () => {
+  test("never throws and returns undefined outside darwin", () => {
+    const value = readClaudeCodeKeychain();
+
+    if (process.platform === "darwin") {
+      if (value !== undefined) expect(typeof value).toBe("string");
+      return;
+    }
+
+    expect(value).toBeUndefined();
   });
 });
 

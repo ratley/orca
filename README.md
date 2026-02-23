@@ -297,13 +297,13 @@ Global:
 
 `orca setup`:
 
-- `--anthropic-key <key>`
-- `--openai-key <key>`
-- `--check` (API key lookup order: CLI flag → process env → `~/.openclaw/openclaw.json` `env.vars` → `~/.claude/.env` → `~/.config/claude/.env`)
-- `--global`
-- `--project`
-- `--project-config-template`
-- `--skip-project-config`
+- `--anthropic-key <key>` — override Anthropic API key (written to config)
+- `--openai-key <key>` — override OpenAI API key (written to config)
+- `--executor <codex|claude>` — explicitly set executor in written config
+- `--global` — save to `~/.orca/config.js` (default)
+- `--project` — save to `./orca.config.js`
+- `--project-config-template` — write typed project hook template to `./orca.config.ts`
+- `--skip-project-config` — skip project config prompt
 
 `orca help`:
 

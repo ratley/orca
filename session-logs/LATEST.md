@@ -1,23 +1,13 @@
 ---
-date: 2026-02-22T04:59:00-08:00
-session: docs-accuracy-wrap
+date: 2026-02-22T18:55:00-08:00
+session: docs-skill-readme-update
 agent: eve
 ---
 
-## Task
-Finalize README accuracy to match current CLI/config behavior before commit/push.
+## Session: docs-skill-readme-update
 
-## What changed
-- Added missing command-flag documentation from latest audits.
-- Clarified `orca pr publish` run-selection behavior for TTY vs non-TTY.
-- Kept `pr-finalize` out of docs (publish is canonical).
-- Clarified config precedence (`orca.config.ts` over `orca.config.js` when both exist).
-- Expanded config reference coverage and added caveats (`ORCA_SKIP_VALIDATORS=1`, `onError` hook-dispatch behavior).
-- Clarified PR `--config` flag as accepted for compatibility and currently unused by PR run resolution.
+Updated SKILL.md with comprehensive operator guide and cleaned up README.
 
-## Verification run
-- `npm run build` ✅
-- Codex final review on uncommitted README diff: `no issues found` ✅
-
-## Notes
-- Commit intentionally docs-only; no runtime behavior changes.
+### Changes
+- SKILL.md: full rewrite — prerequisites, executor selection, fast-start runbook, status monitoring, failure handling, PR workflow, config reference, done criteria
+- README.md: updated `orca setup` flags — removed `--check`, added `--executor`, improved descriptions

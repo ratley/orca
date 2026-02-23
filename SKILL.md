@@ -1,62 +1,199 @@
 ---
 name: orca
-description: "Orchestrate multi-step AI coding tasks via the Orca CLI. Use when: running multi-file code changes, spawning background agents, planning and executing complex tasks end-to-end. NOT for: simple single-file edits, reading code."
+description: "Orchestrate multi-step AI coding tasks via the Orca CLI. Use when: running multi-file code changes, spawning background agents, planning and executing complex coding tasks end-to-end. NOT for: simple single-file edits, reading code, or any work in ~/clawd workspace."
 ---
 
-# Orca
+# Orca — Operator Guide
 
-Orca (orcastrator) is a CLI that breaks a goal into a task graph and executes it end-to-end via Codex or Claude.
+Orca (`orcastrator`) breaks a goal into a task graph and executes it end-to-end via Codex or Claude. Claude plans; Codex (or Claude) executes; a reviewer catches regressions and can auto-fix.
 
-## Install
+---
+
+## Prerequisites
+
+- Must be run inside a git repo (or pass `--skip-git-repo-check`)
+- Codex executor (default): requires `~/.codex/auth.json` (Codex OAuth)
+- Claude executor: requires `ANTHROPIC_API_KEY` in env
+- Install: `npm install -g orcastrator`
+
+---
+
+## Executor Selection
+
+| Executor | When to use |
+|---|---|
+| `codex` (default) | Most tasks. Persistent Codex session, fast, integrates with app-server skills |
+| `claude` | When Codex auth is unavailable, or for heavy reasoning tasks |
+
+Override in config: `executor: "claude"` or per-run (no CLI flag; change config).
+
+---
+
+## Fast-Start Runbook
 
 ```sh
-npm install -g orcastrator
-```
+# 1. Navigate into the target repo
+cd /path/to/repo
 
-## Run a Goal
-
-```sh
+# 2. Start a run
 orca "your goal here"
+
+# 3. Check status (run ID printed on start, also available via --last)
+orca status --last
+
+# 4. If the agent asks a question, answer it
+orca answer --last "your answer"
+
+# 5. Once complete, open a PR
+orca pr draft --last    # opens draft PR
+orca pr create --last   # creates + publishes PR
 ```
+
+---
+
+## Writing Good Goals
+
+Be specific. Orca passes your goal to a planner that generates a task graph — vague goals produce vague plans.
+
+**Bad:** `"fix the bug"`  
+**Good:** `"Fix the TypeError thrown when user logs out with an expired token in src/auth/session.ts. Ensure existing tests pass and add a regression test."`
+
+Include:
+- What to change and where
+- Acceptance criteria or test expectations
+- What NOT to touch (if relevant)
+
+---
+
+## Status Monitoring
+
+```sh
+orca status --last        # status of most recent run
+orca status --run <id>    # status of a specific run
+```
+
+**Run states:**
+- `planning` — generating task graph
+- `running` — executing tasks
+- `waiting_for_answer` — agent raised a question, needs `orca answer`
+- `reviewing` — post-exec review cycle
+- `complete` — done, branch ready
+- `failed` — run errored; check session logs
+
+**Poll pattern:** check every 30–60s. Don't busy-poll. If `waiting_for_answer`, respond immediately.
+
+**Run ID format:** `<slug>-<unix-ms>-<hex4>` (e.g. `cobalt-summit-1708123456789-a3f2`)
+
+---
+
+## Handling Questions
+
+If `orca status` shows `waiting_for_answer`:
+
+```sh
+orca status --last        # read the question
+orca answer --last "yes"  # unblock the run
+```
+
+Answer concisely. The agent is waiting synchronously.
+
+---
+
+## Failure Handling
+
+```sh
+orca status --last        # check error message
+orca resume --last        # retry from last checkpoint
+orca cancel --last        # abort if unrecoverable
+```
+
+**Common failures:**
+- `auth error` → re-auth Codex (`codex auth`) or check `ANTHROPIC_API_KEY`
+- `no git repo` → `cd` into a git repo or use `--skip-git-repo-check`
+- `plan invalid` → goal was too vague; cancel and restate with more specificity
+- `review cycle exceeded` → reviewer found persistent issues; inspect branch manually
+- session logs: check `./session-logs/` (or configured `sessionLogs` path)
+
+---
+
+## PR Workflow
+
+```sh
+orca pr draft --last      # open draft PR (safe — won't trigger CI)
+orca pr status --last     # check PR + CI status
+orca pr publish --last    # un-draft and publish
+orca pr create --last     # create + publish in one step
+```
+
+Never push directly to main/master. Orca always works on a branch.
+
+---
+
+## Review Cycle
+
+Orca's post-exec reviewer checks the output and can auto-fix findings:
+
+```ts
+review: {
+  execution: {
+    enabled: true,
+    maxCycles: 2,
+    onFindings: "auto_fix",   // auto_fix | report_only | fail
+    validator: { auto: true }
+  }
+}
+```
+
+If `maxCycles` is hit, the run completes with findings reported. Inspect the branch manually.
+
+---
 
 ## Key Commands
 
 ```
-orca <goal>              Start a new run
-orca status [--last]     Check run status
-orca answer [--run <id>] [answer]    Answer a question the agent raised
-orca resume [--last]     Resume a paused run
-orca cancel [--last]     Cancel a run
-orca pr draft [--last]   Open a draft PR for the run's branch
-orca pr create [--last]  Create and publish a PR
-orca pr publish [--last] Publish (un-draft) an existing draft PR
-orca pr status [--last]  Check PR and CI status
+orca <goal>                          Start a new run
+orca status [--last] [--run <id>]    Check run status
+orca answer [--last] [--run <id>] <answer>  Answer a waiting question
+orca resume [--last]                 Resume a paused/failed run
+orca cancel [--last]                 Cancel a run
+orca pr draft [--last]               Open a draft PR
+orca pr create [--last]              Create and publish PR
+orca pr publish [--last]             Un-draft an existing PR
+orca pr status [--last]              Check PR and CI status
 ```
 
-## Config (~/.orca/config.js, ./orca.config.js, or ./orca.config.ts)
+---
+
+## Config Reference
+
+Config locations (first found wins): `~/.orca/config.js`, `./orca.config.js`, `./orca.config.ts`
 
 ```ts
 export default {
-  executor: "codex",           // "codex" (default) or "claude"
-  sessionLogs: "./session-logs",
+  executor: "codex",              // "codex" | "claude"
+  sessionLogs: "./session-logs",  // where to write session logs
+
   hooks: {
-    onFindings: async (event) => {
-      console.log(`findings:${event.metadata?.findingsCount} cycle:${event.metadata?.cycleIndex}`);
-    }
+    onFindings: async (event, context) => { /* fires after reviewer */ },
+    onComplete: async (event, context) => { /* fires on success */ },
+    onError: async (event, context) => { /* fires on failure */ },
   },
+
   hookCommands: {
-    onComplete: "your-notify-command", // reads event JSON from stdin
+    onComplete: "your-notify-command",  // reads event JSON from stdin
     onError: "your-error-command",
   },
+
   review: {
     plan: { enabled: true, onInvalid: "fail" },
     execution: {
       enabled: true,
       maxCycles: 2,
-      onFindings: "auto_fix",   // auto_fix | report_only | fail
+      onFindings: "auto_fix",
       validator: { auto: true }
     }
   },
+
   codex: {
     multiAgent: false,
     perCwdExtraUserRoots: [
@@ -66,16 +203,25 @@ export default {
 };
 ```
 
-## Notes
+---
 
-- Codex executor requires `~/.codex/auth.json`
-- Must be run inside a git repo
-- Function hooks are primary (`hooks`) and receive `(event, context)` with deterministic context `{ cwd, pid, invokedAt }`
-- Hook commands still work, but they now receive structured event JSON on stdin (no `ORCA_*` hook env payload)
-- Post-exec reviewer uses strict JSON schema (`summary`, `findings[]`, `fixed`) with one bounded repair retry on malformed output
-- Hook smoke harness: run `npm run smoke:hooks`
-- Run ID format: `<slug>-<unix-ms>-<hex4>`  (e.g. cobalt-summit-1708123456789-a3f2)
-- Bundled default skill: `<orca package root>/.orca/skills/code-simplifier/SKILL.md` (shipped with Orca and applied explicitly in planner/reviewer/executor prompts for all code-writing and code-review steps)
-- Codex session startup calls app-server `skills/list` with `forceReload: true`; app-server-discovered skills are appended without overriding Orca loader precedence
-- `codex.perCwdExtraUserRoots` can scope extra app-server skill roots to specific cwd values when needed
-- Use `orca answer` to unblock a waiting run
+## Multi-Agent Mode
+
+Set `codex.multiAgent: true` to spawn parallel Codex agents per task. Faster for independent tasks; higher token cost. Use for large refactors with clearly separable subtasks.
+
+---
+
+## Skills
+
+Orca ships a bundled `code-simplifier` skill that's applied in planner, reviewer, and executor prompts automatically. Extra skills can be injected via `codex.perCwdExtraUserRoots` (scoped per cwd).
+
+---
+
+## Done Criteria
+
+A run is complete when:
+1. `orca status --last` shows `complete`
+2. A branch exists with the committed changes
+3. `orca pr status --last` shows CI passing (if applicable)
+
+Don't consider a run done until these are verified.

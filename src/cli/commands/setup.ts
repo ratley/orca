@@ -7,16 +7,16 @@ import readline from "node:readline/promises";
 import { pathToFileURL } from "node:url";
 
 import chalk from "chalk";
-import type { Command } from "commander";
+import { InvalidArgumentError, type Command } from "commander";
 
 import type { OrcaConfig } from "../../types/index.js";
 
 export interface SetupCommandOptions {
   anthropicKey?: string;
   openaiKey?: string;
-  check?: boolean;
   global?: boolean;
   project?: boolean;
+  executor?: "codex" | "claude";
   projectConfigTemplate?: boolean;
   skipProjectConfig?: boolean;
 }
@@ -26,6 +26,7 @@ type CheckStatus = "pass" | "fail" | "warn";
 type ApiKeyConfig = {
   anthropicApiKey?: string;
   openaiApiKey?: string;
+  executor?: "codex" | "claude";
 };
 
 type CheckResult = {
@@ -93,19 +94,46 @@ type ResolveApiKeyOptions = {
   homedir?: string;
 };
 
-export function resolveApiKey(
+type ApiKeySource = "flag" | "env" | "openclaw";
+
+type ResolvedApiKey = {
+  value: string;
+  source: ApiKeySource;
+};
+
+function getOrcaEnvVarName(envVarName: string): string | undefined {
+  if (envVarName === "ANTHROPIC_API_KEY") {
+    return "ORCA_ANTHROPIC_API_KEY";
+  }
+
+  if (envVarName === "OPENAI_API_KEY") {
+    return "ORCA_OPENAI_API_KEY";
+  }
+
+  return undefined;
+}
+
+function resolveApiKeyWithSource(
   flagValue: string | undefined,
   envVarName: string,
   openclawConfigPathOrOptions?: string | ResolveApiKeyOptions,
   maybeOptions?: ResolveApiKeyOptions
-): string | undefined {
+): ResolvedApiKey | undefined {
   if (flagValue && flagValue.trim().length > 0) {
-    return flagValue.trim();
+    return { value: flagValue.trim(), source: "flag" };
+  }
+
+  const orcaEnvVarName = getOrcaEnvVarName(envVarName);
+  if (orcaEnvVarName) {
+    const orcaEnvValue = process.env[orcaEnvVarName];
+    if (orcaEnvValue && orcaEnvValue.trim().length > 0) {
+      return { value: orcaEnvValue.trim(), source: "env" };
+    }
   }
 
   const envValue = process.env[envVarName];
   if (envValue && envValue.trim().length > 0) {
-    return envValue.trim();
+    return { value: envValue.trim(), source: "env" };
   }
 
   const options =
@@ -116,17 +144,19 @@ export function resolveApiKey(
   const homedir = options.homedir ?? os.homedir();
   const openclawValue = readOpenclawEnvVar(envVarName, options.openclawConfigPath, homedir);
   if (openclawValue) {
-    return openclawValue;
-  }
-
-  const dotenvValue = readDotEnvFallback(envVarName, {
-    homedir
-  });
-  if (dotenvValue) {
-    return dotenvValue;
+    return { value: openclawValue, source: "openclaw" };
   }
 
   return undefined;
+}
+
+export function resolveApiKey(
+  flagValue: string | undefined,
+  envVarName: string,
+  openclawConfigPathOrOptions?: string | ResolveApiKeyOptions,
+  maybeOptions?: ResolveApiKeyOptions
+): string | undefined {
+  return resolveApiKeyWithSource(flagValue, envVarName, openclawConfigPathOrOptions, maybeOptions)?.value;
 }
 
 function readOpenclawEnvVar(
@@ -170,32 +200,15 @@ function readOpenclawEnvVar(
   return undefined;
 }
 
-function readDotEnvFallback(
-  envVarName: string,
-  options: { homedir: string }
-): string | undefined {
-  const candidatePaths = [
-    path.join(options.homedir, ".claude", ".env"),
-    path.join(options.homedir, ".config", "claude", ".env")
-  ];
+export function readCodexAuthJson(homedir: string = os.homedir()): string | undefined {
+  const authPath = path.join(homedir, ".codex", "auth.json");
 
-  for (const candidatePath of candidatePaths) {
-    const value = readEnvVarFromDotEnvFile(candidatePath, envVarName);
-    if (value !== undefined) {
-      return value;
-    }
-  }
-
-  return undefined;
-}
-
-function readEnvVarFromDotEnvFile(filePath: string, envVarName: string): string | undefined {
   try {
-    const parsed = parseDotEnv(readFileSync(filePath, "utf8"));
-    const value = parsed[envVarName];
+    const parsed = JSON.parse(readFileSync(authPath, "utf8")) as { OPENAI_API_KEY?: unknown };
+    const key = parsed.OPENAI_API_KEY;
 
-    if (value !== undefined && value.trim().length > 0) {
-      return value.trim();
+    if (typeof key === "string" && key.trim().length > 0) {
+      return key.trim();
     }
   } catch {
     return undefined;
@@ -204,76 +217,40 @@ function readEnvVarFromDotEnvFile(filePath: string, envVarName: string): string 
   return undefined;
 }
 
-function parseDotEnv(text: string): Record<string, string> {
-  const values: Record<string, string> = {};
-
-  for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith("#")) {
-      continue;
-    }
-
-    const normalized = line.startsWith("export ") ? line.slice(7).trimStart() : line;
-    const separatorIndex = normalized.indexOf("=");
-    if (separatorIndex <= 0) {
-      continue;
-    }
-
-    const key = normalized.slice(0, separatorIndex).trim();
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
-      continue;
-    }
-
-    let rawValue = normalized.slice(separatorIndex + 1).trim();
-    if (!rawValue) {
-      values[key] = "";
-      continue;
-    }
-
-    if (rawValue.startsWith('"') || rawValue.startsWith("'")) {
-      const quote = rawValue.charAt(0);
-      const closingQuoteIndex = findClosingQuote(rawValue, quote);
-      if (closingQuoteIndex > 0) {
-        rawValue = rawValue.slice(1, closingQuoteIndex);
-      } else {
-        rawValue = rawValue.slice(1);
-      }
-      values[key] = quote === '"' ? unescapeDoubleQuoted(rawValue) : unescapeSingleQuoted(rawValue);
-      continue;
-    }
-
-    const commentStart = rawValue.search(/\s#/);
-    if (commentStart >= 0) {
-      rawValue = rawValue.slice(0, commentStart).trimEnd();
-    }
-
-    values[key] = rawValue;
+export function readClaudeCodeKeychain(): string | undefined {
+  if (process.platform !== "darwin") {
+    return undefined;
   }
 
-  return values;
-}
+  try {
+    const raw = execSync('security find-generic-password -s "Claude Code-credentials" -w', {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"]
+    }).trim();
 
-function findClosingQuote(value: string, quote: string): number {
-  for (let i = 1; i < value.length; i += 1) {
-    if (value[i] === quote && value[i - 1] !== "\\") {
-      return i;
+    const parsed = JSON.parse(raw) as {
+      claudeAiOauth?: {
+        accessToken?: unknown;
+      };
+    };
+
+    const token = parsed.claudeAiOauth?.accessToken;
+    if (typeof token === "string" && token.trim().length > 0) {
+      return token.trim();
     }
+  } catch {
+    return undefined;
   }
 
-  return -1;
+  return undefined;
 }
 
-function unescapeDoubleQuoted(value: string): string {
-  return value
-    .replace(/\\n/g, "\n")
-    .replace(/\\r/g, "\r")
-    .replace(/\\t/g, "\t")
-    .replace(/\\"/g, '"')
-    .replace(/\\\\/g, "\\");
-}
+function parseExecutorOption(value: string): "codex" | "claude" {
+  if (value === "codex" || value === "claude") {
+    return value;
+  }
 
-function unescapeSingleQuoted(value: string): string {
-  return value.replace(/\\'/g, "'").replace(/\\\\/g, "\\");
+  throw new InvalidArgumentError("executor must be one of: codex, claude");
 }
 
 export function detectPackageManager(
@@ -294,7 +271,7 @@ export function detectPackageManager(
   return null;
 }
 
-export function buildConfigModule({ anthropicApiKey, openaiApiKey }: ApiKeyConfig): string {
+export function buildConfigModule({ anthropicApiKey, openaiApiKey, executor }: ApiKeyConfig): string {
   const lines = ["// generated by orca setup", "export default {"];
 
   if (anthropicApiKey !== undefined) {
@@ -303,6 +280,10 @@ export function buildConfigModule({ anthropicApiKey, openaiApiKey }: ApiKeyConfi
 
   if (openaiApiKey !== undefined) {
     lines.push(`  openaiApiKey: ${JSON.stringify(openaiApiKey)},`);
+  }
+
+  if (executor !== undefined) {
+    lines.push(`  executor: ${JSON.stringify(executor)},`);
   }
 
   lines.push("};", "");
@@ -469,18 +450,21 @@ async function loadExistingConfig(configPath: string): Promise<OrcaConfig | unde
 
 async function saveConfig(
   configPath: string,
-  keys: ApiKeyConfig
+  keys: ApiKeyConfig,
+  executor?: "codex" | "claude"
 ): Promise<void> {
   const existing = await loadExistingConfig(configPath);
   const merged: OrcaConfig = {
     ...existing,
     ...(keys.anthropicApiKey !== undefined ? { anthropicApiKey: keys.anthropicApiKey } : {}),
-    ...(keys.openaiApiKey !== undefined ? { openaiApiKey: keys.openaiApiKey } : {})
+    ...(keys.openaiApiKey !== undefined ? { openaiApiKey: keys.openaiApiKey } : {}),
+    ...(executor !== undefined ? { executor } : {})
   };
 
   const moduleText = buildConfigModule({
     ...(merged.anthropicApiKey !== undefined ? { anthropicApiKey: merged.anthropicApiKey } : {}),
-    ...(merged.openaiApiKey !== undefined ? { openaiApiKey: merged.openaiApiKey } : {})
+    ...(merged.openaiApiKey !== undefined ? { openaiApiKey: merged.openaiApiKey } : {}),
+    ...(merged.executor !== undefined ? { executor: merged.executor } : {})
   });
   const fullModuleText = buildMergedConfigModule(merged);
 
@@ -506,35 +490,6 @@ function parseSaveTarget(options: SetupCommandOptions): "global" | "project" | n
   }
 
   return null;
-}
-
-async function chooseSaveTarget(
-  rl: readline.Interface,
-  explicitTarget: "global" | "project" | null
-): Promise<"global" | "project" | "skip"> {
-  if (explicitTarget) {
-    return explicitTarget;
-  }
-
-  if (!supportsPrompting()) {
-    return "global";
-  }
-
-  const answer = (
-    await rl.question("Save API keys to config? [G]lobal (~/.orca/config.js) / [P]roject (./orca.config.js) / [S]kip: ")
-  )
-    .trim()
-    .toLowerCase();
-
-  if (answer === "p" || answer === "project") {
-    return "project";
-  }
-
-  if (answer === "s" || answer === "skip") {
-    return "skip";
-  }
-
-  return "global";
 }
 
 function getConfigPath(target: "global" | "project"): string {
@@ -592,9 +547,7 @@ export async function setupCommandHandler(options: SetupCommandOptions): Promise
   }
 
   const explicitTarget = parseSaveTarget(options);
-  const checkMode = Boolean(options.check);
-  const canPrompt = supportsPrompting() && !checkMode;
-  const rl = canPrompt
+  const rl = supportsPrompting()
     ? readline.createInterface({
         input: process.stdin,
         output: process.stdout
@@ -602,42 +555,43 @@ export async function setupCommandHandler(options: SetupCommandOptions): Promise
     : null;
 
   const results: CheckResult[] = [];
-  let anthropicApiKey = resolveApiKey(options.anthropicKey, "ANTHROPIC_API_KEY");
-  let openaiApiKey = resolveApiKey(options.openaiKey, "OPENAI_API_KEY");
+  const initialAnthropic = resolveApiKeyWithSource(options.anthropicKey, "ANTHROPIC_API_KEY");
+  const initialOpenai = resolveApiKeyWithSource(options.openaiKey, "OPENAI_API_KEY");
+  let anthropicApiKey = initialAnthropic?.value;
+  let openaiApiKey = initialOpenai?.value;
+  let shouldPersistAnthropicKey = options.anthropicKey !== undefined;
+  let shouldPersistOpenaiKey = options.openaiKey !== undefined;
 
   try {
-    if (!checkMode && rl) {
-      anthropicApiKey = await promptForApiKey(rl, anthropicApiKey, "Enter your Anthropic API key (sk-ant-...): ");
+    let codexAvailable = Boolean(openaiApiKey) || Boolean(readCodexAuthJson());
+    let claudeAvailable = Boolean(anthropicApiKey) || Boolean(readClaudeCodeKeychain());
+
+    if (!codexAvailable && !claudeAvailable && rl) {
+      const anthropicBeforePrompt = anthropicApiKey;
+      const openaiBeforePrompt = openaiApiKey;
+
+      anthropicApiKey = await promptForApiKey(rl, anthropicApiKey, "Enter your Anthropic API key (sk-ant-...) [optional]: ");
+      openaiApiKey = await promptForApiKey(rl, openaiApiKey, "Enter your OpenAI API key (sk-...) [optional]: ");
+
+      if (!shouldPersistAnthropicKey && !anthropicBeforePrompt && anthropicApiKey) {
+        shouldPersistAnthropicKey = true;
+      }
+
+      if (!shouldPersistOpenaiKey && !openaiBeforePrompt && openaiApiKey) {
+        shouldPersistOpenaiKey = true;
+      }
+
+      codexAvailable = Boolean(openaiApiKey) || Boolean(readCodexAuthJson());
+      claudeAvailable = Boolean(anthropicApiKey) || Boolean(readClaudeCodeKeychain());
     }
 
-    if (anthropicApiKey) {
-      results.push({ name: "ANTHROPIC_API_KEY", status: "pass", detail: checkMode ? "set" : "found" });
-      if (!checkMode) console.log(chalk.green("✓ Anthropic API key found"));
-    } else {
-      results.push({ name: "ANTHROPIC_API_KEY", status: "warn", detail: "not set" });
-      if (!checkMode) console.log(chalk.yellow("! ANTHROPIC_API_KEY not set"));
-    }
-
-    if (!checkMode && rl) {
-      openaiApiKey = await promptForApiKey(rl, openaiApiKey, "Enter your OpenAI API key (sk-...): ");
-    }
-
-    if (openaiApiKey) {
-      results.push({ name: "OPENAI_API_KEY", status: "pass", detail: checkMode ? "set" : "found" });
-      if (!checkMode) console.log(chalk.green("✓ OpenAI API key found"));
-    } else {
-      results.push({ name: "OPENAI_API_KEY", status: "warn", detail: "not set" });
-      if (!checkMode) console.log(chalk.yellow("! OPENAI_API_KEY not set"));
-    }
+    results.push({ name: "Codex", status: codexAvailable ? "pass" : "warn", detail: codexAvailable ? "available" : "not available" });
+    results.push({ name: "Claude", status: claudeAvailable ? "pass" : "warn", detail: claudeAvailable ? "available" : "not available" });
 
     const ghAvailable = commandExists("gh");
     if (!ghAvailable) {
       results.push({ name: "gh CLI", status: "warn", detail: "not found" });
-      if (!checkMode) {
-        console.log(chalk.yellow("! gh CLI not found — needed for orca pr commands"));
-      }
-
-      if (!checkMode && rl) {
+      if (rl) {
         const installAnswer = (await rl.question("Install gh CLI? (y/N): ")).trim().toLowerCase();
         if (installAnswer === "y" || installAnswer === "yes") {
           const packageManager = detectPackageManager();
@@ -646,27 +600,15 @@ export async function setupCommandHandler(options: SetupCommandOptions): Promise
           } else {
             console.log("Install manually: https://cli.github.com");
           }
-        } else {
-          console.log("Skipping gh CLI installation.");
         }
-      } else if (!checkMode) {
-        console.log("Skipping gh CLI installation (non-interactive mode).");
       }
     } else {
       const auth = runGhAuthStatus();
-      if (auth.authenticated) {
-        results.push({ name: "gh CLI", status: "pass", detail: auth.detail });
-      } else {
-        results.push({ name: "gh CLI", status: "warn", detail: auth.detail });
-      }
-
-      if (!checkMode && !auth.authenticated) {
-        console.log(chalk.yellow("! gh CLI is not authenticated"));
-        if (rl) {
-          const loginAnswer = (await rl.question("Run gh auth login now? (y/N): ")).trim().toLowerCase();
-          if (loginAnswer === "y" || loginAnswer === "yes") {
-            spawnSync("gh", ["auth", "login"], { stdio: "inherit" });
-          }
+      results.push({ name: "gh CLI", status: auth.authenticated ? "pass" : "warn", detail: auth.detail });
+      if (!auth.authenticated && rl) {
+        const loginAnswer = (await rl.question("Run gh auth login now? (y/N): ")).trim().toLowerCase();
+        if (loginAnswer === "y" || loginAnswer === "yes") {
+          spawnSync("gh", ["auth", "login"], { stdio: "inherit" });
         }
       }
     }
@@ -674,60 +616,41 @@ export async function setupCommandHandler(options: SetupCommandOptions): Promise
     const gitCheck = checkGitOrigin();
     if (!gitCheck.inRepo) {
       results.push({ name: "git origin", status: "warn", detail: "not in a git repo" });
-      if (!checkMode) {
-        console.log(chalk.yellow("! Not in a git repo — orca pr commands require one"));
-      }
     } else if (!gitCheck.hasOrigin) {
       results.push({ name: "git origin", status: "warn", detail: "not set" });
-      if (!checkMode) {
-        console.log(chalk.yellow('! No git remote "origin" set'));
-      }
     } else {
       results.push({ name: "git origin", status: "pass", detail: "found" });
-      if (!checkMode) {
-        console.log(chalk.green("✓ Git remote origin found"));
-      }
     }
 
-    if (!checkMode && (anthropicApiKey || openaiApiKey)) {
-      const target = rl ? await chooseSaveTarget(rl, explicitTarget) : explicitTarget ?? "global";
-      if (target !== "skip") {
-        const configPath = getConfigPath(target);
-        await saveConfig(configPath, {
-          ...(anthropicApiKey !== undefined ? { anthropicApiKey } : {}),
-          ...(openaiApiKey !== undefined ? { openaiApiKey } : {})
-        });
+    const target = explicitTarget ?? "global";
+    const configPath = getConfigPath(target);
+    const resolvedExecutor = options.executor ?? (codexAvailable ? "codex" : claudeAvailable ? "claude" : undefined);
 
-        const printedPath = target === "global" ? "~/.orca/config.js" : "./orca.config.js";
-        console.log(chalk.green(`✓ Config saved to ${printedPath}`));
-      }
+    await saveConfig(
+      configPath,
+      {
+        ...(shouldPersistAnthropicKey && anthropicApiKey !== undefined ? { anthropicApiKey: anthropicApiKey } : {}),
+        ...(shouldPersistOpenaiKey && openaiApiKey !== undefined ? { openaiApiKey: openaiApiKey } : {})
+      },
+      resolvedExecutor
+    );
+
+    const printedPath = target === "global" ? "~/.orca/config.js" : "./orca.config.js";
+    if (resolvedExecutor) {
+      console.log(chalk.green(`✓ Config saved to ${printedPath} (executor: ${resolvedExecutor})`));
+    } else {
+      console.log(chalk.green(`✓ Config saved to ${printedPath}`));
+      console.log("! No executors detected. Set ANTHROPIC_API_KEY (Claude) or OPENAI_API_KEY (Codex), then run `orca setup` again.");
+      process.exitCode = 1;
     }
 
-    if (!checkMode) {
-      await maybeWriteProjectTemplate(options, rl);
-    }
+    await maybeWriteProjectTemplate(options, rl);
 
-    if (!checkMode) {
-      console.log("\nSummary:");
-    }
+    console.log("\nSummary:");
     printSummary(results);
 
-    if (checkMode) {
-      const requiredPass = Boolean(anthropicApiKey) && Boolean(openaiApiKey);
-      if (!requiredPass) {
-        console.log(
-          chalk.dim("\nSome API keys aren't configured yet. Run `orca setup` to add them interactively,")
-        );
-        console.log(
-          chalk.dim("or pass them directly: orca setup --anthropic-key <key> --openai-key <key>")
-        );
-      }
-      process.exitCode = requiredPass ? 0 : 1;
-      return;
-    }
-
-    if (!anthropicApiKey || !openaiApiKey) {
-      process.exitCode = 1;
+    if (resolvedExecutor) {
+      process.exitCode = 0;
     }
   } finally {
     rl?.close();
@@ -738,11 +661,11 @@ export function registerSetupCommand(program: Command): void {
   program
     .command("setup")
     .description("Run first-time setup and environment checks")
-    .option("--anthropic-key <key>", "Provide ANTHROPIC_API_KEY directly")
-    .option("--openai-key <key>", "Provide OPENAI_API_KEY directly")
-    .option("--check", "Run non-interactive validation checks")
+    .option("--anthropic-key <key>", "Provide Anthropic API key directly")
+    .option("--openai-key <key>", "Provide OpenAI API key directly")
     .option("--global", "Save config to ~/.orca/config.js")
     .option("--project", "Save config to ./orca.config.js")
+    .option("--executor <value>", "Set executor in written config (codex|claude)", parseExecutorOption)
     .option("--project-config-template", "Write a typed project hook template to ./orca.config.ts")
     .option("--skip-project-config", "Do not prompt to generate a project config template")
     .action(async (commandOptions: SetupCommandOptions) => {
