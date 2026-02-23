@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -39,6 +39,26 @@ describe("first-run config initialization", () => {
     try {
       process.chdir(tempProjectDir);
       await writeFile(path.join(tempProjectDir, "orca.config.ts"), "export default { executor: 'claude' };\n", "utf8");
+      await runModule.maybeCreateFirstRunGlobalConfig(fakeHome);
+
+      await expect(readFile(path.join(fakeHome, ".orca", "config.js"), "utf8")).rejects.toBeDefined();
+    } finally {
+      process.chdir(originalCwd);
+      await rm(fakeHome, { recursive: true, force: true });
+      await rm(tempProjectDir, { recursive: true, force: true });
+    }
+  });
+
+  test("does not create global js config when global ts config already exists", async () => {
+    const { runModule } = await loadRunModule();
+    const fakeHome = await mkdtemp(path.join(os.tmpdir(), "orca-home-"));
+    const originalCwd = process.cwd();
+    const tempProjectDir = await mkdtemp(path.join(os.tmpdir(), "orca-project-"));
+
+    try {
+      process.chdir(tempProjectDir);
+      await mkdir(path.join(fakeHome, ".orca"), { recursive: true });
+      await writeFile(path.join(fakeHome, ".orca", "config.ts"), "export default { executor: 'codex' };\n", "utf8");
       await runModule.maybeCreateFirstRunGlobalConfig(fakeHome);
 
       await expect(readFile(path.join(fakeHome, ".orca", "config.js"), "utf8")).rejects.toBeDefined();

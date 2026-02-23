@@ -122,11 +122,13 @@ async function pathExists(filePath: string): Promise<boolean> {
 }
 
 export async function maybeCreateFirstRunGlobalConfig(homedir: string = os.homedir()): Promise<void> {
-  const globalConfigPath = path.join(homedir, ".orca", "config.js");
+  const globalJsConfigPath = path.join(homedir, ".orca", "config.js");
+  const globalTsConfigPath = path.join(homedir, ".orca", "config.ts");
   const projectJsConfigPath = path.join(process.cwd(), "orca.config.js");
   const projectTsConfigPath = path.join(process.cwd(), "orca.config.ts");
 
-  const hasAnyConfig = (await pathExists(globalConfigPath))
+  const hasAnyConfig = (await pathExists(globalJsConfigPath))
+    || (await pathExists(globalTsConfigPath))
     || (await pathExists(projectJsConfigPath))
     || (await pathExists(projectTsConfigPath));
 
@@ -134,8 +136,8 @@ export async function maybeCreateFirstRunGlobalConfig(homedir: string = os.homed
     return;
   }
 
-  await mkdir(path.dirname(globalConfigPath), { recursive: true });
-  await writeFile(globalConfigPath, "export default {\n  executor: \"codex\"\n};\n", "utf8");
+  await mkdir(path.dirname(globalJsConfigPath), { recursive: true });
+  await writeFile(globalJsConfigPath, "export default {\n  executor: \"codex\"\n};\n", "utf8");
   console.log("✓ Created ~/.orca/config.js (first run defaults)");
 }
 
