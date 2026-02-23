@@ -22,6 +22,7 @@
     "lint": "oxlint src/",
     "typecheck": "node ./scripts/typecheck.mjs",
     "test": "bun test src",
+    "test:setup": "bash scripts/test-setup.sh",
     "test:postexec-json": "bun test src/cli/commands/run.postexec-json.integration.test.ts",
     "start": "bun run src/cli/index.ts",
     "prepare": "husky",
