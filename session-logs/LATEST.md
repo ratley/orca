@@ -1,13 +1,12 @@
 ---
-date: 2026-02-22T18:55:00-08:00
-session: docs-skill-readme-update
+date: 2026-02-22T23:35:00-08:00
+session: docs-sync-post-release
 agent: eve
 ---
 
-## Session: docs-skill-readme-update
+## Session: docs-sync-post-release
 
-Updated SKILL.md with comprehensive operator guide and cleaned up README.
-
-### Changes
-- SKILL.md: full rewrite — prerequisites, executor selection, fast-start runbook, status monitoring, failure handling, PR workflow, config reference, done criteria
-- README.md: updated `orca setup` flags — removed `--check`, added `--executor`, improved descriptions
+Updated README to reflect latest setup behavior:
+- auto-detect defaults (no --check)
+- --ts flag support
+- global config precedence includes ~/.orca/config.ts over ~/.orca/config.js
