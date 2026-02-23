@@ -152,6 +152,11 @@ describe("task-runner", () => {
 
     const hookEvents: HookEvent[] = [];
 
+    setExecuteTaskForTests(async () => ({
+      outcome: "done",
+      rawResponse: '{"outcome":"done"}'
+    }));
+
     await expect(
       runTaskRunner({
         runId,

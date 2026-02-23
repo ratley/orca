@@ -1,12 +1,12 @@
 ---
-date: 2026-02-23T02:24:00-08:00
-session: pr10-review-followup
-agent: eve
+date: 2026-02-23T04:58:00-08:00
+session: ci-timeout-root-cause-fix
+agent: codex-subagent
 ---
 
-## Session: pr10-review-followup
+## Session: ci-timeout-root-cause-fix
 
-Addressed PR #10 review comments:
-- removed orphaned setup flags (`--project-config-template`, `--skip-project-config`)
-- restored `PULL REQUESTS` section in `orca help`
-- updated README setup flags list to match current CLI
+- Diagnosed local timeout/hang cause in `bun test src/cli/commands/run.test.ts`.
+- Replaced fragile `mock.module("./setup.js")` strategy with deterministic `OPENAI_API_KEY` test env setup/restore in run command test harness.
+- Kept task-runner deterministic executeTask stub in failing test path.
+- Re-ran targeted failing tests and full validation gates.
