@@ -58,10 +58,13 @@ describe("first-run config initialization", () => {
     try {
       process.chdir(tempProjectDir);
       await mkdir(path.join(fakeHome, ".orca"), { recursive: true });
-      await writeFile(path.join(fakeHome, ".orca", "config.ts"), "export default { executor: 'codex' };\n", "utf8");
+      const tsConfigPath = path.join(fakeHome, ".orca", "config.ts");
+      const tsConfig = "export default { executor: 'codex' };\n";
+      await writeFile(tsConfigPath, tsConfig, "utf8");
       await runModule.maybeCreateFirstRunGlobalConfig(fakeHome);
 
       await expect(readFile(path.join(fakeHome, ".orca", "config.js"), "utf8")).rejects.toBeDefined();
+      await expect(readFile(tsConfigPath, "utf8")).resolves.toBe(tsConfig);
     } finally {
       process.chdir(originalCwd);
       await rm(fakeHome, { recursive: true, force: true });
