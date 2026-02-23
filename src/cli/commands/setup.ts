@@ -14,8 +14,6 @@ import type { OrcaConfig } from "../../types/index.js";
 export interface SetupCommandOptions {
   anthropicKey?: string;
   openaiKey?: string;
-  check?: boolean;
-  auto?: boolean;
   global?: boolean;
   project?: boolean;
   executor?: "codex" | "claude";
@@ -101,19 +99,6 @@ type ResolvedApiKey = {
   value: string;
   source: ApiKeySource;
 };
-
-function formatApiKeySource(source: ApiKeySource | "prompt"): string {
-  switch (source) {
-    case "flag":
-      return "--key flag";
-    case "env":
-      return "environment variable";
-    case "openclaw":
-      return "~/.openclaw/openclaw.json";
-    default:
-      return "interactive prompt";
-  }
-}
 
 function getOrcaEnvVarName(envVarName: string): string | undefined {
   if (envVarName === "ANTHROPIC_API_KEY") {
@@ -501,35 +486,6 @@ function parseSaveTarget(options: SetupCommandOptions): "global" | "project" | n
   return null;
 }
 
-async function chooseSaveTarget(
-  rl: readline.Interface,
-  explicitTarget: "global" | "project" | null
-): Promise<"global" | "project" | "skip"> {
-  if (explicitTarget) {
-    return explicitTarget;
-  }
-
-  if (!supportsPrompting()) {
-    return "global";
-  }
-
-  const answer = (
-    await rl.question("Save API keys to config? [G]lobal (~/.orca/config.js) / [P]roject (./orca.config.js) / [S]kip: ")
-  )
-    .trim()
-    .toLowerCase();
-
-  if (answer === "p" || answer === "project") {
-    return "project";
-  }
-
-  if (answer === "s" || answer === "skip") {
-    return "skip";
-  }
-
-  return "global";
-}
-
 function getConfigPath(target: "global" | "project"): string {
   if (target === "project") {
     return path.resolve("orca.config.js");
@@ -585,10 +541,7 @@ export async function setupCommandHandler(options: SetupCommandOptions): Promise
   }
 
   const explicitTarget = parseSaveTarget(options);
-  const checkMode = Boolean(options.check);
-  const autoMode = Boolean(options.auto);
-  const canPrompt = supportsPrompting() && !checkMode && !autoMode;
-  const rl = canPrompt
+  const rl = supportsPrompting()
     ? readline.createInterface({
         input: process.stdin,
         output: process.stdout
@@ -602,50 +555,23 @@ export async function setupCommandHandler(options: SetupCommandOptions): Promise
   let openaiApiKey = initialOpenai?.value;
 
   try {
-    if (!checkMode && !autoMode && rl) {
-      anthropicApiKey = await promptForApiKey(rl, anthropicApiKey, "Enter your Anthropic API key (sk-ant-...): ");
+    let codexAvailable = Boolean(openaiApiKey) || Boolean(readCodexAuthJson());
+    let claudeAvailable = Boolean(anthropicApiKey) || Boolean(readClaudeCodeKeychain());
+
+    if (!codexAvailable && !claudeAvailable && rl) {
+      anthropicApiKey = await promptForApiKey(rl, anthropicApiKey, "Enter your Anthropic API key (sk-ant-...) [optional]: ");
+      openaiApiKey = await promptForApiKey(rl, openaiApiKey, "Enter your OpenAI API key (sk-...) [optional]: ");
+      codexAvailable = Boolean(openaiApiKey) || Boolean(readCodexAuthJson());
+      claudeAvailable = Boolean(anthropicApiKey) || Boolean(readClaudeCodeKeychain());
     }
 
-    if (!checkMode && !autoMode && rl) {
-      openaiApiKey = await promptForApiKey(rl, openaiApiKey, "Enter your OpenAI API key (sk-...): ");
-    }
-
-    const codexAvailable = Boolean(openaiApiKey) || Boolean(readCodexAuthJson());
-    const claudeAvailable = Boolean(anthropicApiKey) || Boolean(readClaudeCodeKeychain());
-
-    if (autoMode) {
-      results.push({ name: "Codex", status: codexAvailable ? "pass" : "warn", detail: codexAvailable ? "available" : "not available" });
-      results.push({ name: "Claude", status: claudeAvailable ? "pass" : "warn", detail: claudeAvailable ? "available" : "not available" });
-    } else {
-      if (anthropicApiKey) {
-        const anthropicSource = formatApiKeySource(initialAnthropic?.source ?? "prompt");
-        const anthropicDetail = checkMode ? `set (${anthropicSource})` : `found (${anthropicSource})`;
-        results.push({ name: "ANTHROPIC_API_KEY", status: "pass", detail: anthropicDetail });
-        if (!checkMode) console.log(chalk.green(`✓ Anthropic API key found (${anthropicSource})`));
-      } else {
-        results.push({ name: "ANTHROPIC_API_KEY", status: "warn", detail: "not set" });
-        if (!checkMode) console.log(chalk.yellow("! ANTHROPIC_API_KEY not set"));
-      }
-
-      if (openaiApiKey) {
-        const openaiSource = formatApiKeySource(initialOpenai?.source ?? "prompt");
-        const openaiDetail = checkMode ? `set (${openaiSource})` : `found (${openaiSource})`;
-        results.push({ name: "OPENAI_API_KEY", status: "pass", detail: openaiDetail });
-        if (!checkMode) console.log(chalk.green(`✓ OpenAI API key found (${openaiSource})`));
-      } else {
-        results.push({ name: "OPENAI_API_KEY", status: "warn", detail: "not set" });
-        if (!checkMode) console.log(chalk.yellow("! OPENAI_API_KEY not set"));
-      }
-    }
+    results.push({ name: "Codex", status: codexAvailable ? "pass" : "warn", detail: codexAvailable ? "available" : "not available" });
+    results.push({ name: "Claude", status: claudeAvailable ? "pass" : "warn", detail: claudeAvailable ? "available" : "not available" });
 
     const ghAvailable = commandExists("gh");
     if (!ghAvailable) {
       results.push({ name: "gh CLI", status: "warn", detail: "not found" });
-      if (!checkMode) {
-        console.log(chalk.yellow("! gh CLI not found — needed for orca pr commands"));
-      }
-
-      if (!checkMode && rl) {
+      if (rl) {
         const installAnswer = (await rl.question("Install gh CLI? (y/N): ")).trim().toLowerCase();
         if (installAnswer === "y" || installAnswer === "yes") {
           const packageManager = detectPackageManager();
@@ -654,27 +580,15 @@ export async function setupCommandHandler(options: SetupCommandOptions): Promise
           } else {
             console.log("Install manually: https://cli.github.com");
           }
-        } else {
-          console.log("Skipping gh CLI installation.");
         }
-      } else if (!checkMode) {
-        console.log("Skipping gh CLI installation (non-interactive mode).");
       }
     } else {
       const auth = runGhAuthStatus();
-      if (auth.authenticated) {
-        results.push({ name: "gh CLI", status: "pass", detail: auth.detail });
-      } else {
-        results.push({ name: "gh CLI", status: "warn", detail: auth.detail });
-      }
-
-      if (!checkMode && !auth.authenticated) {
-        console.log(chalk.yellow("! gh CLI is not authenticated"));
-        if (rl) {
-          const loginAnswer = (await rl.question("Run gh auth login now? (y/N): ")).trim().toLowerCase();
-          if (loginAnswer === "y" || loginAnswer === "yes") {
-            spawnSync("gh", ["auth", "login"], { stdio: "inherit" });
-          }
+      results.push({ name: "gh CLI", status: auth.authenticated ? "pass" : "warn", detail: auth.detail });
+      if (!auth.authenticated && rl) {
+        const loginAnswer = (await rl.question("Run gh auth login now? (y/N): ")).trim().toLowerCase();
+        if (loginAnswer === "y" || loginAnswer === "yes") {
+          spawnSync("gh", ["auth", "login"], { stdio: "inherit" });
         }
       }
     }
@@ -682,67 +596,32 @@ export async function setupCommandHandler(options: SetupCommandOptions): Promise
     const gitCheck = checkGitOrigin();
     if (!gitCheck.inRepo) {
       results.push({ name: "git origin", status: "warn", detail: "not in a git repo" });
-      if (!checkMode) {
-        console.log(chalk.yellow("! Not in a git repo — orca pr commands require one"));
-      }
     } else if (!gitCheck.hasOrigin) {
       results.push({ name: "git origin", status: "warn", detail: "not set" });
-      if (!checkMode) {
-        console.log(chalk.yellow('! No git remote "origin" set'));
-      }
     } else {
       results.push({ name: "git origin", status: "pass", detail: "found" });
-      if (!checkMode) {
-        console.log(chalk.green("✓ Git remote origin found"));
-      }
     }
 
-    if (!checkMode && (codexAvailable || claudeAvailable)) {
-      const target = autoMode ? "global" : (rl ? await chooseSaveTarget(rl, explicitTarget) : explicitTarget ?? "global");
-      if (target !== "skip") {
-        const configPath = getConfigPath(target);
-        const resolvedExecutor = options.executor ?? (codexAvailable ? "codex" : "claude");
+    const target = explicitTarget ?? "global";
+    const configPath = getConfigPath(target);
+    const resolvedExecutor = options.executor ?? (codexAvailable ? "codex" : claudeAvailable ? "claude" : "codex");
 
-        await saveConfig(
-          configPath,
-          {
-            ...(options.anthropicKey !== undefined ? { anthropicApiKey: options.anthropicKey } : {}),
-            ...(options.openaiKey !== undefined ? { openaiApiKey: options.openaiKey } : {})
-          },
-          resolvedExecutor
-        );
+    await saveConfig(
+      configPath,
+      {
+        ...(options.anthropicKey !== undefined ? { anthropicApiKey: options.anthropicKey } : {}),
+        ...(options.openaiKey !== undefined ? { openaiApiKey: options.openaiKey } : {})
+      },
+      resolvedExecutor
+    );
 
-        const printedPath = target === "global" ? "~/.orca/config.js" : "./orca.config.js";
-        const executorNote = resolvedExecutor ? ` (executor: ${resolvedExecutor})` : "";
-        console.log(chalk.green(`✓ Config saved to ${printedPath}${executorNote}`));
-      }
-    }
+    const printedPath = target === "global" ? "~/.orca/config.js" : "./orca.config.js";
+    console.log(chalk.green(`✓ Config saved to ${printedPath} (executor: ${resolvedExecutor})`));
 
-    if (!checkMode && !autoMode) {
-      await maybeWriteProjectTemplate(options, rl);
-    }
+    await maybeWriteProjectTemplate(options, rl);
 
-    if (!checkMode) {
-      console.log("\nSummary:");
-    }
+    console.log("\nSummary:");
     printSummary(results);
-
-    if (checkMode) {
-      const requiredPass = Boolean(anthropicApiKey) || Boolean(openaiApiKey);
-      if (!requiredPass) {
-        console.log(
-          chalk.dim("\nNo API keys detected in env/overrides. Run `orca setup` to configure overrides if needed.")
-        );
-      }
-      process.exitCode = requiredPass ? 0 : 1;
-      return;
-    }
-
-    if (autoMode) {
-      process.exitCode = codexAvailable || claudeAvailable ? 0 : 1;
-    } else if (!anthropicApiKey && !openaiApiKey) {
-      process.exitCode = 1;
-    }
   } finally {
     rl?.close();
   }
@@ -754,8 +633,6 @@ export function registerSetupCommand(program: Command): void {
     .description("Run first-time setup and environment checks")
     .option("--anthropic-key <key>", "Provide Anthropic API key directly")
     .option("--openai-key <key>", "Provide OpenAI API key directly")
-    .option("--check", "Run non-interactive validation checks")
-    .option("--auto", "Run fully non-interactive setup and write ~/.orca/config.js when keys are detected")
     .option("--global", "Save config to ~/.orca/config.js")
     .option("--project", "Save config to ./orca.config.js")
     .option("--executor <value>", "Set executor in written config (codex|claude)", parseExecutorOption)
