@@ -1,7 +1,6 @@
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
-import * as claudeAgent from "../agents/claude/session.js";
 import { createCodexSession } from "../agents/codex/session.js";
 import { RunStore } from "../state/store.js";
 import type { HookEvent, OrcaConfig, RunId, RunStatus, Task } from "../types/index.js";
@@ -16,7 +15,7 @@ export type ExecuteTaskFn = (
   runId: string,
   config?: OrcaConfig,
   systemContext?: string
-) => Promise<claudeAgent.TaskExecutionResult>;
+) => Promise<{ outcome: "done" | "failed"; rawResponse: string; error?: string }>;
 
 // Non-null only when set by tests — null means "use real executor logic"
 let testExecuteTaskOverride: ExecuteTaskFn | null = null;
@@ -146,7 +145,7 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
   // Test mocks bypass all executor logic entirely — no real sessions created.
   const mockFn: ExecuteTaskFn | null = options.executeTask ?? testExecuteTaskOverride;
 
-  // Build real executor (Codex persistent session or Claude stateless fallback).
+  // Build real executor (Codex persistent session).
   // Only runs in production — skipped completely when a mock is active.
   let codexSession: Awaited<ReturnType<typeof createCodexSession>> | undefined;
   let executeTaskFn: ExecuteTaskFn;
@@ -154,21 +153,9 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
   if (mockFn) {
     executeTaskFn = mockFn;
   } else {
-    const executor = config?.executor ?? "codex";
-    if (executor === "codex") {
-      try {
-        codexSession = await createCodexSession(process.cwd(), config);
-        executeTaskFn = (task, taskRunId, _cfg, systemContext) =>
-          codexSession!.executeTask(task, taskRunId, systemContext);
-      } catch (sessionError) {
-        console.warn(
-          `[orca] Codex session init failed, falling back to Claude: ${toErrorMessage(sessionError)}`
-        );
-        executeTaskFn = claudeAgent.executeTask;
-      }
-    } else {
-      executeTaskFn = claudeAgent.executeTask;
-    }
+    codexSession = await createCodexSession(process.cwd(), config);
+    executeTaskFn = (task, taskRunId, _cfg, systemContext) =>
+      codexSession!.executeTask(task, taskRunId, systemContext);
   }
 
   try {

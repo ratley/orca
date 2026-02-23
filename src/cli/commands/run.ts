@@ -19,7 +19,7 @@ import { createStdoutHookHandler } from "../../hooks/adapters/stdout.js";
 import { HookDispatcher } from "../../hooks/dispatcher.js";
 import { RunStore } from "../../state/store.js";
 import type { HookEvent, HookHandler, HookName, OrcaConfig } from "../../types/index.js";
-import { parseClaudeEffort, parseCodexEffort, type ClaudeEffort, type CodexEffort } from "../../types/effort.js";
+import { parseCodexEffort, type CodexEffort } from "../../types/effort.js";
 import { generateRunId } from "../../utils/ids.js";
 import { readCodexAuthJson } from "./setup.js";
 
@@ -56,9 +56,7 @@ export interface RunCommandOptions {
   goal?: string;
   config?: string;
   codexOnly?: boolean;
-  claudeOnly?: boolean;
   codexEffort?: CodexEffort;
-  claudeEffort?: ClaudeEffort;
   onMilestone?: string;
   onTaskComplete?: string;
   onTaskFail?: string;
@@ -94,14 +92,6 @@ function isHookName(value: string): value is HookName {
 function parseCodexEffortOption(value: string): CodexEffort {
   try {
     return parseCodexEffort(value);
-  } catch (error) {
-    throw new InvalidArgumentError(error instanceof Error ? error.message : String(error));
-  }
-}
-
-function parseClaudeEffortOption(value: string): ClaudeEffort {
-  try {
-    return parseClaudeEffort(value);
   } catch (error) {
     throw new InvalidArgumentError(error instanceof Error ? error.message : String(error));
   }
@@ -165,18 +155,6 @@ function buildCliCommandHooks(options: RunCommandOptions): Partial<Record<HookNa
   };
 }
 
-function isNestedClaudeCodeSession(env: NodeJS.ProcessEnv = process.env): boolean {
-  const markers = [
-    env.CLAUDE_CODE_SESSION_ID,
-    env.CLAUDE_CODE_ENTRYPOINT,
-    env.ANTHROPIC_CLAUDE_CODE,
-    env.CLAUDE_CODE,
-    env.CLAUDECODE
-  ];
-
-  return markers.some((value) => typeof value === "string" ? value.trim().length > 0 : Boolean(value));
-}
-
 function isCodexAvailableForRun(env: NodeJS.ProcessEnv = process.env): boolean {
   const envOpenai = env.ORCA_OPENAI_API_KEY ?? env.OPENAI_API_KEY;
   if (typeof envOpenai === "string" && envOpenai.trim().length > 0) {
@@ -189,20 +167,16 @@ function isCodexAvailableForRun(env: NodeJS.ProcessEnv = process.env): boolean {
 
 function applyExecutorOverrideForRun(
   config: OrcaConfig | undefined,
-  options: Pick<RunCommandOptions, "codexOnly" | "claudeOnly" | "codexEffort" | "claudeEffort">
+  options: Pick<RunCommandOptions, "codexOnly" | "codexEffort">
 ): OrcaConfig | undefined {
   const nextConfig: OrcaConfig = { ...config };
 
-  if (options.codexOnly || options.claudeOnly) {
-    nextConfig.executor = options.codexOnly ? "codex" : "claude";
+  if (options.codexOnly) {
+    nextConfig.executor = "codex";
   }
 
   if (options.codexEffort !== undefined) {
     nextConfig.codex = { ...nextConfig.codex, effort: options.codexEffort };
-  }
-
-  if (options.claudeEffort !== undefined) {
-    nextConfig.claude = { ...nextConfig.claude, effort: options.claudeEffort };
   }
 
   if (config === undefined && Object.keys(nextConfig).length === 0) {
@@ -368,10 +342,6 @@ async function requestStructuredExecutionReview(
 }
 
 export async function runCommandHandler(options: RunCommandOptions): Promise<void> {
-  if (options.codexOnly && options.claudeOnly) {
-    throw new Error("--codex-only and --claude-only are mutually exclusive; choose only one executor override.");
-  }
-
   const inlineTask = options.task ?? options.prompt ?? options.goal;
   const inputSpecPath = options.spec ?? options.plan;
 
@@ -407,20 +377,12 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
 
     await maybeCreateFirstRunGlobalConfig();
     const orcaConfig = await resolveConfig(options.config);
-    let effectiveConfig = applyExecutorOverrideForRun(orcaConfig, options);
+    const effectiveConfig = applyExecutorOverrideForRun(orcaConfig, options);
 
-    if (isNestedClaudeCodeSession()) {
-      console.warn("⚠ Running inside Claude Code — forcing executor: codex to avoid runtime conflicts.");
-      effectiveConfig = {
-        ...effectiveConfig,
-        executor: "codex"
-      };
-
-      if (!isCodexAvailableForRun()) {
-        console.error("Codex is unavailable in this nested Claude Code session. Set OPENAI_API_KEY (or ORCA_OPENAI_API_KEY) or configure ~/.codex/auth.json.");
-        process.exitCode = 1;
-        return;
-      }
+    if (!isCodexAvailableForRun()) {
+      console.error("Codex is unavailable. Set OPENAI_API_KEY (or ORCA_OPENAI_API_KEY) or configure ~/.codex/auth.json.");
+      process.exitCode = 1;
+      return;
     }
 
     const runId = generateRunId(specPath);
@@ -501,8 +463,7 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
       overallStatus: "running"
     });
 
-    const executor = effectiveConfig?.executor ?? "codex";
-    if (executor === "codex") {
+    {
       const cwd = process.cwd();
 
       const multiAgentResult = await ensureCodexMultiAgent(effectiveConfig);
@@ -617,14 +578,6 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
       } finally {
         await codexSession.disconnect();
       }
-    } else {
-      console.log("Phase 4: Skipping Codex consultation because executor is set to Claude.");
-      await runTaskRunner({
-        runId,
-        store,
-        ...(effectiveConfig ? { config: effectiveConfig } : {}),
-        emitHook
-      });
     }
 
     const run = await store.getRun(runId);
@@ -667,9 +620,7 @@ export function registerRunCommand(program: Command): void {
     .option("-p, --prompt <text>", "Inline task text (alias for --task)")
     .option("--config <path>", "Path to orca config file")
     .option("--codex-only", "Force Codex executor for this run (overrides config)")
-    .option("--claude-only", "Force Claude executor for this run (overrides config)")
     .option("--codex-effort <value>", "Codex effort override for this run", parseCodexEffortOption)
-    .option("--claude-effort <value>", "Claude effort override for this run", parseClaudeEffortOption)
     .option("--on-milestone <cmd>", "Shell hook command for onMilestone")
     .option("--on-task-complete <cmd>", "Shell hook command for onTaskComplete")
     .option("--on-task-fail <cmd>", "Shell hook command for onTaskFail")
@@ -683,12 +634,6 @@ export function registerRunCommand(program: Command): void {
           ...commandOptions,
           ...(goal !== undefined ? { goal } : {})
         };
-
-        if (normalizedOptions.codexOnly && normalizedOptions.claudeOnly) {
-          console.error("Error: --codex-only and --claude-only are mutually exclusive; choose only one.");
-          process.exitCode = 1;
-          return;
-        }
 
         const inlineTask = normalizedOptions.task ?? normalizedOptions.prompt ?? normalizedOptions.goal;
         const inputSpecPath = normalizedOptions.spec ?? normalizedOptions.plan;

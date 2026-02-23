@@ -1,4 +1,4 @@
-import type { ClaudeEffort, CodexEffort } from "./effort.js";
+import type { CodexEffort } from "./effort.js";
 
 export type RunId = `${string}-${number}-${string}`;
 
@@ -92,7 +92,7 @@ export type HookHandler<K extends HookName = HookName> = (
   context: HookHandlerContext
 ) => Promise<void> | void;
 
-// Shared agent result types (used by both claude and codex session adapters)
+// Shared agent result types (used by codex session adapters)
 export interface PlanResult {
   tasks: Task[];
   rawResponse: string;
@@ -139,20 +139,12 @@ export interface TaskGraphReviewResult {
 }
 
 export interface OrcaConfig {
-  anthropicApiKey?: string;
   openaiApiKey?: string;
   runsDir?: string;
   sessionLogs?: string;
   skills?: string[];
   maxRetries?: number;
-  executor?: "claude" | "codex";
-  claude?: {
-    model?: string;
-    effort?: ClaudeEffort;
-    useV2Preview?: boolean;
-    maxTurnsPerTask?: number;
-    allowTextJsonFallback?: boolean;
-  };
+  executor?: "codex";
   codex?: {
     enabled?: boolean;
     model?: string;

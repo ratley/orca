@@ -23,9 +23,8 @@ Orca (`orcastrator`) breaks a goal into a task graph and executes it end-to-end 
 | Executor | When to use |
 |---|---|
 | `codex` (default) | Most tasks. Persistent Codex session, fast, integrates with app-server skills |
-| `claude` | When Codex auth is unavailable, or for heavy reasoning tasks |
 
-Override in config: `executor: "claude"` or per-run (no CLI flag; change config).
+Override in config: `executor: "codex"` (default and only supported executor).
 
 ---
 
@@ -170,7 +169,7 @@ Config locations (first found wins): `~/.orca/config.js`, `./orca.config.js`, `.
 
 ```ts
 export default {
-  executor: "codex",              // "codex" | "claude"
+  executor: "codex",              // "codex"
   sessionLogs: "./session-logs",  // where to write session logs
 
   hooks: {
