@@ -559,14 +559,28 @@ export async function setupCommandHandler(options: SetupCommandOptions): Promise
   const initialOpenai = resolveApiKeyWithSource(options.openaiKey, "OPENAI_API_KEY");
   let anthropicApiKey = initialAnthropic?.value;
   let openaiApiKey = initialOpenai?.value;
+  let shouldPersistAnthropicKey = options.anthropicKey !== undefined;
+  let shouldPersistOpenaiKey = options.openaiKey !== undefined;
 
   try {
     let codexAvailable = Boolean(openaiApiKey) || Boolean(readCodexAuthJson());
     let claudeAvailable = Boolean(anthropicApiKey) || Boolean(readClaudeCodeKeychain());
 
     if (!codexAvailable && !claudeAvailable && rl) {
+      const anthropicBeforePrompt = anthropicApiKey;
+      const openaiBeforePrompt = openaiApiKey;
+
       anthropicApiKey = await promptForApiKey(rl, anthropicApiKey, "Enter your Anthropic API key (sk-ant-...) [optional]: ");
       openaiApiKey = await promptForApiKey(rl, openaiApiKey, "Enter your OpenAI API key (sk-...) [optional]: ");
+
+      if (!shouldPersistAnthropicKey && !anthropicBeforePrompt && anthropicApiKey) {
+        shouldPersistAnthropicKey = true;
+      }
+
+      if (!shouldPersistOpenaiKey && !openaiBeforePrompt && openaiApiKey) {
+        shouldPersistOpenaiKey = true;
+      }
+
       codexAvailable = Boolean(openaiApiKey) || Boolean(readCodexAuthJson());
       claudeAvailable = Boolean(anthropicApiKey) || Boolean(readClaudeCodeKeychain());
     }
@@ -615,8 +629,8 @@ export async function setupCommandHandler(options: SetupCommandOptions): Promise
     await saveConfig(
       configPath,
       {
-        ...(options.anthropicKey !== undefined ? { anthropicApiKey: options.anthropicKey } : {}),
-        ...(options.openaiKey !== undefined ? { openaiApiKey: options.openaiKey } : {})
+        ...(shouldPersistAnthropicKey && anthropicApiKey !== undefined ? { anthropicApiKey: anthropicApiKey } : {}),
+        ...(shouldPersistOpenaiKey && openaiApiKey !== undefined ? { openaiApiKey: openaiApiKey } : {})
       },
       resolvedExecutor
     );
