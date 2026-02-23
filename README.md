@@ -109,7 +109,7 @@ orca pr publish --last
 
 Orca auto-discovers config in this order:
 
-1. `~/.orca/config.js`
+1. Global config: `~/.orca/config.ts` (preferred when both exist) or `~/.orca/config.js`
 2. Project config: `./orca.config.ts` (preferred when both exist) or `./orca.config.js`
 3. `--config <path>` (if passed)
 
@@ -297,11 +297,13 @@ Global:
 
 `orca setup`:
 
+- auto-detect is default (no `--auto`, no `--check`)
 - `--anthropic-key <key>` — override Anthropic API key (written to config)
 - `--openai-key <key>` — override OpenAI API key (written to config)
 - `--executor <codex|claude>` — explicitly set executor in written config
-- `--global` — save to `~/.orca/config.js` (default)
-- `--project` — save to `./orca.config.js`
+- `--ts` — write TS config output (`~/.orca/config.ts` / `./orca.config.ts`)
+- `--global` — save to global config (`~/.orca/config.js` by default, or `.ts` with `--ts`)
+- `--project` — save to project config (`./orca.config.js` by default, or `.ts` with `--ts`)
 - `--project-config-template` — write typed project hook template to `./orca.config.ts`
 - `--skip-project-config` — skip project config prompt
 
@@ -342,8 +344,8 @@ Run IDs are generated as:
 
 ### Config File Locations
 
-- Global: `~/.orca/config.js`
-- Project: `./orca.config.js` or `./orca.config.ts`
+- Global: `~/.orca/config.ts` (preferred when both exist) or `~/.orca/config.js`
+- Project: `./orca.config.ts` (preferred when both exist) or `./orca.config.js`
 - Explicit: `--config <path>`
 
 ### Project Instruction Files
