@@ -5,7 +5,7 @@ description: "Orchestrate multi-step AI coding tasks via the Orca CLI. Use when:
 
 # Orca — Operator Guide
 
-Orca (`orcastrator`) breaks a goal into a task graph and executes it end-to-end via Codex or Claude. Claude plans; Codex (or Claude) executes; a reviewer catches regressions and can auto-fix.
+Orca (`orcastrator`) breaks a goal into a task graph and executes it end-to-end via Codex. Codex plans and executes; a reviewer catches regressions and can auto-fix.
 
 ---
 
@@ -13,7 +13,6 @@ Orca (`orcastrator`) breaks a goal into a task graph and executes it end-to-end 
 
 - Must be run inside a git repo (or pass `--skip-git-repo-check`)
 - Codex executor (default): requires `~/.codex/auth.json` (Codex OAuth)
-- Claude executor: requires `ANTHROPIC_API_KEY` in env
 - Install: `npm install -g orcastrator`
 
 ---
@@ -165,7 +164,7 @@ orca pr status [--last]              Check PR and CI status
 
 ## Config Reference
 
-Config locations (first found wins): `~/.orca/config.js`, `./orca.config.js`, `./orca.config.ts`
+Config locations (later entries override earlier): `~/.orca/config.ts` (preferred when both exist) or `~/.orca/config.js`, then `./orca.config.ts` (preferred when both exist) or `./orca.config.js`, then `--config <path>`
 
 ```ts
 export default {
