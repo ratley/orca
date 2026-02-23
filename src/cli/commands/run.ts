@@ -21,6 +21,7 @@ import { RunStore } from "../../state/store.js";
 import type { HookEvent, HookHandler, HookName, OrcaConfig } from "../../types/index.js";
 import { parseClaudeEffort, parseCodexEffort, type ClaudeEffort, type CodexEffort } from "../../types/effort.js";
 import { generateRunId } from "../../utils/ids.js";
+import { readCodexAuthJson } from "./setup.js";
 
 const exec = promisify(execCallback);
 
@@ -121,11 +122,13 @@ async function pathExists(filePath: string): Promise<boolean> {
 }
 
 export async function maybeCreateFirstRunGlobalConfig(homedir: string = os.homedir()): Promise<void> {
-  const globalConfigPath = path.join(homedir, ".orca", "config.js");
+  const globalJsConfigPath = path.join(homedir, ".orca", "config.js");
+  const globalTsConfigPath = path.join(homedir, ".orca", "config.ts");
   const projectJsConfigPath = path.join(process.cwd(), "orca.config.js");
   const projectTsConfigPath = path.join(process.cwd(), "orca.config.ts");
 
-  const hasAnyConfig = (await pathExists(globalConfigPath))
+  const hasAnyConfig = (await pathExists(globalJsConfigPath))
+    || (await pathExists(globalTsConfigPath))
     || (await pathExists(projectJsConfigPath))
     || (await pathExists(projectTsConfigPath));
 
@@ -133,8 +136,8 @@ export async function maybeCreateFirstRunGlobalConfig(homedir: string = os.homed
     return;
   }
 
-  await mkdir(path.dirname(globalConfigPath), { recursive: true });
-  await writeFile(globalConfigPath, "export default {\n  executor: \"codex\"\n};\n", "utf8");
+  await mkdir(path.dirname(globalJsConfigPath), { recursive: true });
+  await writeFile(globalJsConfigPath, "export default {\n  executor: \"codex\"\n};\n", "utf8");
   console.log("✓ Created ~/.orca/config.js (first run defaults)");
 }
 
@@ -160,6 +163,28 @@ function buildCliCommandHooks(options: RunCommandOptions): Partial<Record<HookNa
     ...(options.onComplete ? { onComplete: options.onComplete } : {}),
     ...(options.onError ? { onError: options.onError } : {})
   };
+}
+
+function isNestedClaudeCodeSession(env: NodeJS.ProcessEnv = process.env): boolean {
+  const markers = [
+    env.CLAUDE_CODE_SESSION_ID,
+    env.CLAUDE_CODE_ENTRYPOINT,
+    env.ANTHROPIC_CLAUDE_CODE,
+    env.CLAUDE_CODE,
+    env.CLAUDECODE
+  ];
+
+  return markers.some((value) => typeof value === "string" ? value.trim().length > 0 : Boolean(value));
+}
+
+function isCodexAvailableForRun(env: NodeJS.ProcessEnv = process.env): boolean {
+  const envOpenai = env.ORCA_OPENAI_API_KEY ?? env.OPENAI_API_KEY;
+  if (typeof envOpenai === "string" && envOpenai.trim().length > 0) {
+    return true;
+  }
+
+  const homeDir = typeof env.HOME === "string" && env.HOME.trim().length > 0 ? env.HOME : os.homedir();
+  return Boolean(readCodexAuthJson(homeDir));
 }
 
 function applyExecutorOverrideForRun(
@@ -382,7 +407,21 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
 
     await maybeCreateFirstRunGlobalConfig();
     const orcaConfig = await resolveConfig(options.config);
-    const effectiveConfig = applyExecutorOverrideForRun(orcaConfig, options);
+    let effectiveConfig = applyExecutorOverrideForRun(orcaConfig, options);
+
+    if (isNestedClaudeCodeSession()) {
+      console.warn("⚠ Running inside Claude Code — forcing executor: codex to avoid runtime conflicts.");
+      effectiveConfig = {
+        ...effectiveConfig,
+        executor: "codex"
+      };
+
+      if (!isCodexAvailableForRun()) {
+        console.error("Codex is unavailable in this nested Claude Code session. Set OPENAI_API_KEY (or ORCA_OPENAI_API_KEY) or configure ~/.codex/auth.json.");
+        process.exitCode = 1;
+        return;
+      }
+    }
 
     const runId = generateRunId(specPath);
     console.log(`Run ID: ${runId}`);

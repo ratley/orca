@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -42,6 +42,29 @@ describe("first-run config initialization", () => {
       await runModule.maybeCreateFirstRunGlobalConfig(fakeHome);
 
       await expect(readFile(path.join(fakeHome, ".orca", "config.js"), "utf8")).rejects.toBeDefined();
+    } finally {
+      process.chdir(originalCwd);
+      await rm(fakeHome, { recursive: true, force: true });
+      await rm(tempProjectDir, { recursive: true, force: true });
+    }
+  });
+
+  test("does not create global js config when global ts config already exists", async () => {
+    const { runModule } = await loadRunModule();
+    const fakeHome = await mkdtemp(path.join(os.tmpdir(), "orca-home-"));
+    const originalCwd = process.cwd();
+    const tempProjectDir = await mkdtemp(path.join(os.tmpdir(), "orca-project-"));
+
+    try {
+      process.chdir(tempProjectDir);
+      await mkdir(path.join(fakeHome, ".orca"), { recursive: true });
+      const tsConfigPath = path.join(fakeHome, ".orca", "config.ts");
+      const tsConfig = "export default { executor: 'codex' };\n";
+      await writeFile(tsConfigPath, tsConfig, "utf8");
+      await runModule.maybeCreateFirstRunGlobalConfig(fakeHome);
+
+      await expect(readFile(path.join(fakeHome, ".orca", "config.js"), "utf8")).rejects.toBeDefined();
+      await expect(readFile(tsConfigPath, "utf8")).resolves.toBe(tsConfig);
     } finally {
       process.chdir(originalCwd);
       await rm(fakeHome, { recursive: true, force: true });
@@ -106,6 +129,68 @@ describe("run command executor flags", () => {
         claudeOnly: true
       })
     ).rejects.toThrow("--codex-only and --claude-only are mutually exclusive");
+  });
+
+  test("forces codex executor when nested inside Claude Code", async () => {
+    const { runModule, runPlannerMock, runTaskRunnerMock } = await loadRunModule();
+    const configPath = path.join(getTempDir(), "orca.config.js");
+    const originalNested = process.env.CLAUDE_CODE_SESSION_ID;
+    const originalOpenai = process.env.OPENAI_API_KEY;
+
+    try {
+      process.env.CLAUDE_CODE_SESSION_ID = "nested-session";
+      process.env.OPENAI_API_KEY = "sk-openai";
+      await writeFile(configPath, "export default { executor: 'claude' };\n", "utf8");
+
+      await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
+
+      const plannerConfig = runPlannerMock.mock.calls[0]?.[3] as { executor?: string } | undefined;
+      const runnerArg = runTaskRunnerMock.mock.calls[0]?.[0] as { config?: { executor?: string } } | undefined;
+      expect(plannerConfig?.executor).toBe("codex");
+      expect(runnerArg?.config?.executor).toBe("codex");
+    } finally {
+      if (originalNested === undefined) delete process.env.CLAUDE_CODE_SESSION_ID;
+      else process.env.CLAUDE_CODE_SESSION_ID = originalNested;
+
+      if (originalOpenai === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = originalOpenai;
+    }
+  });
+
+  test("exits with code 1 in nested Claude Code session when Codex is unavailable", async () => {
+    const { runModule, runPlannerMock, runTaskRunnerMock } = await loadRunModule();
+    const originalNested = process.env.CLAUDE_CODE_ENTRYPOINT;
+    const originalOpenai = process.env.OPENAI_API_KEY;
+    const originalOrcaOpenai = process.env.ORCA_OPENAI_API_KEY;
+    const originalHome = process.env.HOME;
+    const isolatedHome = await mkdtemp(path.join(os.tmpdir(), "orca-no-codex-home-"));
+
+    try {
+      process.env.CLAUDE_CODE_ENTRYPOINT = "nested-entrypoint";
+      delete process.env.OPENAI_API_KEY;
+      delete process.env.ORCA_OPENAI_API_KEY;
+      process.env.HOME = isolatedHome;
+
+      await parseRun(runModule, ["run", "--task", "x"]);
+
+      expect(process.exitCode).toBe(1);
+      expect(runPlannerMock).not.toHaveBeenCalled();
+      expect(runTaskRunnerMock).not.toHaveBeenCalled();
+    } finally {
+      if (originalNested === undefined) delete process.env.CLAUDE_CODE_ENTRYPOINT;
+      else process.env.CLAUDE_CODE_ENTRYPOINT = originalNested;
+
+      if (originalOpenai === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = originalOpenai;
+
+      if (originalOrcaOpenai === undefined) delete process.env.ORCA_OPENAI_API_KEY;
+      else process.env.ORCA_OPENAI_API_KEY = originalOrcaOpenai;
+
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+
+      await rm(isolatedHome, { recursive: true, force: true });
+    }
   });
 
   test("dispatches onInvalidPlan hook when planner rejects invalid graph", async () => {

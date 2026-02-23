@@ -9,6 +9,7 @@ import {
   buildProjectConfigTemplate,
   detectPackageManager,
   readClaudeCodeKeychain,
+  readCodexAuthJson,
   resolveApiKey
 } from "./setup.js";
 
@@ -117,6 +118,65 @@ describe("resolveApiKey", () => {
     });
 
     expect(resolved).toBeUndefined();
+  });
+});
+
+describe("readCodexAuthJson", () => {
+  let tempDir: string | undefined;
+
+  afterEach(async () => {
+    if (tempDir) {
+      await rm(tempDir, { recursive: true, force: true });
+      tempDir = undefined;
+    }
+  });
+
+  test("reads OPENAI_API_KEY when auth_mode is api_key", async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-codex-auth-test-"));
+    await mkdir(path.join(tempDir, ".codex"), { recursive: true });
+    await writeFile(
+      path.join(tempDir, ".codex", "auth.json"),
+      JSON.stringify({ auth_mode: "api_key", OPENAI_API_KEY: "sk-api-value" }),
+      "utf8"
+    );
+
+    expect(readCodexAuthJson(tempDir)).toBe("sk-api-value");
+  });
+
+  test("reads tokens.access_token when auth_mode is chatgpt", async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-codex-auth-test-"));
+    await mkdir(path.join(tempDir, ".codex"), { recursive: true });
+    await writeFile(
+      path.join(tempDir, ".codex", "auth.json"),
+      JSON.stringify({ auth_mode: "chatgpt", tokens: { access_token: "sk-token-value" } }),
+      "utf8"
+    );
+
+    expect(readCodexAuthJson(tempDir)).toBe("sk-token-value");
+  });
+
+  test("reads tokens.access_token when auth_mode is oauth", async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-codex-auth-test-"));
+    await mkdir(path.join(tempDir, ".codex"), { recursive: true });
+    await writeFile(
+      path.join(tempDir, ".codex", "auth.json"),
+      JSON.stringify({ auth_mode: "oauth", tokens: { access_token: "sk-oauth-token" } }),
+      "utf8"
+    );
+
+    expect(readCodexAuthJson(tempDir)).toBe("sk-oauth-token");
+  });
+
+  test("falls back to tokens.access_token then OPENAI_API_KEY when auth_mode is missing", async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-codex-auth-test-"));
+    await mkdir(path.join(tempDir, ".codex"), { recursive: true });
+    await writeFile(
+      path.join(tempDir, ".codex", "auth.json"),
+      JSON.stringify({ tokens: { access_token: "sk-token-value" }, OPENAI_API_KEY: "sk-api-value" }),
+      "utf8"
+    );
+
+    expect(readCodexAuthJson(tempDir)).toBe("sk-token-value");
   });
 });
 
