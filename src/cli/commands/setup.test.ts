@@ -12,6 +12,27 @@ import {
   resolveApiKey
 } from "./setup.js";
 
+/*
+Manual setup smoke tests:
+
+# Test: Codex only
+OPENAI_API_KEY=sk-test orca setup
+# Expected: executor: "codex" in ~/.orca/config.js
+
+# Test: Claude only
+ANTHROPIC_API_KEY=sk-ant-test orca setup
+# Expected: executor: "claude" in ~/.orca/config.js
+
+# Test: neither
+# (unset both keys, ensure no ~/.codex/auth.json, no keychain entry)
+orca setup
+# Expected: base config written, "! No executors detected" message, exit 1
+
+# Test: agent non-TTY
+echo "" | orca setup
+# Expected: non-interactive, same as above
+*/
+
 describe("resolveApiKey", () => {
   const originalAnthropic = process.env.ANTHROPIC_API_KEY;
   const originalOpenai = process.env.OPENAI_API_KEY;

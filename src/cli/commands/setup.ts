@@ -604,7 +604,7 @@ export async function setupCommandHandler(options: SetupCommandOptions): Promise
 
     const target = explicitTarget ?? "global";
     const configPath = getConfigPath(target);
-    const resolvedExecutor = options.executor ?? (codexAvailable ? "codex" : claudeAvailable ? "claude" : "codex");
+    const resolvedExecutor = options.executor ?? (codexAvailable ? "codex" : claudeAvailable ? "claude" : undefined);
 
     await saveConfig(
       configPath,
@@ -616,12 +616,22 @@ export async function setupCommandHandler(options: SetupCommandOptions): Promise
     );
 
     const printedPath = target === "global" ? "~/.orca/config.js" : "./orca.config.js";
-    console.log(chalk.green(`✓ Config saved to ${printedPath} (executor: ${resolvedExecutor})`));
+    if (resolvedExecutor) {
+      console.log(chalk.green(`✓ Config saved to ${printedPath} (executor: ${resolvedExecutor})`));
+    } else {
+      console.log(chalk.green(`✓ Config saved to ${printedPath}`));
+      console.log("! No executors detected. Set ANTHROPIC_API_KEY (Claude) or OPENAI_API_KEY (Codex), then run `orca setup` again.");
+      process.exitCode = 1;
+    }
 
     await maybeWriteProjectTemplate(options, rl);
 
     console.log("\nSummary:");
     printSummary(results);
+
+    if (resolvedExecutor) {
+      process.exitCode = 0;
+    }
   } finally {
     rl?.close();
   }
