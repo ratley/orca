@@ -207,11 +207,21 @@ export default {
 
 Set `codex.multiAgent: true` to spawn parallel Codex agents per task. Faster for independent tasks; higher token cost. Use for large refactors with clearly separable subtasks.
 
+When parallelizing, enforce lane ownership:
+- one sub-agent lane per independent subsystem/file set
+- avoid overlapping write scopes
+- keep integration/merge steps sequential
+
 ---
 
 ## Skills
 
 Orca ships a bundled `code-simplifier` skill that's applied in planner, reviewer, and executor prompts automatically. Extra skills can be injected via `codex.perCwdExtraUserRoots` (scoped per cwd).
+
+Execution guardrails (especially for Codex):
+- bias to the simplest implementation that works
+- no compatibility fallbacks or dead code unless explicitly required
+- run a simplification pass before final handoff
 
 ---
 

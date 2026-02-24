@@ -21,6 +21,9 @@ function getCodeSimplifierGuidance(): string[] {
   return [
     "For every code-writing step, explicitly apply code-simplifier guidance (use the bundled code-simplifier skill when available).",
     "For every code-review step, explicitly apply code-simplifier guidance (use the bundled code-simplifier skill when available).",
+    "Bias toward the simplest implementation that satisfies the task.",
+    "Do not add compatibility fallbacks, legacy branches, or dead code unless explicitly required by the task.",
+    "Before finalizing, run a simplification pass: remove unnecessary complexity while preserving required behavior.",
     "Keep changes behavior-preserving unless the task explicitly requires behavior changes.",
   ];
 }
@@ -29,6 +32,8 @@ function buildPlanningPrompt(spec: string, systemContext: string): string {
   return [
     systemContext,
     "You are decomposing a spec into an ordered task graph.",
+    "Prefer task decomposition that maximizes safe parallelism for independent workstreams.",
+    "Isolate task ownership (files/subsystems) to avoid cross-task collisions.",
     ...getCodeSimplifierGuidance(),
     "Return a JSON array of tasks.",
     "Each task must include fields: id, name, description, dependencies, acceptance_criteria, status, retries, maxRetries.",

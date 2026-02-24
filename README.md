@@ -352,6 +352,11 @@ Orca auto-loads skills in this precedence order (first matching skill name wins)
 
 This repo ships a bundled default `code-simplifier` skill at `./.orca/skills/code-simplifier/SKILL.md`, and it loads even when Orca runs in arbitrary target repositories. Project/global/config skills can still override it by reusing the same skill name. Planner/reviewer/executor prompts explicitly apply `code-simplifier` guidance for all code-writing and code-review steps while keeping behavior unchanged unless a task explicitly requires behavior changes.
 
+The Codex prompt contract also enforces anti-overengineering defaults:
+- prefer the simplest implementation that satisfies the task
+- avoid compatibility fallbacks/legacy branches/dead code unless explicitly required
+- run a simplification pass before final handoff
+
 When Orca uses the Codex executor, each turn is sent with both:
 - a text input item (`{ type: "text", text: ... }`), and
 - explicit skill input items (`{ type: "skill", name, path }`) for every loaded skill in the same precedence order above.
@@ -439,6 +444,13 @@ Safety checks enforced before publish:
 2. Create and push a matching tag, for example: `git tag v1.2.3 && git push origin v1.2.3`.
 3. Verify the package on npm after the workflow completes.
 4. If needed, run the same workflow manually from **Actions → npm Publish → Run workflow** as a fallback (use an existing tag so the workflow publishes that exact tagged commit).
+
+## Implementation hygiene
+
+For implementation work in target repos (including Orca-orchestrated runs):
+- pull latest `master` (or default branch) before starting task branches
+- create fresh worktrees per task
+- keep one task per worktree to avoid cross-task contamination
 
 ## Package manager + lockfile policy
 
