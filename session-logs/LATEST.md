@@ -1,12 +1,12 @@
 ---
-date: 2026-02-23T04:58:00-08:00
-session: ci-timeout-root-cause-fix
-agent: codex-subagent
+date: 2026-02-24T09:05:00-08:00
+session: fix-master-red-publish-tag-version-mismatch
+agent: eve-main
 ---
 
-## Session: ci-timeout-root-cause-fix
+## Session: fix-master-red-publish-tag-version-mismatch
 
-- Diagnosed local timeout/hang cause in `bun test src/cli/commands/run.test.ts`.
-- Replaced fragile `mock.module("./setup.js")` strategy with deterministic `OPENAI_API_KEY` test env setup/restore in run command test harness.
-- Kept task-runner deterministic executeTask stub in failing test path.
-- Re-ran targeted failing tests and full validation gates.
+- Investigated failing `npm Publish` workflow for tag `v0.2.22` on master.
+- Root cause: tag version and `package.json` version mismatch (`v0.2.22` vs `0.2.21`).
+- Chose clean forward fix: bump package version to `0.2.23` (no tag rewrite).
+- Plan: run full gates (`bun test`, `npm run build`, `npm run validate`), push commit to master, tag `v0.2.23`, and verify publish/release workflows succeed.
