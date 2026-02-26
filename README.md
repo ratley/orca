@@ -472,3 +472,9 @@ bun install
 ```
 
 This keeps npm and Bun behavior aligned without forcing a disruptive full migration.
+
+---
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](./LICENSE) for details.
