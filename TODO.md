@@ -23,9 +23,9 @@
 - ✅ `orca skills list` command shipped
 - ✅ Executor override flags shipped: `--codex-only` / `--claude-only`
 - ✅ Claude planner/executor deterministic structured-output path shipped (text JSON fallback gated)
-- ✅ Effort controls shipped: `--codex-effort <low|medium|high|extra-high>`, `--claude-effort <low|medium|high|max>`
+- ✅ Effort controls shipped: `--codex-effort <low|medium|high|xhigh>`, `--claude-effort <low|medium|high|max>`
 - ✅ Planning gate shipped: low-thinking `needsPlan` decision pass before heavy planning; skips full planner/review when a single execution task is enough
-- ✅ Fine-grained Codex thinking controls shipped: `codex.thinking.decision|planning|execution` (with clear defaults)
+- ✅ Fine-grained Codex thinking controls shipped: `codex.thinkingLevel.decision|planning|execution` (with clear defaults)
 - ✅ `orca setup --check` key detection improved (OpenClaw env + cross-platform `.env` fallbacks)
 - ✅ Dedicated post-exec reviewer JSON hardening integration target shipped (`npm run test:postexec-json`)
 

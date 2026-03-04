@@ -310,11 +310,6 @@ function getEffort(config: OrcaConfig | undefined, step: ThinkingStep): CodexEff
     return explicitThinkingLevel;
   }
 
-  const explicitLegacyThinking = config?.codex?.thinking?.[step];
-  if (explicitLegacyThinking !== undefined) {
-    return explicitLegacyThinking;
-  }
-
   if (config?.codex?.effort !== undefined) {
     return config.codex.effort;
   }

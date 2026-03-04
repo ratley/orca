@@ -167,6 +167,19 @@ describe("config-loader", () => {
     ).rejects.toThrow("Codex thinking level must be one of");
   });
 
+  test("resolveConfigFromPaths rejects removed codex effort alias extra-high", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(cliPath, "export default { codex: { effort: 'extra-high' } };\n", "utf8");
+
+    await expect(
+      resolveConfigFromPaths(
+        path.join(tempDir, "missing-global.js"),
+        path.join(tempDir, "missing-project.js"),
+        cliPath
+      )
+    ).rejects.toThrow("Codex thinking level must be one of");
+  });
+
   test("resolveConfigFromPaths accepts codex.thinkingLevel per-step efforts", async () => {
     const cliPath = path.join(tempDir, "cli.config.js");
     await fs.writeFile(
@@ -188,43 +201,21 @@ describe("config-loader", () => {
     });
   });
 
-  test("resolveConfigFromPaths normalizes deprecated 'extra-high' to 'xhigh'", async () => {
+  test("resolveConfigFromPaths rejects removed codex.thinking", async () => {
     const cliPath = path.join(tempDir, "cli.config.js");
     await fs.writeFile(
       cliPath,
-      "export default { codex: { thinkingLevel: { planning: 'extra-high' }, effort: 'extra-high' } };\n",
+      "export default { codex: { thinking: { execution: 'high' } } };\n",
       "utf8"
     );
 
-    const resolved = await resolveConfigFromPaths(
-      path.join(tempDir, "missing-global.js"),
-      path.join(tempDir, "missing-project.js"),
-      cliPath
-    );
-
-    expect(resolved?.codex?.thinkingLevel?.planning).toBe("xhigh");
-    expect(resolved?.codex?.effort).toBe("xhigh");
-  });
-
-  test("resolveConfigFromPaths still accepts deprecated codex.thinking", async () => {
-    const cliPath = path.join(tempDir, "cli.config.js");
-    await fs.writeFile(
-      cliPath,
-      "export default { codex: { thinking: { decision: 'low', planning: 'high', execution: 'medium' } } };\n",
-      "utf8"
-    );
-
-    const resolved = await resolveConfigFromPaths(
-      path.join(tempDir, "missing-global.js"),
-      path.join(tempDir, "missing-project.js"),
-      cliPath
-    );
-
-    expect(resolved?.codex?.thinking).toEqual({
-      decision: "low",
-      planning: "high",
-      execution: "medium",
-    });
+    await expect(
+      resolveConfigFromPaths(
+        path.join(tempDir, "missing-global.js"),
+        path.join(tempDir, "missing-project.js"),
+        cliPath
+      )
+    ).rejects.toThrow("Config.codex.thinking is no longer supported");
   });
 
   test("resolveConfigFromPaths validates codex.perCwdExtraUserRoots shape", async () => {

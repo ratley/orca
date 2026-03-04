@@ -141,19 +141,7 @@ function coerceConfig(candidate: unknown): OrcaConfig {
     }
 
     if ("thinking" in candidate.codex && candidate.codex.thinking !== undefined) {
-      if (!isObject(candidate.codex.thinking)) {
-        throw new Error(`Config.codex.thinking must be an object, got ${describeType(candidate.codex.thinking)}`);
-      }
-
-      for (const key of ["decision", "planning", "execution"] as const) {
-        const value = candidate.codex.thinking[key];
-        if (value !== undefined) {
-          if (typeof value !== "string") {
-            throw new Error(`Config.codex.thinking.${key} must be a string, got ${describeType(value)}`);
-          }
-          candidate.codex.thinking[key] = parseCodexEffort(value);
-        }
-      }
+      throw new Error("Config.codex.thinking is no longer supported. Use Config.codex.thinkingLevel instead.");
     }
 
     if ("perCwdExtraUserRoots" in candidate.codex && candidate.codex.perCwdExtraUserRoots !== undefined) {
@@ -334,18 +322,10 @@ export function mergeConfigs(...configs: Array<OrcaConfig | undefined>): OrcaCon
         }
         : undefined;
 
-      const mergedLegacyThinking = (merged.codex?.thinking !== undefined || config.codex?.thinking !== undefined)
-        ? {
-          ...merged.codex?.thinking,
-          ...config.codex?.thinking
-        }
-        : undefined;
-
       merged.codex = {
         ...merged.codex,
         ...config.codex,
-        ...(mergedThinkingLevel !== undefined ? { thinkingLevel: mergedThinkingLevel } : {}),
-        ...(mergedLegacyThinking !== undefined ? { thinking: mergedLegacyThinking } : {})
+        ...(mergedThinkingLevel !== undefined ? { thinkingLevel: mergedThinkingLevel } : {})
       };
     }
 

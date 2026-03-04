@@ -19,6 +19,5 @@ function parseEffort<T extends readonly string[]>(
 }
 
 export function parseCodexEffort(raw: string): CodexEffort {
-  const normalized = raw === "extra-high" ? "xhigh" : raw;
-  return parseEffort(normalized, CODEX_EFFORT_VALUES, "Codex thinking level");
+  return parseEffort(raw, CODEX_EFFORT_VALUES, "Codex thinking level");
 }

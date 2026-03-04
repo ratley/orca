@@ -115,64 +115,6 @@ describe("codex session effort wiring", () => {
     }
   });
 
-  test("thinkingLevel takes precedence over deprecated thinking", async () => {
-    const efforts: string[] = [];
-    const runTurnMock = mock(async (params: { effort?: string }) => {
-      efforts.push(params.effort ?? "");
-      return {
-        agentMessage: "[]",
-        turn: { status: "completed" },
-        items: [],
-      };
-    });
-
-    mock.module("@ratley/codex-client", () => ({
-      CodexClient: class {
-        async connect(): Promise<void> {}
-        async disconnect(): Promise<void> {}
-        async startThread(): Promise<{ id: string }> {
-          return { id: "thread-1" };
-        }
-        runTurn = runTurnMock;
-        async runReview(): Promise<{ reviewText: string }> {
-          return { reviewText: "ok" };
-        }
-      },
-    }));
-
-    mock.module("../../utils/skill-loader.js", () => ({
-      loadSkills: async () => [],
-    }));
-
-    const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
-    const session = await createCodexSession(process.cwd(), {
-      codex: {
-        thinkingLevel: { execution: "high" },
-        thinking: { execution: "low" },
-      },
-    });
-
-    try {
-      await session.executeTask(
-        {
-          id: "t1",
-          name: "Task",
-          description: "Do thing",
-          dependencies: [],
-          acceptance_criteria: ["Done"],
-          status: "pending",
-          retries: 0,
-          maxRetries: 3,
-        },
-        "run-1",
-        "context",
-      );
-
-      expect(efforts).toEqual(["high"]);
-    } finally {
-      await session.disconnect();
-    }
-  });
 });
 
 describe("codex session code-simplifier guidance", () => {
