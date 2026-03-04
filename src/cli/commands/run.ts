@@ -440,7 +440,7 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
     };
 
     try {
-      await runPlanner(specPath, store, runId, effectiveConfig);
+      await runPlanner(specPath, store, runId, effectiveConfig, { allowPlanSkip: true });
     } catch (error) {
       if (error instanceof InvalidPlanError) {
         await emitHook({

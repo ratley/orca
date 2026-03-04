@@ -22,7 +22,7 @@ Start with a plain-language task:
 orca "add auth to the app"
 ```
 
-Orca will create a run, plan tasks, run a pre-execution review/improvement pass on the task graph, execute the reviewed graph, and persist run state.
+Orca will create a run, do a low-thinking planning gate (`needsPlan?`), then either (a) run full planning + pre-execution review for multi-step work or (b) skip heavy planning and execute as a single task, then persist run state.
 
 ### Pre-execution review-improvement stage
 
@@ -129,7 +129,11 @@ export default defineOrcaConfig({
   codex: {
     enabled: true,
     model: "gpt-5.3-codex",
-    effort: "medium",
+    thinking: {
+      decision: "low",
+      planning: "high", // or "extra-high"
+      execution: "medium"
+    },
     command: "codex",
     timeoutMs: 300000,
     multiAgent: false,
@@ -182,7 +186,7 @@ Top-level: `executor`, `openaiApiKey`, `runsDir`, `sessionLogs`, `skills`, `maxR
 
 - `pr.enabled`, `pr.requireConfirmation`
 - `maxRetries` is part of `OrcaConfig`; current planner-generated task retries remain fixed in task graph contracts
-- `codex.enabled`, `codex.model`, `codex.effort`, `codex.command`, `codex.timeoutMs`, `codex.multiAgent`, `codex.perCwdExtraUserRoots`
+- `codex.enabled`, `codex.model`, `codex.effort` (legacy global override), `codex.thinking.decision|planning|execution`, `codex.command`, `codex.timeoutMs`, `codex.multiAgent`, `codex.perCwdExtraUserRoots`
 - `review.plan.enabled`, `review.plan.onInvalid`
 - `review.execution.enabled`, `review.execution.maxCycles`, `review.execution.onFindings`, `review.execution.validator.auto`, `review.execution.validator.commands`, `review.execution.prompt`
 - Deprecated compatibility aliases: `review.enabled`, `review.onInvalid` (still accepted; prefer `review.plan.*`)
@@ -220,7 +224,7 @@ Global:
 - `--plan <path>`
 - `--config <path>`
 - `--codex-only` (force Codex executor for this run)
-- `--codex-effort <low|medium|high>`
+- `--codex-effort <low|medium|high|extra-high>`
 - `--on-milestone <cmd>`
 - `--on-task-complete <cmd>`
 - `--on-task-fail <cmd>`
@@ -248,7 +252,7 @@ Global:
 - `--last`
 - `--config <path>`
 - `--codex-only`
-- `--codex-effort <low|medium|high>`
+- `--codex-effort <low|medium|high|extra-high>`
 
 `orca cancel`:
 

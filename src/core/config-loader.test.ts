@@ -167,6 +167,27 @@ describe("config-loader", () => {
     ).rejects.toThrow("Codex effort must be one of");
   });
 
+  test("resolveConfigFromPaths accepts codex.thinking per-step efforts", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(
+      cliPath,
+      "export default { codex: { thinking: { decision: 'low', planning: 'extra-high', execution: 'medium' } } };\n",
+      "utf8"
+    );
+
+    const resolved = await resolveConfigFromPaths(
+      path.join(tempDir, "missing-global.js"),
+      path.join(tempDir, "missing-project.js"),
+      cliPath
+    );
+
+    expect(resolved?.codex?.thinking).toEqual({
+      decision: "low",
+      planning: "extra-high",
+      execution: "medium",
+    });
+  });
+
   test("resolveConfigFromPaths validates codex.perCwdExtraUserRoots shape", async () => {
     const cliPath = path.join(tempDir, "cli.config.js");
     await fs.writeFile(
@@ -301,6 +322,33 @@ describe("config-loader", () => {
     const merged = mergeConfigs(globalConfig, projectConfig, cliConfig);
 
     expect(merged?.executor).toBe("codex");
+  });
+
+  test("mergeConfigs deeply merges codex thinking settings", () => {
+    const globalConfig = {
+      codex: {
+        thinking: {
+          decision: "low" as const,
+          planning: "high" as const,
+        },
+      },
+    };
+
+    const projectConfig = {
+      codex: {
+        thinking: {
+          execution: "medium" as const,
+        },
+      },
+    };
+
+    const merged = mergeConfigs(globalConfig, projectConfig);
+
+    expect(merged?.codex?.thinking).toEqual({
+      decision: "low",
+      planning: "high",
+      execution: "medium",
+    });
   });
 
   test("mergeConfigs deeply merges review plan/execution settings", () => {

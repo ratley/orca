@@ -124,6 +124,22 @@ function coerceConfig(candidate: unknown): OrcaConfig {
       parseCodexEffort(candidate.codex.effort);
     }
 
+    if ("thinking" in candidate.codex && candidate.codex.thinking !== undefined) {
+      if (!isObject(candidate.codex.thinking)) {
+        throw new Error(`Config.codex.thinking must be an object, got ${describeType(candidate.codex.thinking)}`);
+      }
+
+      for (const key of ["decision", "planning", "execution"] as const) {
+        const value = candidate.codex.thinking[key];
+        if (value !== undefined) {
+          if (typeof value !== "string") {
+            throw new Error(`Config.codex.thinking.${key} must be a string, got ${describeType(value)}`);
+          }
+          parseCodexEffort(value);
+        }
+      }
+    }
+
     if ("perCwdExtraUserRoots" in candidate.codex && candidate.codex.perCwdExtraUserRoots !== undefined) {
       if (!Array.isArray(candidate.codex.perCwdExtraUserRoots)) {
         throw new Error(
@@ -295,7 +311,18 @@ export function mergeConfigs(...configs: Array<OrcaConfig | undefined>): OrcaCon
     }
 
     if (merged.codex !== undefined || config.codex !== undefined) {
-      merged.codex = { ...merged.codex, ...config.codex };
+      const mergedThinking = (merged.codex?.thinking !== undefined || config.codex?.thinking !== undefined)
+        ? {
+          ...merged.codex?.thinking,
+          ...config.codex?.thinking
+        }
+        : undefined;
+
+      merged.codex = {
+        ...merged.codex,
+        ...config.codex,
+        ...(mergedThinking !== undefined ? { thinking: mergedThinking } : {})
+      };
     }
 
     if (merged.pr !== undefined || config.pr !== undefined) {

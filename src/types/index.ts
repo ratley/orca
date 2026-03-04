@@ -148,7 +148,16 @@ export interface OrcaConfig {
   codex?: {
     enabled?: boolean;
     model?: string;
+    /**
+     * Legacy global thinking/effort override applied to all Codex turns.
+     * Prefer codex.thinking for per-step control.
+     */
     effort?: CodexEffort;
+    thinking?: {
+      decision?: CodexEffort;
+      planning?: CodexEffort;
+      execution?: CodexEffort;
+    };
     command?: string;
     timeoutMs?: number;
     multiAgent?: boolean;

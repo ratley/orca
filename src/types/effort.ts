@@ -1,4 +1,4 @@
-export const CODEX_EFFORT_VALUES = ["low", "medium", "high"] as const;
+export const CODEX_EFFORT_VALUES = ["low", "medium", "high", "extra-high"] as const;
 export type CodexEffort = (typeof CODEX_EFFORT_VALUES)[number];
 
 function formatAllowed(values: readonly string[]): string {
