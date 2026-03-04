@@ -48,7 +48,7 @@ orca status --run <run-id>   # specific run
 orca list                    # alias for status
 ```
 
-Run states: `planning` → `running` → `reviewing` → `complete` | `failed` | `waiting_for_answer`
+Run states: `planning` → `running` → `completed` | `failed` | `cancelled` | `waiting_for_answer`
 
 ### Answering questions
 
@@ -76,7 +76,7 @@ orca cancel --last   # abort
 ```
 
 Common failures:
-- `auth error` → re-auth Codex (`codex auth`) or check `ANTHROPIC_API_KEY`
+- `auth error` → re-auth Codex (`codex auth`) or set `OPENAI_API_KEY` / `ORCA_OPENAI_API_KEY`
 - `no git repo` → `cd` into a git repo
 - `plan invalid` → goal too vague; cancel and restate
 - Session logs: `./session-logs/` (or `sessionLogs` config path)
@@ -109,7 +109,7 @@ Orca loads config in this order (later overrides earlier):
 import { defineOrcaConfig } from "orcastrator";
 
 export default defineOrcaConfig({
-  executor: "codex",              // "codex" (default) | "claude"
+  executor: "codex",              // only supported value
   runsDir: "./.orca/runs",        // default: ~/.orca/runs
   sessionLogs: "./session-logs",
   skills: ["./.orca/skills"],
@@ -117,11 +117,7 @@ export default defineOrcaConfig({
 
   codex: {
     model: "gpt-5.3-codex",
-    thinkingLevel: {
-      decision: "low",
-      planning: "high",     // "low" | "medium" | "high" | "xhigh"
-      execution: "medium",
-    },
+    effort: "medium",             // "low" | "medium" | "high" — applies to all Codex turns
     timeoutMs: 300000,
     multiAgent: false,      // see Multi-agent section
     perCwdExtraUserRoots: [
@@ -206,17 +202,22 @@ orca pr draft [--last | --run <id>]      Open draft PR
 orca pr create [--last | --run <id>]     Create and publish PR
 orca pr publish [--last | --run <id>]    Un-draft an existing PR
 orca pr status [--last | --run <id>]     PR and CI status
+                                         (non-TTY: --run or --last required)
 
 orca skills                              List loaded skills
 orca setup                               Interactive setup wizard
 ```
 
-**Key flags for `orca` / `orca resume`:**
+**Key flags for `orca` (run):**
 
 - `--codex-only` — force Codex executor
-- `--codex-effort <low|medium|high|xhigh>` — override thinking level
+- `--codex-effort <low|medium|high>` — override effort for this run
 - `--config <path>` — explicit config file
-- `--on-complete <cmd>`, `--on-error <cmd>`, `--on-task-complete <cmd>`, etc.
+- `--on-complete <cmd>`, `--on-error <cmd>`, `--on-task-complete <cmd>`, `--on-findings <cmd>`, etc.
+
+**Key flags for `orca resume`:**
+
+- `--codex-only`, `--codex-effort <low|medium|high>`, `--config <path>`, `--run <id>`, `--last`
 
 **`orca setup` flags:**
 
