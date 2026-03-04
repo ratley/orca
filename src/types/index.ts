@@ -149,6 +149,11 @@ export interface OrcaConfig {
     enabled?: boolean;
     model?: string;
     effort?: CodexEffort;
+    thinkingLevel?: {
+      decision?: CodexEffort;
+      planning?: CodexEffort;
+      execution?: CodexEffort;
+    };
     command?: string;
     timeoutMs?: number;
     multiAgent?: boolean;

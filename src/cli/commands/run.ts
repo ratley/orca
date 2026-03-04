@@ -440,7 +440,7 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
     };
 
     try {
-      await runPlanner(specPath, store, runId, effectiveConfig);
+      await runPlanner(specPath, store, runId, effectiveConfig, { allowPlanSkip: true });
     } catch (error) {
       if (error instanceof InvalidPlanError) {
         await emitHook({
@@ -620,7 +620,7 @@ export function registerRunCommand(program: Command): void {
     .option("-p, --prompt <text>", "Inline task text (alias for --task)")
     .option("--config <path>", "Path to orca config file")
     .option("--codex-only", "Force Codex executor for this run (overrides config)")
-    .option("--codex-effort <value>", "Codex effort override for this run", parseCodexEffortOption)
+    .option("--codex-effort <value>", "Codex thinking level override for this run", parseCodexEffortOption)
     .option("--on-milestone <cmd>", "Shell hook command for onMilestone")
     .option("--on-task-complete <cmd>", "Shell hook command for onTaskComplete")
     .option("--on-task-fail <cmd>", "Shell hook command for onTaskFail")

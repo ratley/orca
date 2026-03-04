@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
-import { runPlanner, setPlanSpecForTests, setReviewTaskGraphForTests } from "./planner.js";
+import { runPlanner, setDecidePlanningNeedForTests, setPlanSpecForTests, setReviewTaskGraphForTests } from "./planner.js";
 import { RunStore } from "../state/store.js";
 
 describe("runPlanner task graph validation", () => {
@@ -24,12 +24,14 @@ describe("runPlanner task graph validation", () => {
     await store.createRun(runId, specPath);
     process.chdir(tempDir);
     setPlanSpecForTests(async () => ({ tasks: [...baseTasks], rawResponse: "[]" }));
+    setDecidePlanningNeedForTests(async () => ({ needsPlan: true, reason: "default" }));
     setReviewTaskGraphForTests(async () => ({ changes: [], rawResponse: "{}" }));
   });
 
   afterEach(async () => {
     process.chdir(originalCwd);
     setPlanSpecForTests(null);
+    setDecidePlanningNeedForTests(null);
     setReviewTaskGraphForTests(null);
     await rm(tempDir, { recursive: true, force: true });
   });
@@ -56,5 +58,33 @@ describe("runPlanner task graph validation", () => {
 
     await runPlanner(specPath, store, runId);
     expect(captured).not.toContain("## Project Instructions");
+  });
+
+  test("can skip heavy planning when decision step says no plan needed", async () => {
+    setDecidePlanningNeedForTests(async () => ({ needsPlan: false, reason: "single step" }));
+    let calledPlanSpec = false;
+    setPlanSpecForTests(async () => {
+      calledPlanSpec = true;
+      return { tasks: [...baseTasks], rawResponse: "[]" };
+    });
+
+    await runPlanner(specPath, store, runId, undefined, { allowPlanSkip: true });
+    expect(calledPlanSpec).toBe(false);
+
+    const run = await store.getRun(runId);
+    expect(run?.tasks).toHaveLength(1);
+    expect(run?.tasks[0]?.name).toBe("Execute requested work");
+  });
+
+  test("runs planner when decision step says planning is needed", async () => {
+    setDecidePlanningNeedForTests(async () => ({ needsPlan: true, reason: "multi-step" }));
+    let calledPlanSpec = false;
+    setPlanSpecForTests(async () => {
+      calledPlanSpec = true;
+      return { tasks: [...baseTasks], rawResponse: "[]" };
+    });
+
+    await runPlanner(specPath, store, runId, undefined, { allowPlanSkip: true });
+    expect(calledPlanSpec).toBe(true);
   });
 });

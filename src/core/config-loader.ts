@@ -121,7 +121,27 @@ function coerceConfig(candidate: unknown): OrcaConfig {
         );
       }
 
-      parseCodexEffort(candidate.codex.effort);
+      candidate.codex.effort = parseCodexEffort(candidate.codex.effort);
+    }
+
+    if ("thinkingLevel" in candidate.codex && candidate.codex.thinkingLevel !== undefined) {
+      if (!isObject(candidate.codex.thinkingLevel)) {
+        throw new Error(`Config.codex.thinkingLevel must be an object, got ${describeType(candidate.codex.thinkingLevel)}`);
+      }
+
+      for (const key of ["decision", "planning", "execution"] as const) {
+        const value = candidate.codex.thinkingLevel[key];
+        if (value !== undefined) {
+          if (typeof value !== "string") {
+            throw new Error(`Config.codex.thinkingLevel.${key} must be a string, got ${describeType(value)}`);
+          }
+          candidate.codex.thinkingLevel[key] = parseCodexEffort(value);
+        }
+      }
+    }
+
+    if ("thinking" in candidate.codex && candidate.codex.thinking !== undefined) {
+      throw new Error("Config.codex.thinking is no longer supported. Use Config.codex.thinkingLevel instead.");
     }
 
     if ("perCwdExtraUserRoots" in candidate.codex && candidate.codex.perCwdExtraUserRoots !== undefined) {
@@ -295,7 +315,18 @@ export function mergeConfigs(...configs: Array<OrcaConfig | undefined>): OrcaCon
     }
 
     if (merged.codex !== undefined || config.codex !== undefined) {
-      merged.codex = { ...merged.codex, ...config.codex };
+      const mergedThinkingLevel = (merged.codex?.thinkingLevel !== undefined || config.codex?.thinkingLevel !== undefined)
+        ? {
+          ...merged.codex?.thinkingLevel,
+          ...config.codex?.thinkingLevel
+        }
+        : undefined;
+
+      merged.codex = {
+        ...merged.codex,
+        ...config.codex,
+        ...(mergedThinkingLevel !== undefined ? { thinkingLevel: mergedThinkingLevel } : {})
+      };
     }
 
     if (merged.pr !== undefined || config.pr !== undefined) {

@@ -138,7 +138,7 @@ export function registerResumeCommand(program: Command): void {
     .option("--last", "Use the most recent run")
     .option("--config <path>", "Path to orca config file")
     .option("--codex-only", "Force Codex executor for this resumed run (overrides config)")
-    .option("--codex-effort <value>", "Codex effort override for this resumed run", parseCodexEffortOption)
+    .option("--codex-effort <value>", "Codex thinking level override for this resumed run", parseCodexEffortOption)
     .action(async (options: ResumeCommandOptions) => {
       try {
         await resumeCommandHandler(options);

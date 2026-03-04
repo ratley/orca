@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import { planSpec as planSpecWithCodex, reviewTaskGraph as reviewTaskGraphWithCodex } from "../agents/codex/session.js";
+import { decidePlanningNeed as decidePlanningNeedWithCodex, planSpec as planSpecWithCodex, reviewTaskGraph as reviewTaskGraphWithCodex } from "../agents/codex/session.js";
 import type { OrcaConfig, Task, TaskGraphReviewResult } from "../types/index.js";
 import { logger } from "../utils/logger.js";
 import { loadSkills, type LoadedSkill } from "../utils/skill-loader.js";
@@ -14,6 +14,7 @@ const PROJECT_INSTRUCTION_FILES = ["AGENTS.md"] as const;
 const PROJECT_INSTRUCTION_CHAR_CAP = 4_000;
 
 type PlanSpecFn = typeof planSpecWithCodex;
+type DecidePlanningNeedFn = typeof decidePlanningNeedWithCodex;
 type ReviewTaskGraphFn = typeof reviewTaskGraphWithCodex;
 
 export class InvalidPlanError extends Error {
@@ -34,10 +35,15 @@ type ProjectInstruction = {
 };
 
 let testPlanSpecOverride: PlanSpecFn | null = null;
+let testDecidePlanningNeedOverride: DecidePlanningNeedFn | null = null;
 let testReviewTaskGraphOverride: ReviewTaskGraphFn | null = null;
 
 export function setPlanSpecForTests(fn: PlanSpecFn | null): void {
   testPlanSpecOverride = fn;
+}
+
+export function setDecidePlanningNeedForTests(fn: DecidePlanningNeedFn | null): void {
+  testDecidePlanningNeedOverride = fn;
 }
 
 export function setReviewTaskGraphForTests(fn: ReviewTaskGraphFn | null): void {
@@ -46,6 +52,10 @@ export function setReviewTaskGraphForTests(fn: ReviewTaskGraphFn | null): void {
 
 function resolvePlanSpecImpl(_config?: OrcaConfig): PlanSpecFn {
   return testPlanSpecOverride ?? planSpecWithCodex;
+}
+
+function resolveDecidePlanningNeedImpl(_config?: OrcaConfig): DecidePlanningNeedFn {
+  return testDecidePlanningNeedOverride ?? decidePlanningNeedWithCodex;
 }
 
 function resolveReviewTaskGraphImpl(_config?: OrcaConfig): ReviewTaskGraphFn {
@@ -206,15 +216,27 @@ async function runTaskGraphReview(
   return { finalTasks: updated, review };
 }
 
-export async function runPlanner(
-  specPath: string,
-  store: RunStore,
-  runId: string,
-  config?: OrcaConfig
-): Promise<void> {
-  const spec = await fs.readFile(specPath, "utf8");
-  const [skills, instructions] = await Promise.all([loadSkills(config), loadProjectInstructions(specPath)]);
-  const systemContext = buildSystemContext(skills, instructions);
+type PlannerOptions = {
+  allowPlanSkip?: boolean;
+};
+
+function buildSingleExecutionTask(spec: string): Task[] {
+  const trimmed = spec.trim();
+  return [
+    {
+      id: "task-1",
+      name: "Execute requested work",
+      description: trimmed.length > 0 ? trimmed : "Execute the provided spec.",
+      dependencies: [],
+      acceptance_criteria: ["Requested work is completed and verified."],
+      status: "pending",
+      retries: 0,
+      maxRetries: 3,
+    },
+  ];
+}
+
+async function runFullPlanning(spec: string, systemContext: string, config?: OrcaConfig): Promise<Task[]> {
   const planSpecImpl = resolvePlanSpecImpl(config);
   const result = await planSpecImpl(spec, systemContext, config);
 
@@ -240,6 +262,36 @@ export async function runPlanner(
     }
   }
 
+  return finalTasks;
+}
+
+export async function runPlanner(
+  specPath: string,
+  store: RunStore,
+  runId: string,
+  config?: OrcaConfig,
+  options?: PlannerOptions,
+): Promise<void> {
+  const spec = await fs.readFile(specPath, "utf8");
+  const [skills, instructions] = await Promise.all([loadSkills(config), loadProjectInstructions(specPath)]);
+  const systemContext = buildSystemContext(skills, instructions);
+
+  let finalTasks: Task[];
+
+  if (options?.allowPlanSkip === true) {
+    const decidePlanningNeed = resolveDecidePlanningNeedImpl(config);
+    const decision = await decidePlanningNeed(spec, systemContext, config);
+    if (!decision.needsPlan) {
+      logger.info(`Planning skipped: ${decision.reason}`);
+      finalTasks = buildSingleExecutionTask(spec);
+    } else {
+      logger.info(`Planning required: ${decision.reason}`);
+      finalTasks = await runFullPlanning(spec, systemContext, config);
+    }
+  } else {
+    finalTasks = await runFullPlanning(spec, systemContext, config);
+  }
+
   await store.writeTasks(runId, finalTasks);
   await store.updateRun(runId, {
     overallStatus: "planning",
@@ -250,4 +302,4 @@ export async function runPlanner(
   logger.success(`Plan complete: ${finalTasks.length} tasks`);
 }
 
-export type { PlanSpecFn, ReviewTaskGraphFn };
+export type { PlanSpecFn, DecidePlanningNeedFn, ReviewTaskGraphFn };

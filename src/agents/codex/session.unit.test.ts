@@ -41,6 +41,80 @@ describe("codex session effort wiring", () => {
       await session.disconnect();
     }
   });
+
+  test("smoke: uses per-step thinkingLevel values for decision/planning/execution turns", async () => {
+    const efforts: string[] = [];
+    const runTurnMock = mock(async (params: { effort?: string; input?: Array<{ text?: string }> }) => {
+      efforts.push(params.effort ?? "");
+      const prompt = params.input?.[0]?.text ?? "";
+      if (prompt.includes("planning gate")) {
+        return {
+          agentMessage: '{"needsPlan":true,"reason":"multi-step"}',
+          turn: { status: "completed" },
+          items: [],
+        };
+      }
+
+      return {
+        agentMessage: "[]",
+        turn: { status: "completed" },
+        items: [],
+      };
+    });
+
+    mock.module("@ratley/codex-client", () => ({
+      CodexClient: class {
+        async connect(): Promise<void> {}
+        async disconnect(): Promise<void> {}
+        async startThread(): Promise<{ id: string }> {
+          return { id: "thread-1" };
+        }
+        runTurn = runTurnMock;
+        async runReview(): Promise<{ reviewText: string }> {
+          return { reviewText: "ok" };
+        }
+      },
+    }));
+
+    mock.module("../../utils/skill-loader.js", () => ({
+      loadSkills: async () => [],
+    }));
+
+    const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
+    const session = await createCodexSession(process.cwd(), {
+      codex: {
+        thinkingLevel: {
+          decision: "low",
+          planning: "xhigh",
+          execution: "medium",
+        },
+      },
+    });
+
+    try {
+      await session.decidePlanningNeed("spec", "context");
+      await session.planSpec("spec", "context");
+      await session.executeTask(
+        {
+          id: "t1",
+          name: "Task",
+          description: "Do thing",
+          dependencies: [],
+          acceptance_criteria: ["Done"],
+          status: "pending",
+          retries: 0,
+          maxRetries: 3,
+        },
+        "run-1",
+        "context",
+      );
+
+      expect(efforts).toEqual(["low", "xhigh", "medium"]);
+    } finally {
+      await session.disconnect();
+    }
+  });
+
 });
 
 describe("codex session code-simplifier guidance", () => {
@@ -151,7 +225,7 @@ describe("codex session skill discovery", () => {
 
     try {
       expect(requestMock).toHaveBeenCalledWith("skills/list", {
-        cwd,
+        cwds: [cwd],
         forceReload: true,
         perCwdExtraUserRoots: [{ cwd, extraUserRoots: ["/tmp/extra-skills"] }],
       });

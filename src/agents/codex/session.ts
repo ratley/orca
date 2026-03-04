@@ -75,6 +75,19 @@ function buildTaskExecutionPrompt(
   ].join("\n\n");
 }
 
+function buildPlanDecisionPrompt(spec: string, systemContext: string): string {
+  return [
+    systemContext,
+    "You are Orca's planning gate.",
+    "Decide whether this spec needs multi-step planning or can run as one direct execution task.",
+    "Set needsPlan=true when coordination/dependencies/research/design across multiple steps are required.",
+    "Set needsPlan=false when a single focused execution task is sufficient.",
+    "Return JSON only with shape: {\"needsPlan\":boolean,\"reason\":string}",
+    "Spec:",
+    spec,
+  ].join("\n\n");
+}
+
 function buildTaskGraphReviewPrompt(tasks: Task[], systemContext: string): string {
   return [
     systemContext,
@@ -158,6 +171,33 @@ function parseTaskArray(raw: string): Task[] {
   }
 
   return parsed as Task[];
+}
+
+export interface PlanNeedDecision {
+  needsPlan: boolean;
+  reason: string;
+}
+
+function parsePlanDecision(raw: string): PlanNeedDecision {
+  const json = extractJson(raw);
+  const parsed = JSON.parse(json) as unknown;
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Codex plan decision response was not a JSON object");
+  }
+
+  const candidate = parsed as { needsPlan?: unknown; reason?: unknown };
+  if (typeof candidate.needsPlan !== "boolean") {
+    throw new Error("Codex plan decision response missing boolean needsPlan");
+  }
+
+  if (typeof candidate.reason !== "string" || candidate.reason.trim().length === 0) {
+    throw new Error("Codex plan decision response missing non-empty reason");
+  }
+
+  return {
+    needsPlan: candidate.needsPlan,
+    reason: candidate.reason,
+  };
 }
 
 const POSITIVE_COMPLETION_PATTERNS = [
@@ -256,8 +296,25 @@ function getCodexPath(): string {
   );
 }
 
-function getEffort(config?: OrcaConfig): CodexEffort | undefined {
-  return config?.codex?.effort;
+type ThinkingStep = "decision" | "planning" | "execution";
+
+const DEFAULT_THINKING_BY_STEP: Record<ThinkingStep, CodexEffort> = {
+  decision: "low",
+  planning: "high",
+  execution: "medium",
+};
+
+function getEffort(config: OrcaConfig | undefined, step: ThinkingStep): CodexEffort {
+  const explicitThinkingLevel = config?.codex?.thinkingLevel?.[step];
+  if (explicitThinkingLevel !== undefined) {
+    return explicitThinkingLevel;
+  }
+
+  if (config?.codex?.effort !== undefined) {
+    return config.codex.effort;
+  }
+
+  return DEFAULT_THINKING_BY_STEP[step];
 }
 
 function buildTurnInput(text: string, skills: LoadedSkill[]): Array<{ type: "text"; text: string } | { type: "skill"; name: string; path: string }> {
@@ -322,7 +379,7 @@ async function loadCodexListedSkills(client: CodexClient, cwd: string, config?: 
   let response: unknown;
   try {
     response = await request.call(client, "skills/list", {
-      cwd,
+      cwds: [cwd],
       forceReload: true,
       ...(perCwdExtraUserRoots.length > 0 ? { perCwdExtraUserRoots } : {}),
     });
@@ -415,6 +472,7 @@ export async function createCodexSession(
   cwd: string,
   config?: OrcaConfig,
 ): Promise<{
+  decidePlanningNeed: (spec: string, systemContext: string) => Promise<PlanNeedDecision>;
   planSpec: (spec: string, systemContext: string) => Promise<PlanResult>;
   reviewTaskGraph: (tasks: Task[], systemContext: string) => Promise<TaskGraphReviewResult>;
   executeTask: (task: Task, runId: string, systemContext?: string) => Promise<TaskExecutionResult>;
@@ -448,21 +506,26 @@ export async function createCodexSession(
   return {
     threadId,
 
+    async decidePlanningNeed(spec: string, systemContext: string): Promise<PlanNeedDecision> {
+      const result = await client.runTurn({
+        threadId,
+        effort: getEffort(config, "decision"),
+        input: buildTurnInput(buildPlanDecisionPrompt(spec, systemContext), skills),
+      });
+
+      const rawResponse = extractAgentText(result);
+      return parsePlanDecision(rawResponse);
+    },
+
     async planSpec(
       spec: string,
       systemContext: string,
     ): Promise<PlanResult> {
-      const effort = getEffort(config);
-      const result = effort
-        ? await client.runTurn({
-            threadId,
-            effort,
-            input: buildTurnInput(buildPlanningPrompt(spec, systemContext), skills),
-          })
-        : await client.runTurn({
-            threadId,
-            input: buildTurnInput(buildPlanningPrompt(spec, systemContext), skills),
-          });
+      const result = await client.runTurn({
+        threadId,
+        effort: getEffort(config, "planning"),
+        input: buildTurnInput(buildPlanningPrompt(spec, systemContext), skills),
+      });
 
       const rawResponse = extractAgentText(result);
 
@@ -473,17 +536,11 @@ export async function createCodexSession(
     },
 
     async reviewTaskGraph(tasks: Task[], systemContext: string): Promise<TaskGraphReviewResult> {
-      const effort = getEffort(config);
-      const result = effort
-        ? await client.runTurn({
-            threadId,
-            effort,
-            input: buildTurnInput(buildTaskGraphReviewPrompt(tasks, systemContext), skills),
-          })
-        : await client.runTurn({
-            threadId,
-            input: buildTurnInput(buildTaskGraphReviewPrompt(tasks, systemContext), skills),
-          });
+      const result = await client.runTurn({
+        threadId,
+        effort: getEffort(config, "planning"),
+        input: buildTurnInput(buildTaskGraphReviewPrompt(tasks, systemContext), skills),
+      });
 
       const rawResponse = extractAgentText(result);
       return parseTaskGraphReview(rawResponse);
@@ -494,17 +551,11 @@ export async function createCodexSession(
       runId: string,
       systemContext?: string,
     ): Promise<TaskExecutionResult> {
-      const effort = getEffort(config);
-      const result = effort
-        ? await client.runTurn({
-            threadId,
-            effort,
-            input: buildTurnInput(buildTaskExecutionPrompt(task, runId, cwd, systemContext), skills),
-          })
-        : await client.runTurn({
-            threadId,
-            input: buildTurnInput(buildTaskExecutionPrompt(task, runId, cwd, systemContext), skills),
-          });
+      const result = await client.runTurn({
+        threadId,
+        effort: getEffort(config, "execution"),
+        input: buildTurnInput(buildTaskExecutionPrompt(task, runId, cwd, systemContext), skills),
+      });
 
       const rawResponse = extractAgentText(result);
 
@@ -544,17 +595,11 @@ export async function createCodexSession(
         taskGraphJson,
       ].join("\n");
 
-      const effort = getEffort(config);
-      const result = effort
-        ? await client.runTurn({
-            threadId,
-            effort,
-            input: buildTurnInput(prompt, skills),
-          })
-        : await client.runTurn({
-            threadId,
-            input: buildTurnInput(prompt, skills),
-          });
+      const result = await client.runTurn({
+        threadId,
+        effort: getEffort(config, "decision"),
+        input: buildTurnInput(prompt, skills),
+      });
 
       const rawResponse = extractAgentText(result);
       const json = extractJson(rawResponse);
@@ -584,17 +629,11 @@ export async function createCodexSession(
     },
 
     async runPrompt(prompt: string): Promise<string> {
-      const effort = getEffort(config);
-      const result = effort
-        ? await client.runTurn({
-            threadId,
-            effort,
-            input: buildTurnInput(prompt, skills),
-          })
-        : await client.runTurn({
-            threadId,
-            input: buildTurnInput(prompt, skills),
-          });
+      const result = await client.runTurn({
+        threadId,
+        effort: getEffort(config, "execution"),
+        input: buildTurnInput(prompt, skills),
+      });
 
       return extractAgentText(result);
     },
@@ -610,6 +649,20 @@ export async function createCodexSession(
  * Each call creates a new client + thread (no persistence).
  * Use createCodexSession() for persistent threads.
  */
+export async function decidePlanningNeed(
+  spec: string,
+  systemContext: string,
+  config?: OrcaConfig,
+): Promise<PlanNeedDecision> {
+  const session = await createCodexSession(process.cwd(), config);
+
+  try {
+    return await session.decidePlanningNeed(spec, systemContext);
+  } finally {
+    await session.disconnect();
+  }
+}
+
 export async function planSpec(
   spec: string,
   systemContext: string,

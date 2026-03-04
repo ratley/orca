@@ -72,6 +72,15 @@ describe("first-run config initialization", () => {
 });
 
 describe("run command executor flags", () => {
+  test("enables planning-skip decision pass for run command", async () => {
+    const { runModule, runPlannerMock } = await loadRunModule();
+
+    await parseRun(runModule, ["run", "--task", "x"]);
+
+    const plannerOptions = runPlannerMock.mock.calls[0]?.[4] as { allowPlanSkip?: boolean } | undefined;
+    expect(plannerOptions?.allowPlanSkip).toBe(true);
+  });
+
   test("parses --codex-only and overrides resolved executor", async () => {
     const { runModule, runPlannerMock, runTaskRunnerMock } = await loadRunModule();
     const configPath = path.join(getTempDir(), "orca.config.js");
@@ -132,10 +141,17 @@ describe("run command executor flags", () => {
     expect(runnerArg?.config?.codex?.effort).toBe("medium");
   });
 
+  test("rejects removed codex effort alias extra-high", async () => {
+    const { runModule } = await loadRunModule();
+    await expect(parseRun(runModule, ["run", "--task", "x", "--codex-effort", "extra-high"])).rejects.toThrow(
+      "Codex thinking level must be one of",
+    );
+  });
+
   test("rejects invalid codex effort", async () => {
     const { runModule } = await loadRunModule();
     await expect(parseRun(runModule, ["run", "--task", "x", "--codex-effort", "extreme"])).rejects.toThrow(
-      "Codex effort must be one of",
+      "Codex thinking level must be one of",
     );
   });
 
