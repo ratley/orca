@@ -305,9 +305,14 @@ const DEFAULT_THINKING_BY_STEP: Record<ThinkingStep, CodexEffort> = {
 };
 
 function getEffort(config: OrcaConfig | undefined, step: ThinkingStep): CodexEffort {
-  const explicit = config?.codex?.thinking?.[step];
-  if (explicit !== undefined) {
-    return explicit;
+  const explicitThinkingLevel = config?.codex?.thinkingLevel?.[step];
+  if (explicitThinkingLevel !== undefined) {
+    return explicitThinkingLevel;
+  }
+
+  const explicitLegacyThinking = config?.codex?.thinking?.[step];
+  if (explicitLegacyThinking !== undefined) {
+    return explicitLegacyThinking;
   }
 
   if (config?.codex?.effort !== undefined) {

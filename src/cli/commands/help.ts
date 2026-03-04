@@ -56,7 +56,7 @@ function printStyledHelpPage(): void {
     { command: "--last", description: "use the most recent run" },
     { command: "--config <path>", description: "explicit config file (auto-discovered by default)" },
     { command: "--codex-only", description: "override executor to Codex for the current run" },
-    { command: "--codex-effort <value>", description: "override Codex effort for the current run" },
+    { command: "--codex-effort <value>", description: "override Codex thinking level for the current run" },
     { command: "--full-auto", description: "skip all questions, proceed autonomously" },
     { command: "--on-complete <cmd>", description: "shell hook on run complete" },
     { command: "--on-error <cmd>", description: "shell hook on run error" },

@@ -164,14 +164,53 @@ describe("config-loader", () => {
         path.join(tempDir, "missing-project.js"),
         cliPath
       )
-    ).rejects.toThrow("Codex effort must be one of");
+    ).rejects.toThrow("Codex thinking level must be one of");
   });
 
-  test("resolveConfigFromPaths accepts codex.thinking per-step efforts", async () => {
+  test("resolveConfigFromPaths accepts codex.thinkingLevel per-step efforts", async () => {
     const cliPath = path.join(tempDir, "cli.config.js");
     await fs.writeFile(
       cliPath,
-      "export default { codex: { thinking: { decision: 'low', planning: 'extra-high', execution: 'medium' } } };\n",
+      "export default { codex: { thinkingLevel: { decision: 'low', planning: 'xhigh', execution: 'medium' } } };\n",
+      "utf8"
+    );
+
+    const resolved = await resolveConfigFromPaths(
+      path.join(tempDir, "missing-global.js"),
+      path.join(tempDir, "missing-project.js"),
+      cliPath
+    );
+
+    expect(resolved?.codex?.thinkingLevel).toEqual({
+      decision: "low",
+      planning: "xhigh",
+      execution: "medium",
+    });
+  });
+
+  test("resolveConfigFromPaths normalizes deprecated 'extra-high' to 'xhigh'", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(
+      cliPath,
+      "export default { codex: { thinkingLevel: { planning: 'extra-high' }, effort: 'extra-high' } };\n",
+      "utf8"
+    );
+
+    const resolved = await resolveConfigFromPaths(
+      path.join(tempDir, "missing-global.js"),
+      path.join(tempDir, "missing-project.js"),
+      cliPath
+    );
+
+    expect(resolved?.codex?.thinkingLevel?.planning).toBe("xhigh");
+    expect(resolved?.codex?.effort).toBe("xhigh");
+  });
+
+  test("resolveConfigFromPaths still accepts deprecated codex.thinking", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(
+      cliPath,
+      "export default { codex: { thinking: { decision: 'low', planning: 'high', execution: 'medium' } } };\n",
       "utf8"
     );
 
@@ -183,7 +222,7 @@ describe("config-loader", () => {
 
     expect(resolved?.codex?.thinking).toEqual({
       decision: "low",
-      planning: "extra-high",
+      planning: "high",
       execution: "medium",
     });
   });
@@ -324,10 +363,10 @@ describe("config-loader", () => {
     expect(merged?.executor).toBe("codex");
   });
 
-  test("mergeConfigs deeply merges codex thinking settings", () => {
+  test("mergeConfigs deeply merges codex thinkingLevel settings", () => {
     const globalConfig = {
       codex: {
-        thinking: {
+        thinkingLevel: {
           decision: "low" as const,
           planning: "high" as const,
         },
@@ -336,7 +375,7 @@ describe("config-loader", () => {
 
     const projectConfig = {
       codex: {
-        thinking: {
+        thinkingLevel: {
           execution: "medium" as const,
         },
       },
@@ -344,7 +383,7 @@ describe("config-loader", () => {
 
     const merged = mergeConfigs(globalConfig, projectConfig);
 
-    expect(merged?.codex?.thinking).toEqual({
+    expect(merged?.codex?.thinkingLevel).toEqual({
       decision: "low",
       planning: "high",
       execution: "medium",

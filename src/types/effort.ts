@@ -1,5 +1,6 @@
-export const CODEX_EFFORT_VALUES = ["low", "medium", "high", "extra-high"] as const;
-export type CodexEffort = (typeof CODEX_EFFORT_VALUES)[number];
+export const CODEX_THINKING_LEVEL_VALUES = ["low", "medium", "high", "xhigh"] as const;
+export const CODEX_EFFORT_VALUES = CODEX_THINKING_LEVEL_VALUES;
+export type CodexEffort = (typeof CODEX_THINKING_LEVEL_VALUES)[number];
 
 function formatAllowed(values: readonly string[]): string {
   return values.map((value) => `'${value}'`).join(", ");
@@ -18,5 +19,6 @@ function parseEffort<T extends readonly string[]>(
 }
 
 export function parseCodexEffort(raw: string): CodexEffort {
-  return parseEffort(raw, CODEX_EFFORT_VALUES, "Codex effort");
+  const normalized = raw === "extra-high" ? "xhigh" : raw;
+  return parseEffort(normalized, CODEX_EFFORT_VALUES, "Codex thinking level");
 }

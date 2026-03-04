@@ -42,7 +42,7 @@ describe("codex session effort wiring", () => {
     }
   });
 
-  test("uses per-step thinking levels for decision/planning/execution", async () => {
+  test("smoke: uses per-step thinkingLevel values for decision/planning/execution turns", async () => {
     const efforts: string[] = [];
     const runTurnMock = mock(async (params: { effort?: string; input?: Array<{ text?: string }> }) => {
       efforts.push(params.effort ?? "");
@@ -83,9 +83,9 @@ describe("codex session effort wiring", () => {
     const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
     const session = await createCodexSession(process.cwd(), {
       codex: {
-        thinking: {
+        thinkingLevel: {
           decision: "low",
-          planning: "extra-high",
+          planning: "xhigh",
           execution: "medium",
         },
       },
@@ -109,7 +109,66 @@ describe("codex session effort wiring", () => {
         "context",
       );
 
-      expect(efforts).toEqual(["low", "extra-high", "medium"]);
+      expect(efforts).toEqual(["low", "xhigh", "medium"]);
+    } finally {
+      await session.disconnect();
+    }
+  });
+
+  test("thinkingLevel takes precedence over deprecated thinking", async () => {
+    const efforts: string[] = [];
+    const runTurnMock = mock(async (params: { effort?: string }) => {
+      efforts.push(params.effort ?? "");
+      return {
+        agentMessage: "[]",
+        turn: { status: "completed" },
+        items: [],
+      };
+    });
+
+    mock.module("@ratley/codex-client", () => ({
+      CodexClient: class {
+        async connect(): Promise<void> {}
+        async disconnect(): Promise<void> {}
+        async startThread(): Promise<{ id: string }> {
+          return { id: "thread-1" };
+        }
+        runTurn = runTurnMock;
+        async runReview(): Promise<{ reviewText: string }> {
+          return { reviewText: "ok" };
+        }
+      },
+    }));
+
+    mock.module("../../utils/skill-loader.js", () => ({
+      loadSkills: async () => [],
+    }));
+
+    const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
+    const session = await createCodexSession(process.cwd(), {
+      codex: {
+        thinkingLevel: { execution: "high" },
+        thinking: { execution: "low" },
+      },
+    });
+
+    try {
+      await session.executeTask(
+        {
+          id: "t1",
+          name: "Task",
+          description: "Do thing",
+          dependencies: [],
+          acceptance_criteria: ["Done"],
+          status: "pending",
+          retries: 0,
+          maxRetries: 3,
+        },
+        "run-1",
+        "context",
+      );
+
+      expect(efforts).toEqual(["high"]);
     } finally {
       await session.disconnect();
     }

@@ -141,10 +141,23 @@ describe("run command executor flags", () => {
     expect(runnerArg?.config?.codex?.effort).toBe("medium");
   });
 
+  test("accepts deprecated --codex-effort extra-high and normalizes to xhigh", async () => {
+    const { runModule, runPlannerMock, runTaskRunnerMock } = await loadRunModule();
+
+    await parseRun(runModule, ["run", "--task", "x", "--codex-effort", "extra-high"]);
+
+    const plannerConfig = runPlannerMock.mock.calls[0]?.[3] as { codex?: { effort?: string } } | undefined;
+    const runnerArg = runTaskRunnerMock.mock.calls[0]?.[0] as
+      | { config?: { codex?: { effort?: string } } }
+      | undefined;
+    expect(plannerConfig?.codex?.effort).toBe("xhigh");
+    expect(runnerArg?.config?.codex?.effort).toBe("xhigh");
+  });
+
   test("rejects invalid codex effort", async () => {
     const { runModule } = await loadRunModule();
     await expect(parseRun(runModule, ["run", "--task", "x", "--codex-effort", "extreme"])).rejects.toThrow(
-      "Codex effort must be one of",
+      "Codex thinking level must be one of",
     );
   });
 

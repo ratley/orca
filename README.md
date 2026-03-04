@@ -129,11 +129,12 @@ export default defineOrcaConfig({
   codex: {
     enabled: true,
     model: "gpt-5.3-codex",
-    thinking: {
+    thinkingLevel: {
       decision: "low",
-      planning: "high", // or "extra-high"
+      planning: "high", // or "xhigh"
       execution: "medium"
     },
+    // Deprecated alias kept for compatibility: codex.thinking
     command: "codex",
     timeoutMs: 300000,
     multiAgent: false,
@@ -186,10 +187,29 @@ Top-level: `executor`, `openaiApiKey`, `runsDir`, `sessionLogs`, `skills`, `maxR
 
 - `pr.enabled`, `pr.requireConfirmation`
 - `maxRetries` is part of `OrcaConfig`; current planner-generated task retries remain fixed in task graph contracts
-- `codex.enabled`, `codex.model`, `codex.effort` (legacy global override), `codex.thinking.decision|planning|execution`, `codex.command`, `codex.timeoutMs`, `codex.multiAgent`, `codex.perCwdExtraUserRoots`
+- `codex.enabled`, `codex.model`, `codex.effort` (legacy global override), `codex.thinkingLevel.decision|planning|execution`, `codex.command`, `codex.timeoutMs`, `codex.multiAgent`, `codex.perCwdExtraUserRoots`
+- Deprecated compatibility alias: `codex.thinking` (same shape as `thinkingLevel`, lower precedence when both are set)
 - `review.plan.enabled`, `review.plan.onInvalid`
 - `review.execution.enabled`, `review.execution.maxCycles`, `review.execution.onFindings`, `review.execution.validator.auto`, `review.execution.validator.commands`, `review.execution.prompt`
 - Deprecated compatibility aliases: `review.enabled`, `review.onInvalid` (still accepted; prefer `review.plan.*`)
+
+### Codex model + thinking-level support assumptions
+
+Orca uses these concrete assumptions:
+
+- Default model fallback is `gpt-5.3-codex`.
+- Orca does **not** hard-block model ids; users may set any `codex.model` value.
+- Thinking-level values accepted by Orca config/CLI are `low`, `medium`, `high`, `xhigh`.
+- Deprecated alias `extra-high` is still accepted and normalized to `xhigh`.
+- `codex.thinkingLevel.*` maps to Codex app-server turn `effort` controls (the model catalog exposes per-model `reasoningEffort` capabilities via `model/list`).
+
+Primary references:
+- https://developers.openai.com/codex/models/
+- https://developers.openai.com/codex/app-server/
+
+Local workspace references:
+- `docs/codex/codex-app-server.md`
+- `docs/codex/codex-ts-sdk.md`
 
 ### Multi-agent mode
 
@@ -224,7 +244,7 @@ Global:
 - `--plan <path>`
 - `--config <path>`
 - `--codex-only` (force Codex executor for this run)
-- `--codex-effort <low|medium|high|extra-high>`
+- `--codex-effort <low|medium|high|xhigh>`
 - `--on-milestone <cmd>`
 - `--on-task-complete <cmd>`
 - `--on-task-fail <cmd>`
@@ -252,7 +272,7 @@ Global:
 - `--last`
 - `--config <path>`
 - `--codex-only`
-- `--codex-effort <low|medium|high|extra-high>`
+- `--codex-effort <low|medium|high|xhigh>`
 
 `orca cancel`:
 

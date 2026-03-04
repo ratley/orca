@@ -121,7 +121,23 @@ function coerceConfig(candidate: unknown): OrcaConfig {
         );
       }
 
-      parseCodexEffort(candidate.codex.effort);
+      candidate.codex.effort = parseCodexEffort(candidate.codex.effort);
+    }
+
+    if ("thinkingLevel" in candidate.codex && candidate.codex.thinkingLevel !== undefined) {
+      if (!isObject(candidate.codex.thinkingLevel)) {
+        throw new Error(`Config.codex.thinkingLevel must be an object, got ${describeType(candidate.codex.thinkingLevel)}`);
+      }
+
+      for (const key of ["decision", "planning", "execution"] as const) {
+        const value = candidate.codex.thinkingLevel[key];
+        if (value !== undefined) {
+          if (typeof value !== "string") {
+            throw new Error(`Config.codex.thinkingLevel.${key} must be a string, got ${describeType(value)}`);
+          }
+          candidate.codex.thinkingLevel[key] = parseCodexEffort(value);
+        }
+      }
     }
 
     if ("thinking" in candidate.codex && candidate.codex.thinking !== undefined) {
@@ -135,7 +151,7 @@ function coerceConfig(candidate: unknown): OrcaConfig {
           if (typeof value !== "string") {
             throw new Error(`Config.codex.thinking.${key} must be a string, got ${describeType(value)}`);
           }
-          parseCodexEffort(value);
+          candidate.codex.thinking[key] = parseCodexEffort(value);
         }
       }
     }
@@ -311,7 +327,14 @@ export function mergeConfigs(...configs: Array<OrcaConfig | undefined>): OrcaCon
     }
 
     if (merged.codex !== undefined || config.codex !== undefined) {
-      const mergedThinking = (merged.codex?.thinking !== undefined || config.codex?.thinking !== undefined)
+      const mergedThinkingLevel = (merged.codex?.thinkingLevel !== undefined || config.codex?.thinkingLevel !== undefined)
+        ? {
+          ...merged.codex?.thinkingLevel,
+          ...config.codex?.thinkingLevel
+        }
+        : undefined;
+
+      const mergedLegacyThinking = (merged.codex?.thinking !== undefined || config.codex?.thinking !== undefined)
         ? {
           ...merged.codex?.thinking,
           ...config.codex?.thinking
@@ -321,7 +344,8 @@ export function mergeConfigs(...configs: Array<OrcaConfig | undefined>): OrcaCon
       merged.codex = {
         ...merged.codex,
         ...config.codex,
-        ...(mergedThinking !== undefined ? { thinking: mergedThinking } : {})
+        ...(mergedThinkingLevel !== undefined ? { thinkingLevel: mergedThinkingLevel } : {}),
+        ...(mergedLegacyThinking !== undefined ? { thinking: mergedLegacyThinking } : {})
       };
     }
 
