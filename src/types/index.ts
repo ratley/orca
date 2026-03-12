@@ -152,6 +152,7 @@ export interface OrcaConfig {
     thinkingLevel?: {
       decision?: CodexEffort;
       planning?: CodexEffort;
+      review?: CodexEffort;
       execution?: CodexEffort;
     };
     command?: string;

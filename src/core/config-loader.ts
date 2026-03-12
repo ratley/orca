@@ -97,16 +97,7 @@ function coerceConfig(candidate: unknown): OrcaConfig {
   }
 
   if ("executor" in candidate && candidate.executor !== undefined) {
-    if (candidate.executor !== "codex") {
-      const executorDisplay =
-        typeof candidate.executor === "string"
-          ? candidate.executor
-          : (JSON.stringify(candidate.executor) ?? describeType(candidate.executor));
-
-      throw new Error(
-        `Config.executor must be 'codex', got ${executorDisplay}`
-      );
-    }
+    candidate.executor = "codex";
   }
 
   if ("codex" in candidate && candidate.codex !== undefined) {
@@ -129,7 +120,7 @@ function coerceConfig(candidate: unknown): OrcaConfig {
         throw new Error(`Config.codex.thinkingLevel must be an object, got ${describeType(candidate.codex.thinkingLevel)}`);
       }
 
-      for (const key of ["decision", "planning", "execution"] as const) {
+      for (const key of ["decision", "planning", "review", "execution"] as const) {
         const value = candidate.codex.thinkingLevel[key];
         if (value !== undefined) {
           if (typeof value !== "string") {

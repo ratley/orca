@@ -22,6 +22,75 @@ function containsMultiAgentSetting(content: string): boolean {
   return /multi_agent\s*=/.test(content);
 }
 
+function isRootFeaturesSection(sectionPath: string[]): boolean {
+  return sectionPath.length === 1 && sectionPath[0] === "features";
+}
+
+function parseSectionPath(line: string): string[] | null {
+  const match = line.match(/^\[(.+)\]$/);
+  if (!match?.[1]) {
+    return null;
+  }
+
+  return match[1]
+    .split(".")
+    .map((part) => part.trim().replace(/^"(.*)"$/, "$1"))
+    .filter((part) => part.length > 0);
+}
+
+function hasEnabledRootMultiAgentSetting(content: string): boolean {
+  let currentSection: string[] = [];
+
+  for (const rawLine of content.split(/\r?\n/u)) {
+    const line = rawLine.replace(/\s+#.*$/u, "").trim();
+    if (line.length === 0 || line.startsWith("#")) {
+      continue;
+    }
+
+    const sectionPath = parseSectionPath(line);
+    if (sectionPath !== null) {
+      currentSection = sectionPath;
+      continue;
+    }
+
+    if (!isRootFeaturesSection(currentSection)) {
+      continue;
+    }
+
+    const match = line.match(/^multi_agent\s*=\s*(true|false)\s*$/u);
+    if (!match?.[1]) {
+      continue;
+    }
+
+    return match[1] === "true";
+  }
+
+  return false;
+}
+
+export async function isCodexMultiAgentActive(
+  config?: OrcaConfig,
+  _configFile?: string,
+): Promise<boolean> {
+  if (isMultiAgentEnabled(config)) {
+    return true;
+  }
+
+  const configFile = _configFile ?? GLOBAL_CONFIG_FILE;
+
+  let existingContent: string;
+  try {
+    existingContent = await readFile(configFile, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return false;
+    }
+    throw err;
+  }
+
+  return hasEnabledRootMultiAgentSetting(existingContent);
+}
+
 /**
  * Ensures `~/.codex/config.toml` has `multi_agent = true` set.
  *

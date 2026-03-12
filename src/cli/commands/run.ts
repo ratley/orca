@@ -520,7 +520,7 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
             const validationResults = await runValidatorCommands(validatorCommands);
             const prompt = buildPostExecutionReviewPrompt(cycleIndex, validationResults, reviewConfig.prompt);
             const reviewResult = await requestStructuredExecutionReview(
-              codexSession.runPrompt,
+              (prompt) => codexSession.runPrompt(prompt, "review"),
               cycleIndex,
               prompt,
               reviewConfig.prompt

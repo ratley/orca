@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
-import { mergeConfigs, resolveConfig, resolveConfigFromPaths } from "./config-loader.js";
+import { mergeConfigs, resolveConfigFromPaths } from "./config-loader.js";
 
 describe("config-loader", () => {
   let tempDir: string;
@@ -26,14 +26,17 @@ describe("config-loader", () => {
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
-  test("resolveConfig prefers project ts config over project js config when both exist", async () => {
-    process.chdir(tempDir);
-    process.env.HOME = tempDir;
+  test("resolveConfigFromPaths prefers project ts config over project js config when both exist", async () => {
+    const projectJsPath = path.join(tempDir, "orca.config.js");
+    const projectTsPath = path.join(tempDir, "orca.config.ts");
+    await fs.writeFile(projectJsPath, "export default { runsDir: 'from-js' };\n", "utf8");
+    await fs.writeFile(projectTsPath, "export default { runsDir: 'from-ts' };\n", "utf8");
 
-    await fs.writeFile(path.join(tempDir, "orca.config.js"), "export default { runsDir: 'from-js' };\n", "utf8");
-    await fs.writeFile(path.join(tempDir, "orca.config.ts"), "export default { runsDir: 'from-ts' };\n", "utf8");
-
-    const resolved = await resolveConfig();
+    const resolved = await resolveConfigFromPaths(
+      path.join(tempDir, "missing-global.js"),
+      projectJsPath,
+      projectTsPath
+    );
 
     expect(resolved?.runsDir).toBe("from-ts");
   });
@@ -76,17 +79,17 @@ describe("config-loader", () => {
     expect(resolved?.sessionLogs).toBe("/tmp/orca-session-logs");
   });
 
-  test("resolveConfigFromPaths throws on invalid executor value", async () => {
+  test("resolveConfigFromPaths coerces stale executor values to codex", async () => {
     const cliPath = path.join(tempDir, "cli.config.js");
-    await fs.writeFile(cliPath, "export default { executor: 'invalid-executor' };\n", "utf8");
+    await fs.writeFile(cliPath, "export default { executor: 'claude' };\n", "utf8");
 
-    await expect(
-      resolveConfigFromPaths(
-        path.join(tempDir, "missing-global.js"),
-        path.join(tempDir, "missing-project.js"),
-        cliPath
-      )
-    ).rejects.toThrow("Config.executor must be 'codex', got invalid-executor");
+    const resolved = await resolveConfigFromPaths(
+      path.join(tempDir, "missing-global.js"),
+      path.join(tempDir, "missing-project.js"),
+      cliPath
+    );
+
+    expect(resolved?.executor).toBe("codex");
   });
 
   test("resolveConfigFromPaths rejects unknown hookCommands keys", async () => {
@@ -184,7 +187,7 @@ describe("config-loader", () => {
     const cliPath = path.join(tempDir, "cli.config.js");
     await fs.writeFile(
       cliPath,
-      "export default { codex: { thinkingLevel: { decision: 'low', planning: 'xhigh', execution: 'medium' } } };\n",
+      "export default { codex: { thinkingLevel: { decision: 'low', planning: 'xhigh', review: 'high', execution: 'medium' } } };\n",
       "utf8"
     );
 
@@ -197,6 +200,7 @@ describe("config-loader", () => {
     expect(resolved?.codex?.thinkingLevel).toEqual({
       decision: "low",
       planning: "xhigh",
+      review: "high",
       execution: "medium",
     });
   });
@@ -367,6 +371,7 @@ describe("config-loader", () => {
     const projectConfig = {
       codex: {
         thinkingLevel: {
+          review: "high" as const,
           execution: "medium" as const,
         },
       },
@@ -377,6 +382,7 @@ describe("config-loader", () => {
     expect(merged?.codex?.thinkingLevel).toEqual({
       decision: "low",
       planning: "high",
+      review: "high",
       execution: "medium",
     });
   });

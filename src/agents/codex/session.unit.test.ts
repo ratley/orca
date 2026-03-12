@@ -1,10 +1,66 @@
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, describe, expect, mock, test } from "bun:test";
 
 afterEach(() => {
   mock.restore();
 });
 
+function mockMultiAgentDetection(active = false): void {
+  mock.module("../../core/codex-config.js", () => ({
+    isCodexMultiAgentActive: async () => active,
+  }));
+}
+
 describe("codex session effort wiring", () => {
+  test("uses ORCA_CODEX_PATH override and otherwise resolves a default Codex binary", async () => {
+    const constructedOptions: Array<{ codexPath?: string }> = [];
+    const originalCodexPath = process.env.ORCA_CODEX_PATH;
+
+    mockMultiAgentDetection(false);
+    mock.module("@ratley/codex-client", () => ({
+      CodexClient: class {
+        constructor(options: { codexPath?: string }) {
+          constructedOptions.push(options);
+        }
+        async connect(): Promise<void> {}
+        async disconnect(): Promise<void> {}
+        async startThread(): Promise<{ id: string }> {
+          return { id: "thread-1" };
+        }
+        async runReview(): Promise<{ reviewText: string }> {
+          return { reviewText: "ok" };
+        }
+      },
+    }));
+
+    mock.module("../../utils/skill-loader.js", () => ({
+      loadSkills: async () => [],
+    }));
+
+    const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
+
+    try {
+      delete process.env.ORCA_CODEX_PATH;
+      const defaultSession = await createCodexSession(process.cwd());
+      await defaultSession.disconnect();
+
+      process.env.ORCA_CODEX_PATH = "/tmp/custom-codex";
+      const overriddenSession = await createCodexSession(process.cwd());
+      await overriddenSession.disconnect();
+
+      expect(constructedOptions[0]?.codexPath).toBeTruthy();
+      expect(constructedOptions[1]?.codexPath).toBe("/tmp/custom-codex");
+    } finally {
+      if (originalCodexPath === undefined) {
+        delete process.env.ORCA_CODEX_PATH;
+      } else {
+        process.env.ORCA_CODEX_PATH = originalCodexPath;
+      }
+    }
+  });
+
   test("passes configured effort into Codex runTurn", async () => {
     const runTurnMock = mock(async () => ({
       agentMessage: "[]",
@@ -12,6 +68,7 @@ describe("codex session effort wiring", () => {
       items: [],
     }));
 
+    mockMultiAgentDetection(false);
     mock.module("@ratley/codex-client", () => ({
       CodexClient: class {
         async connect(): Promise<void> {}
@@ -42,7 +99,7 @@ describe("codex session effort wiring", () => {
     }
   });
 
-  test("smoke: uses per-step thinkingLevel values for decision/planning/execution turns", async () => {
+  test("smoke: uses per-step thinkingLevel values for decision/planning/review/execution turns", async () => {
     const efforts: string[] = [];
     const runTurnMock = mock(async (params: { effort?: string; input?: Array<{ text?: string }> }) => {
       efforts.push(params.effort ?? "");
@@ -55,6 +112,22 @@ describe("codex session effort wiring", () => {
         };
       }
 
+      if (prompt.includes("pre-execution task-graph reviewer")) {
+        return {
+          agentMessage: '{"changes":[]}',
+          turn: { status: "completed" },
+          items: [],
+        };
+      }
+
+      if (prompt.includes("Review this Orca task graph before execution.")) {
+        return {
+          agentMessage: '{"issues":[],"ok":true}',
+          turn: { status: "completed" },
+          items: [],
+        };
+      }
+
       return {
         agentMessage: "[]",
         turn: { status: "completed" },
@@ -62,6 +135,7 @@ describe("codex session effort wiring", () => {
       };
     });
 
+    mockMultiAgentDetection(false);
     mock.module("@ratley/codex-client", () => ({
       CodexClient: class {
         async connect(): Promise<void> {}
@@ -86,6 +160,7 @@ describe("codex session effort wiring", () => {
         thinkingLevel: {
           decision: "low",
           planning: "xhigh",
+          review: "high",
           execution: "medium",
         },
       },
@@ -94,6 +169,7 @@ describe("codex session effort wiring", () => {
     try {
       await session.decidePlanningNeed("spec", "context");
       await session.planSpec("spec", "context");
+      await session.reviewTaskGraph([], "context");
       await session.executeTask(
         {
           id: "t1",
@@ -108,8 +184,10 @@ describe("codex session effort wiring", () => {
         "run-1",
         "context",
       );
+      await session.consultTaskGraph([]);
+      await session.runPrompt("review prompt", "review");
 
-      expect(efforts).toEqual(["low", "xhigh", "medium"]);
+      expect(efforts).toEqual(["low", "xhigh", "high", "medium", "high", "high"]);
     } finally {
       await session.disconnect();
     }
@@ -139,6 +217,7 @@ describe("codex session code-simplifier guidance", () => {
       };
     });
 
+    mockMultiAgentDetection(false);
     mock.module("@ratley/codex-client", () => ({
       CodexClient: class {
         async connect(): Promise<void> {}
@@ -190,10 +269,185 @@ describe("codex session code-simplifier guidance", () => {
   });
 });
 
+describe("codex session multi-agent prompt guidance", () => {
+  test("includes multi-agent guidance in planning, review, consultation, and execution prompts when active", async () => {
+    const prompts: string[] = [];
+    const runTurnMock = mock(async (params: { input?: Array<{ text?: string }> }) => {
+      const prompt = params.input?.[0]?.text ?? "";
+      prompts.push(prompt);
+
+      if (prompt.includes("pre-execution task-graph reviewer")) {
+        return {
+          agentMessage: '{"changes":[]}',
+          turn: { status: "completed" },
+          items: [],
+        };
+      }
+
+      if (prompt.includes("Review this Orca task graph before execution.")) {
+        return {
+          agentMessage: '{"issues":[],"ok":true}',
+          turn: { status: "completed" },
+          items: [],
+        };
+      }
+
+      return {
+        agentMessage: "[]",
+        turn: { status: "completed" },
+        items: [],
+      };
+    });
+
+    mockMultiAgentDetection(true);
+    mock.module("@ratley/codex-client", () => ({
+      CodexClient: class {
+        async connect(): Promise<void> {}
+        async disconnect(): Promise<void> {}
+        async startThread(): Promise<{ id: string }> {
+          return { id: "thread-1" };
+        }
+        runTurn = runTurnMock;
+        async runReview(): Promise<{ reviewText: string }> {
+          return { reviewText: "ok" };
+        }
+      },
+    }));
+
+    mock.module("../../utils/skill-loader.js", () => ({
+      loadSkills: async () => [],
+    }));
+
+    const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
+    const session = await createCodexSession(process.cwd());
+
+    try {
+      await session.planSpec("spec", "context");
+      await session.reviewTaskGraph([], "context");
+      await session.consultTaskGraph([]);
+      await session.executeTask(
+        {
+          id: "t1",
+          name: "Task",
+          description: "Do thing",
+          dependencies: [],
+          acceptance_criteria: ["Done"],
+          status: "pending",
+          retries: 0,
+          maxRetries: 3,
+        },
+        "run-1",
+        "context",
+      );
+
+      const planningPrompt = prompts.find((prompt) => prompt.includes("You are decomposing a spec into an ordered task graph.")) ?? "";
+      const reviewPrompt = prompts.find((prompt) => prompt.includes("You are Orca's pre-execution task-graph reviewer.")) ?? "";
+      const consultationPrompt = prompts.find((prompt) => prompt.includes("Review this Orca task graph before execution.")) ?? "";
+      const executionPrompt = prompts.find((prompt) => prompt.includes("You are Orca's task execution assistant.")) ?? "";
+
+      expect(planningPrompt).toContain("Codex multi-agent mode is enabled for this run. Shape the task graph so safe subagent parallelization is obvious.");
+      expect(planningPrompt).toContain("Do not bundle unrelated work into a single do-everything task when it can be safely split.");
+
+      expect(reviewPrompt).toContain("Codex multi-agent mode is enabled for this run. Review the graph for safe subagent parallelization.");
+      expect(reviewPrompt).toContain("Flag ownership collisions where multiple tasks would touch the same files or subsystem without coordination.");
+
+      expect(consultationPrompt).toContain("Codex multi-agent mode is enabled for this run.");
+      expect(consultationPrompt).toContain("Treat missed safe parallelism, fake dependencies, overlapping ownership, or missing integration tasks as review concerns.");
+
+      expect(executionPrompt).toContain("Codex multi-agent mode is enabled for this run.");
+      expect(executionPrompt).toContain("If this task contains clearly independent subtasks with disjoint ownership, use subagents to parallelize them.");
+      expect(executionPrompt).toContain("Integrate subagent results yourself before final completion.");
+    } finally {
+      await session.disconnect();
+    }
+  });
+
+  test("omits multi-agent guidance from planning, review, consultation, and execution prompts when inactive", async () => {
+    const prompts: string[] = [];
+    const runTurnMock = mock(async (params: { input?: Array<{ text?: string }> }) => {
+      const prompt = params.input?.[0]?.text ?? "";
+      prompts.push(prompt);
+
+      if (prompt.includes("pre-execution task-graph reviewer")) {
+        return {
+          agentMessage: '{"changes":[]}',
+          turn: { status: "completed" },
+          items: [],
+        };
+      }
+
+      if (prompt.includes("Review this Orca task graph before execution.")) {
+        return {
+          agentMessage: '{"issues":[],"ok":true}',
+          turn: { status: "completed" },
+          items: [],
+        };
+      }
+
+      return {
+        agentMessage: "[]",
+        turn: { status: "completed" },
+        items: [],
+      };
+    });
+
+    mockMultiAgentDetection(false);
+    mock.module("@ratley/codex-client", () => ({
+      CodexClient: class {
+        async connect(): Promise<void> {}
+        async disconnect(): Promise<void> {}
+        async startThread(): Promise<{ id: string }> {
+          return { id: "thread-1" };
+        }
+        runTurn = runTurnMock;
+        async runReview(): Promise<{ reviewText: string }> {
+          return { reviewText: "ok" };
+        }
+      },
+    }));
+
+    mock.module("../../utils/skill-loader.js", () => ({
+      loadSkills: async () => [],
+    }));
+
+    const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
+    const session = await createCodexSession(process.cwd());
+
+    try {
+      await session.planSpec("spec", "context");
+      await session.reviewTaskGraph([], "context");
+      await session.consultTaskGraph([]);
+      await session.executeTask(
+        {
+          id: "t1",
+          name: "Task",
+          description: "Do thing",
+          dependencies: [],
+          acceptance_criteria: ["Done"],
+          status: "pending",
+          retries: 0,
+          maxRetries: 3,
+        },
+        "run-1",
+        "context",
+      );
+
+      for (const prompt of prompts) {
+        expect(prompt).not.toContain("Codex multi-agent mode is enabled for this run.");
+        expect(prompt).not.toContain("use subagents to parallelize them");
+        expect(prompt).not.toContain("safe subagent parallelization");
+      }
+    } finally {
+      await session.disconnect();
+    }
+  });
+});
+
 describe("codex session skill discovery", () => {
   test("calls skills/list with forceReload and perCwdExtraUserRoots", async () => {
     const requestMock = mock(async () => ({ data: [] }));
 
+    mockMultiAgentDetection(false);
     mock.module("@ratley/codex-client", () => ({
       CodexClient: class {
         async connect(): Promise<void> {}
@@ -235,10 +489,22 @@ describe("codex session skill discovery", () => {
   });
 
   test("merges app-server listed skills after Orca-loaded skills without overriding deterministic precedence", async () => {
-    type TurnInputItem = { type: "text"; text: string } | { type: "skill"; name: string; path: string };
+    type TurnInputItem = { type: "text"; text: string };
 
     let capturedInput: TurnInputItem[] = [];
+    const listedSkillsRoot = await mkdtemp(path.join(os.tmpdir(), "orca-listed-skills-"));
+    const alphaSkillPath = path.join(listedSkillsRoot, "alpha-skill", "SKILL.md");
+    const codeSimplifierPath = path.join(listedSkillsRoot, "code-simplifier", "SKILL.md");
+    const zetaSkillPath = path.join(listedSkillsRoot, "zeta-skill", "SKILL.md");
 
+    await mkdir(path.dirname(alphaSkillPath), { recursive: true });
+    await mkdir(path.dirname(codeSimplifierPath), { recursive: true });
+    await mkdir(path.dirname(zetaSkillPath), { recursive: true });
+    await writeFile(alphaSkillPath, "alpha body", "utf8");
+    await writeFile(codeSimplifierPath, "server code simplifier body", "utf8");
+    await writeFile(zetaSkillPath, "zeta body", "utf8");
+
+    mockMultiAgentDetection(false);
     mock.module("@ratley/codex-client", () => ({
       CodexClient: class {
         async connect(): Promise<void> {}
@@ -255,9 +521,9 @@ describe("codex session skill discovery", () => {
             data: [
               {
                 skills: [
-                  { name: "zeta-skill", path: "/srv/zeta/zeta-skill/SKILL.md" },
-                  { name: "code-simplifier", path: "/srv/override/code-simplifier/SKILL.md" },
-                  { name: "alpha-skill", path: "/srv/alpha/alpha-skill/SKILL.md" },
+                  { name: "zeta-skill", path: zetaSkillPath },
+                  { name: "code-simplifier", path: codeSimplifierPath },
+                  { name: "alpha-skill", path: alphaSkillPath },
                 ],
               },
             ],
@@ -287,22 +553,26 @@ describe("codex session skill discovery", () => {
     try {
       await session.planSpec("spec", "context");
 
-      const skills = capturedInput.filter((item): item is { type: "skill"; name: string; path: string } => item.type === "skill");
-      expect(skills).toEqual([
-        { type: "skill", name: "code-simplifier", path: "/tmp/skills/code-simplifier" },
-        { type: "skill", name: "alpha-skill", path: "/srv/alpha/alpha-skill" },
-        { type: "skill", name: "zeta-skill", path: "/srv/zeta/zeta-skill" },
-      ]);
+      const prompt = capturedInput[0]?.text ?? "";
+      expect(prompt).toContain("Referenced Orca skills:");
+      expect(prompt).toContain("Skill: code-simplifier");
+      expect(prompt).toContain("Skill: alpha-skill");
+      expect(prompt).toContain("Skill: zeta-skill");
+      expect(prompt).toContain("body");
+      expect(prompt).toContain("alpha body");
+      expect(prompt).toContain("zeta body");
+      expect(prompt).not.toContain("server code simplifier body");
     } finally {
       await session.disconnect();
     }
   });
 });
 
-describe("codex session explicit skill input", () => {
+describe("codex session inline skill context", () => {
   test("disconnects Codex client if skill loading fails during session creation", async () => {
     const disconnectMock = mock(async () => {});
 
+    mockMultiAgentDetection(false);
     mock.module("@ratley/codex-client", () => ({
       CodexClient: class {
         async connect(): Promise<void> {}
@@ -331,8 +601,8 @@ describe("codex session explicit skill input", () => {
     expect(disconnectMock).toHaveBeenCalledTimes(1);
   });
 
-  test("includes skill items with valid name/path alongside text input for every runTurn", async () => {
-    type TurnInputItem = { type: "text"; text: string } | { type: "skill"; name: string; path: string };
+  test("includes inline skill context inside the text input for every runTurn", async () => {
+    type TurnInputItem = { type: "text"; text: string };
 
     const runTurnCalls: Array<{ input?: TurnInputItem[] }> = [];
     const runTurnMock = mock(async (params: { input?: TurnInputItem[] }) => {
@@ -362,6 +632,7 @@ describe("codex session explicit skill input", () => {
       };
     });
 
+    mockMultiAgentDetection(false);
     mock.module("@ratley/codex-client", () => ({
       CodexClient: class {
         async connect(): Promise<void> {}
@@ -414,17 +685,14 @@ describe("codex session explicit skill input", () => {
       expect(runTurnCalls.length).toBe(5);
 
       for (const call of runTurnCalls) {
-        const textItem = call.input?.find((item) => item.type === "text");
-        expect(textItem?.type).toBe("text");
-        expect((textItem as { text?: string } | undefined)?.text).toBeTruthy();
+        expect(call.input).toHaveLength(1);
 
-        const skillItems = call.input?.filter((item) => item.type === "skill") ?? [];
-        expect(skillItems).toHaveLength(1);
-        expect(skillItems[0]).toEqual({
-          type: "skill",
-          name: "code-simplifier",
-          path: "/tmp/skills/code-simplifier",
-        });
+        const text = call.input?.[0]?.text ?? "";
+        expect(text).toBeTruthy();
+        expect(text).toContain("Referenced Orca skills:");
+        expect(text).toContain("Skill: code-simplifier");
+        expect(text).toContain("Source: /tmp/skills/code-simplifier/SKILL.md");
+        expect(text).toContain("body");
       }
     } finally {
       await session.disconnect();

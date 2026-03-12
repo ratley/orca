@@ -30,7 +30,8 @@ describe("post-exec reviewer JSON hardening integration", () => {
     expect(runPromptMock).toHaveBeenCalledTimes(2);
     expect(runPromptMock).toHaveBeenNthCalledWith(
       2,
-      expect.stringContaining("previous post-execution review response was invalid")
+      expect.stringContaining("previous post-execution review response was invalid"),
+      "review"
     );
   });
 
@@ -56,7 +57,8 @@ describe("post-exec reviewer JSON hardening integration", () => {
     expect(runPromptMock).toHaveBeenCalledTimes(2);
     expect(runPromptMock).toHaveBeenNthCalledWith(
       2,
-      expect.stringContaining("Schema validation failed")
+      expect.stringContaining("Schema validation failed"),
+      "review"
     );
   });
 

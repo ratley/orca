@@ -2,6 +2,7 @@ import { afterEach, beforeEach, mock } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { Command } from "commander";
 
 type RunModule = typeof import("./run.js");
@@ -25,18 +26,23 @@ export function createRunCommandTestHarness(tempPrefix: string): RunCommandTestH
   const originalRunsDir = process.env.ORCA_RUNS_DIR;
   const originalSkipValidators = process.env.ORCA_SKIP_VALIDATORS;
   const originalOpenaiApiKey = process.env.OPENAI_API_KEY;
+  const originalHome = process.env.HOME;
+  const originalCwd = process.cwd();
 
   beforeEach(async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), tempPrefix));
     process.env.ORCA_RUNS_DIR = path.join(tempDir, "runs");
     process.env.ORCA_SKIP_VALIDATORS = "1";
     process.env.OPENAI_API_KEY = "test-openai-key";
+    process.env.HOME = tempDir;
+    process.chdir(tempDir);
     process.exitCode = 0;
   });
 
   afterEach(async () => {
     mock.restore();
     process.exitCode = 0;
+    process.chdir(originalCwd);
     if (originalRunsDir === undefined) {
       delete process.env.ORCA_RUNS_DIR;
     } else {
@@ -51,6 +57,11 @@ export function createRunCommandTestHarness(tempPrefix: string): RunCommandTestH
       delete process.env.OPENAI_API_KEY;
     } else {
       process.env.OPENAI_API_KEY = originalOpenaiApiKey;
+    }
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
     }
     await rm(tempDir, { recursive: true, force: true });
   });
@@ -95,8 +106,14 @@ export function createRunCommandTestHarness(tempPrefix: string): RunCommandTestH
       }
     }
 
-    const { resolveConfig: realResolveConfig } = await import(`../../core/config-loader.js?real=${Math.random()}`);
-    const resolveConfigMock = mock((configPath?: string) => realResolveConfig(configPath));
+    const resolveConfigMock = mock(async (configPath?: string) => {
+      if (configPath) {
+        const imported = await import(`${pathToFileURL(configPath).href}?test=${Math.random()}`);
+        return imported.default;
+      }
+
+      return { executor: "codex" as const };
+    });
     const ensureCodexMultiAgentMock = mock(async () => ({
       action: "skipped" as const,
       path: path.join(tempDir, "mock-codex-config.toml")

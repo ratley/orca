@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { CodexClient } from "@ratley/codex-client";
@@ -11,9 +12,12 @@ import type {
   TaskGraphReviewOperation,
   TaskGraphReviewResult
 } from "../../types/index.js";
+import { isCodexMultiAgentActive } from "../../core/codex-config.js";
 import { TaskGraphReviewPayloadSchema } from "../../core/task-graph-review.js";
 import type { CodexEffort } from "../../types/effort.js";
 import { loadSkills, type LoadedSkill } from "../../utils/skill-loader.js";
+import { logger } from "../../utils/logger.js";
+import { resolveCodexPath } from "./codex-path.js";
 
 export type { PlanResult, TaskExecutionResult };
 
@@ -28,12 +32,26 @@ function getCodeSimplifierGuidance(): string[] {
   ];
 }
 
-function buildPlanningPrompt(spec: string, systemContext: string): string {
+function getMultiAgentPlanningGuidance(multiAgentActive: boolean): string[] {
+  if (!multiAgentActive) {
+    return [];
+  }
+
+  return [
+    "Codex multi-agent mode is enabled for this run. Shape the task graph so safe subagent parallelization is obvious.",
+    "Assign clear file or subsystem ownership per task so subagents do not step on each other.",
+    "Only add dependencies that are truly required for correctness.",
+    "Do not bundle unrelated work into a single do-everything task when it can be safely split.",
+  ];
+}
+
+function buildPlanningPrompt(spec: string, systemContext: string, multiAgentActive: boolean): string {
   return [
     systemContext,
     "You are decomposing a spec into an ordered task graph.",
     "Prefer task decomposition that maximizes safe parallelism for independent workstreams.",
     "Isolate task ownership (files/subsystems) to avoid cross-task collisions.",
+    ...getMultiAgentPlanningGuidance(multiAgentActive),
     ...getCodeSimplifierGuidance(),
     "Return a JSON array of tasks.",
     "Each task must include fields: id, name, description, dependencies, acceptance_criteria, status, retries, maxRetries.",
@@ -51,11 +69,20 @@ function buildTaskExecutionPrompt(
   runId: string,
   cwd: string,
   systemContext?: string,
+  multiAgentActive = false,
 ): string {
   return [
     ...(systemContext ? [systemContext] : []),
     "You are Orca's task execution assistant.",
     ...getCodeSimplifierGuidance(),
+    ...(multiAgentActive
+      ? [
+          "Codex multi-agent mode is enabled for this run.",
+          "If this task contains clearly independent subtasks with disjoint ownership, use subagents to parallelize them.",
+          "Do not use subagents for tightly coupled, blocking, or highly stateful work.",
+          "Integrate subagent results yourself before final completion.",
+        ]
+      : []),
     `Run ID: ${runId}`,
     `Repository CWD: ${cwd}`,
     `Task ID: ${task.id}`,
@@ -88,11 +115,20 @@ function buildPlanDecisionPrompt(spec: string, systemContext: string): string {
   ].join("\n\n");
 }
 
-function buildTaskGraphReviewPrompt(tasks: Task[], systemContext: string): string {
+function buildTaskGraphReviewPrompt(tasks: Task[], systemContext: string, multiAgentActive: boolean): string {
   return [
     systemContext,
     "You are Orca's pre-execution task-graph reviewer.",
     ...getCodeSimplifierGuidance(),
+    ...(multiAgentActive
+      ? [
+          "Codex multi-agent mode is enabled for this run. Review the graph for safe subagent parallelization.",
+          "Split independent work into separate tasks when subagents could execute it in parallel.",
+          "Remove fake dependencies that unnecessarily serialize independent work.",
+          "Flag ownership collisions where multiple tasks would touch the same files or subsystem without coordination.",
+          "Add coordination tasks when parallel work needs a final integration step.",
+        ]
+      : []),
     "Return JSON matching this shape exactly: {\"changes\":[...operations...]}",
     "Allowed operation shapes:",
     "- {\"op\":\"update_task\",\"taskId\":\"...\",\"fields\":{\"name\"?:string,\"description\"?:string,\"acceptance_criteria\"?:string[]}}",
@@ -104,6 +140,32 @@ function buildTaskGraphReviewPrompt(tasks: Task[], systemContext: string): strin
     "Current task graph:",
     JSON.stringify(tasks, null, 2),
   ].join("\n\n");
+}
+
+function buildTaskGraphConsultationPrompt(tasks: Task[], multiAgentActive: boolean): string {
+  const taskGraphJson = JSON.stringify(tasks, null, 2);
+
+  return [
+    "Review this Orca task graph before execution.",
+    "Flag any: missing steps, wrong dependency order, tasks that are underdefined, or potential blockers.",
+    ...(multiAgentActive
+      ? [
+          "",
+          "Codex multi-agent mode is enabled for this run.",
+          "Treat missed safe parallelism, fake dependencies, overlapping ownership, or missing integration tasks as review concerns.",
+          "Flag tasks that should be split for safe subagent execution, or tasks that would cause subagents to step on each other.",
+        ]
+      : []),
+    "",
+    "Set ok: false ONLY if there is a hard blocking issue — dependency cycle, circular reference, a task that cannot possibly run as defined, or a critical missing step that would cause the run to fail.",
+    "For minor issues (ambiguous wording, style preferences, nice-to-haves): list them in issues but set ok: true.",
+    "If the graph looks generally reasonable and executable, set ok: true even if you have minor suggestions.",
+    "",
+    "Be brief. Output JSON on the last line: { \"issues\": [...], \"ok\": boolean }",
+    "",
+    "Task graph:",
+    taskGraphJson,
+  ].join("\n");
 }
 
 function parseTaskGraphReview(raw: string): TaskGraphReviewResult {
@@ -289,18 +351,12 @@ function getModel(config?: OrcaConfig): string {
   return config?.codex?.model ?? process.env.ORCA_CODEX_MODEL ?? "gpt-5.3-codex";
 }
 
-function getCodexPath(): string {
-  return (
-    process.env.ORCA_CODEX_PATH ??
-    `${process.env.HOME}/.nvm/versions/node/v22.22.0/bin/codex`
-  );
-}
-
-type ThinkingStep = "decision" | "planning" | "execution";
+type ThinkingStep = "decision" | "planning" | "review" | "execution";
 
 const DEFAULT_THINKING_BY_STEP: Record<ThinkingStep, CodexEffort> = {
   decision: "low",
   planning: "high",
+  review: "high",
   execution: "medium",
 };
 
@@ -317,15 +373,26 @@ function getEffort(config: OrcaConfig | undefined, step: ThinkingStep): CodexEff
   return DEFAULT_THINKING_BY_STEP[step];
 }
 
-function buildTurnInput(text: string, skills: LoadedSkill[]): Array<{ type: "text"; text: string } | { type: "skill"; name: string; path: string }> {
-  return [
-    { type: "text", text },
-    ...skills.map((skill) => ({
-      type: "skill" as const,
-      name: skill.name,
-      path: skill.dirPath,
-    })),
-  ];
+function buildTurnInput(text: string, skills: LoadedSkill[]): Array<{ type: "text"; text: string }> {
+  const usableSkills = skills.filter((skill) => skill.body.trim().length > 0);
+  if (usableSkills.length === 0) {
+    return [{ type: "text", text }];
+  }
+
+  const skillContext = usableSkills.map((skill) => [
+    `Skill: ${skill.name}`,
+    `Source: ${skill.filePath}`,
+    skill.body.trim(),
+  ].join("\n")).join("\n\n");
+
+  return [{
+    type: "text",
+    text: [
+      text,
+      "Referenced Orca skills:",
+      skillContext,
+    ].join("\n\n"),
+  }];
 }
 
 interface RawSkill {
@@ -367,22 +434,36 @@ function getPerCwdExtraUserRootsForCwd(config: OrcaConfig | undefined, cwd: stri
 }
 
 async function loadCodexListedSkills(client: CodexClient, cwd: string, config?: OrcaConfig): Promise<LoadedSkill[]> {
-  const maybeRequest = Reflect.get(client as object, "request");
-  if (typeof maybeRequest !== "function") {
-    return [];
-  }
-
-  const request = maybeRequest as (this: unknown, method: string, params?: unknown, timeoutMs?: number) => Promise<unknown>;
-
   const perCwdExtraUserRoots = getPerCwdExtraUserRootsForCwd(config, cwd);
 
   let response: unknown;
   try {
-    response = await request.call(client, "skills/list", {
-      cwds: [cwd],
-      forceReload: true,
-      ...(perCwdExtraUserRoots.length > 0 ? { perCwdExtraUserRoots } : {}),
-    });
+    const maybeListSkills = Reflect.get(client as object, "listSkills");
+    if (typeof maybeListSkills === "function") {
+      response = await maybeListSkills.call(client, {
+        cwds: [cwd],
+        forceReload: true,
+        ...(perCwdExtraUserRoots.length > 0 ? { perCwdExtraUserRoots } : {}),
+      });
+    } else {
+      const maybeRequest = Reflect.get(client as object, "request");
+      if (typeof maybeRequest !== "function") {
+        return [];
+      }
+
+      const request = maybeRequest as (
+        this: unknown,
+        method: string,
+        params?: unknown,
+        timeoutMs?: number
+      ) => Promise<unknown>;
+
+      response = await request.call(client, "skills/list", {
+        cwds: [cwd],
+        forceReload: true,
+        ...(perCwdExtraUserRoots.length > 0 ? { perCwdExtraUserRoots } : {}),
+      });
+    }
   } catch {
     return [];
   }
@@ -408,10 +489,17 @@ async function loadCodexListedSkills(client: CodexClient, cwd: string, config?: 
         continue;
       }
 
+      let skillBody = "";
+      try {
+        skillBody = await readFile(normalizedSkillPath, "utf8");
+      } catch {
+        skillBody = "";
+      }
+
       discovered.push({
         name: skill.name,
         description: "",
-        body: "",
+        body: skillBody,
         dirPath: path.dirname(normalizedSkillPath),
         filePath: normalizedSkillPath,
       });
@@ -459,6 +547,99 @@ async function resolveTurnSkills(client: CodexClient, config: OrcaConfig | undef
   return [...mergedByName.values()];
 }
 
+function extractUnknownFeatureKey(line: string): string | null {
+  const match = line.match(/unknown feature key in config:\s*([A-Za-z0-9_.-]+)/i);
+  return match?.[1] ?? null;
+}
+
+function isIgnorableMcpStderrLine(line: string): boolean {
+  return (
+    line.includes("codex_rmcp_client::oauth: failed to read OAuth tokens from keyring") ||
+    line.includes("rmcp::transport::worker: worker quit with fatal: Transport channel closed, when AuthRequired(") ||
+    line.includes("codex_core::mcp_connection_manager: Failed to list resources for MCP server") ||
+    line.includes("codex_core::mcp_connection_manager: Failed to list resource templates for MCP server") ||
+    line.includes("codex_core::shell_snapshot: Failed to delete shell snapshot") ||
+    line.includes("codex_rmcp_client::rmcp_client: Failed to kill MCP process group") ||
+    line.includes("codex_protocol::openai_models: Model personality requested but model_messages is missing")
+  );
+}
+
+function attachCodexStderrDiagnostics(client: CodexClient, codexPath: string): void {
+  const on = Reflect.get(client as object, "on");
+  if (typeof on !== "function") {
+    return;
+  }
+
+  const reportedLines = new Set<string>();
+  const reportedUnsupportedFeatures = new Set<string>();
+
+  on.call(client, "stderr", (payload: unknown) => {
+    const line = String(payload).trim();
+    if (line.length === 0) {
+      return;
+    }
+
+    const unsupportedFeature = extractUnknownFeatureKey(line);
+    if (unsupportedFeature) {
+      if (!reportedUnsupportedFeatures.has(unsupportedFeature)) {
+        reportedUnsupportedFeatures.add(unsupportedFeature);
+        logger.warn(
+          `Codex binary ${codexPath} does not support feature '${unsupportedFeature}'. Orca will continue, but you should update Codex or point ORCA_CODEX_PATH at a newer binary.`,
+        );
+      }
+      return;
+    }
+
+    if (isIgnorableMcpStderrLine(line)) {
+      return;
+    }
+
+    if (reportedLines.has(line)) {
+      return;
+    }
+
+    reportedLines.add(line);
+    logger.warn(`Codex app-server: ${line}`);
+  });
+}
+
+async function warnAboutUnavailableMcpServers(client: CodexClient): Promise<void> {
+  const request = Reflect.get(client as object, "request");
+  if (typeof request !== "function") {
+    return;
+  }
+
+  let response: unknown;
+  try {
+    response = await request.call(client, "mcpServerStatus/list", { limit: 50 }, 10_000);
+  } catch {
+    return;
+  }
+
+  if (!response || typeof response !== "object" || !("data" in response) || !Array.isArray(response.data)) {
+    return;
+  }
+
+  const unavailableServers = response.data
+    .filter((entry): entry is { name: string; authStatus: string } =>
+      !!entry &&
+      typeof entry === "object" &&
+      typeof (entry as { name?: unknown }).name === "string" &&
+      typeof (entry as { authStatus?: unknown }).authStatus === "string",
+    )
+    .filter((entry) => entry.authStatus === "notLoggedIn")
+    .map((entry) => entry.name);
+
+  if (unavailableServers.length === 0) {
+    return;
+  }
+
+  const loginCommands = unavailableServers.map((name) => `codex mcp login ${name}`).join(" ; ");
+  logger.warn(
+    `Configured Codex MCP servers need login and will be unavailable for this Orca run: ${unavailableServers.join(", ")}. Orca will continue without them. Run ${loginCommands} or disable them in ~/.codex/config.toml if you do not need them.`,
+  );
+}
+
 /**
  * Create a persistent Codex session. The thread persists across calls —
  * planSpec and executeTask share context within the same session.
@@ -478,19 +659,24 @@ export async function createCodexSession(
   executeTask: (task: Task, runId: string, systemContext?: string) => Promise<TaskExecutionResult>;
   consultTaskGraph: (tasks: Task[]) => Promise<ConsultationResult>;
   reviewChanges: (threadId?: string) => Promise<string>;
-  runPrompt: (prompt: string) => Promise<string>;
+  runPrompt: (prompt: string, step?: ThinkingStep) => Promise<string>;
   disconnect: () => Promise<void>;
   threadId: string;
 }> {
+  const multiAgentActive = await isCodexMultiAgentActive(config);
+  const codexPath = await resolveCodexPath();
+
   const client = new CodexClient({
-    codexPath: getCodexPath(),
+    codexPath,
     model: getModel(config),
     cwd,
     approvalPolicy: "never",
     sandbox: "workspace-write",
   });
 
+  attachCodexStderrDiagnostics(client, codexPath);
   await client.connect();
+  await warnAboutUnavailableMcpServers(client);
 
   let skills: LoadedSkill[];
   let threadId: string;
@@ -524,7 +710,7 @@ export async function createCodexSession(
       const result = await client.runTurn({
         threadId,
         effort: getEffort(config, "planning"),
-        input: buildTurnInput(buildPlanningPrompt(spec, systemContext), skills),
+        input: buildTurnInput(buildPlanningPrompt(spec, systemContext, multiAgentActive), skills),
       });
 
       const rawResponse = extractAgentText(result);
@@ -538,8 +724,8 @@ export async function createCodexSession(
     async reviewTaskGraph(tasks: Task[], systemContext: string): Promise<TaskGraphReviewResult> {
       const result = await client.runTurn({
         threadId,
-        effort: getEffort(config, "planning"),
-        input: buildTurnInput(buildTaskGraphReviewPrompt(tasks, systemContext), skills),
+        effort: getEffort(config, "review"),
+        input: buildTurnInput(buildTaskGraphReviewPrompt(tasks, systemContext, multiAgentActive), skills),
       });
 
       const rawResponse = extractAgentText(result);
@@ -554,7 +740,7 @@ export async function createCodexSession(
       const result = await client.runTurn({
         threadId,
         effort: getEffort(config, "execution"),
-        input: buildTurnInput(buildTaskExecutionPrompt(task, runId, cwd, systemContext), skills),
+        input: buildTurnInput(buildTaskExecutionPrompt(task, runId, cwd, systemContext, multiAgentActive), skills),
       });
 
       const rawResponse = extractAgentText(result);
@@ -580,24 +766,11 @@ export async function createCodexSession(
     },
 
     async consultTaskGraph(tasks: Task[]): Promise<ConsultationResult> {
-      const taskGraphJson = JSON.stringify(tasks, null, 2);
-      const prompt = [
-        "Review this Orca task graph before execution.",
-        "Flag any: missing steps, wrong dependency order, tasks that are underdefined, or potential blockers.",
-        "",
-        "Set ok: false ONLY if there is a hard blocking issue — dependency cycle, circular reference, a task that cannot possibly run as defined, or a critical missing step that would cause the run to fail.",
-        "For minor issues (ambiguous wording, style preferences, nice-to-haves): list them in issues but set ok: true.",
-        "If the graph looks generally reasonable and executable, set ok: true even if you have minor suggestions.",
-        "",
-        "Be brief. Output JSON on the last line: { \"issues\": [...], \"ok\": boolean }",
-        "",
-        "Task graph:",
-        taskGraphJson,
-      ].join("\n");
+      const prompt = buildTaskGraphConsultationPrompt(tasks, multiAgentActive);
 
       const result = await client.runTurn({
         threadId,
-        effort: getEffort(config, "decision"),
+        effort: getEffort(config, "review"),
         input: buildTurnInput(prompt, skills),
       });
 
@@ -628,10 +801,10 @@ export async function createCodexSession(
       return result.reviewText;
     },
 
-    async runPrompt(prompt: string): Promise<string> {
+    async runPrompt(prompt: string, step: ThinkingStep = "execution"): Promise<string> {
       const result = await client.runTurn({
         threadId,
-        effort: getEffort(config, "execution"),
+        effort: getEffort(config, step),
         input: buildTurnInput(prompt, skills),
       });
 
