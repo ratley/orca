@@ -52,11 +52,17 @@ Run states: `planning` → `running` → `completed` | `failed` | `cancelled` | 
 
 ### Answering questions
 
-If a run hits `waiting_for_answer`, it's blocked until you respond:
+If a run hits `waiting_for_answer`, execution pauses until a response is submitted to the live run:
 
 ```bash
 orca status --last                          # read the question
-orca answer <run-id> "yes, use migration A"  # answer and resume the live run
+orca answer <run-id> "yes, use migration A"  # answer and resume the same run
+```
+
+For multi-question prompts, pass JSON mapping question IDs to answers:
+
+```bash
+orca answer <run-id> '{"answers":{"q1":{"answers":["yes"]},"q2":{"answers":["option-a"]}}}'
 ```
 
 ### Spec / plan files
@@ -104,7 +110,7 @@ Orca loads config in this order (later overrides earlier):
 
 `.ts` is preferred over `.js` when both exist.
 
-Stale executor values from older configs are ignored and coerced to `codex`. Orca no longer supports alternate executors.
+Orca is Codex-only. Stale executor values from older configs are coerced to `codex`.
 
 ```ts
 // orca.config.ts
@@ -176,11 +182,11 @@ After planning, Orca runs a pre-execution review that can edit the task graph (a
 
 After execution, Orca runs validation commands and asks Codex to review findings. With `onFindings: "auto_fix"`, it applies fixes and retries up to `maxCycles` times, then reports. Set `ORCA_SKIP_VALIDATORS=1` to skip validator auto-detection at runtime.
 
-Use `codex.thinkingLevel` when you want different reasoning levels for different stages instead of a single global `codex.effort`.
+Use `codex.thinkingLevel` when you want per-step reasoning levels instead of a single global `codex.effort`. Supported steps: `decision`, `planning`, `review`, `execution`.
 
 ### Multi-agent mode
 
-Set `codex.multiAgent: true` to spawn parallel Codex agents per task. Faster for large refactors with independent subtasks; higher token cost. **Note:** this writes `multi_agent = true` to your global `~/.codex/config.toml`.
+Set `codex.multiAgent: true` to enable multi-agent-aware prompt guidance. Orca's task runner stays sequential, but Codex can use subagents inside a task turn when work is independent. **Note:** this writes `multi_agent = true` to your global `~/.codex/config.toml`.
 
 If `~/.codex/config.toml` already enables `[features].multi_agent = true`, Orca also treats the run as multi-agent-aware for planning, review, consultation, and execution prompts even when `codex.multiAgent` is not set in Orca config.
 
@@ -228,14 +234,15 @@ orca setup                               Interactive setup wizard
 
 **Key flags for `orca` (run):**
 
-- `--codex-only` — force Codex executor
-- `--codex-effort <low|medium|high>` — override effort for this run
+- `--codex-only` — compatibility flag; executor is already Codex-only
+- `--codex-effort <low|medium|high|xhigh>` — override effort for this run
 - `--config <path>` — explicit config file
+- `--on-question <cmd>` — command hook when Codex requests user input
 - `--on-complete <cmd>`, `--on-error <cmd>`, `--on-task-complete <cmd>`, `--on-findings <cmd>`, etc.
 
 **Key flags for `orca resume`:**
 
-- `--codex-only`, `--codex-effort <low|medium|high>`, `--config <path>`, `--run <id>`, `--last`
+- `--codex-only`, `--codex-effort <low|medium|high|xhigh>`, `--config <path>`, `--run <id>`, `--last`
 
 **`orca setup` flags:**
 
@@ -251,6 +258,7 @@ Available hook names: `onMilestone`, `onQuestion`, `onTaskComplete`, `onTaskFail
 
 - Function hooks (`config.hooks`): receive `(event, context)` where `context = { cwd, pid, invokedAt }`
 - Command hooks (`config.hookCommands` / `--on-*` flags): receive full event JSON over stdin
+- `onQuestion` includes request metadata (`requestId`, `threadId`, `turnId`, `itemId`) and `questions[]`
 - Unknown hook keys in config are rejected at load time
 
 ### Run ID format
