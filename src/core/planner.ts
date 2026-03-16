@@ -1,8 +1,13 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import { decidePlanningNeed as decidePlanningNeedWithCodex, planSpec as planSpecWithCodex, reviewTaskGraph as reviewTaskGraphWithCodex } from "../agents/codex/session.js";
-import type { OrcaConfig, Task, TaskGraphReviewResult } from "../types/index.js";
+import {
+  decidePlanningNeed as decidePlanningNeedWithCodex,
+  planSpec as planSpecWithCodex,
+  reviewTaskGraph as reviewTaskGraphWithCodex,
+  type SessionInteractionContext,
+} from "../agents/codex/session.js";
+import type { HookEvent, OrcaConfig, Task, TaskGraphReviewResult } from "../types/index.js";
 import { logger } from "../utils/logger.js";
 import { loadSkills, type LoadedSkill } from "../utils/skill-loader.js";
 import { RunStore } from "../state/store.js";
@@ -177,6 +182,7 @@ async function runTaskGraphReview(
   tasks: Task[],
   systemContext: string,
   config: OrcaConfig | undefined,
+  interactionContext?: SessionInteractionContext,
 ): Promise<{ finalTasks: Task[]; review: TaskGraphReviewResult | null }> {
   const planReviewConfig = getPlanReviewConfig(config);
   if (!planReviewConfig.enabled) {
@@ -188,7 +194,7 @@ async function runTaskGraphReview(
   const reviewFn = resolveReviewTaskGraphImpl(config);
   let review: TaskGraphReviewResult;
   try {
-    review = await reviewFn(tasks, systemContext, config);
+    review = await reviewFn(tasks, systemContext, config, interactionContext);
   } catch (error) {
     if (planReviewConfig.onInvalid === "warn_skip") {
       logger.warn(`Review output invalid; skipping review changes (${error instanceof Error ? error.message : String(error)})`);
@@ -218,6 +224,7 @@ async function runTaskGraphReview(
 
 type PlannerOptions = {
   allowPlanSkip?: boolean;
+  emitHook?: (event: HookEvent) => Promise<void>;
 };
 
 function buildSingleExecutionTask(spec: string): Task[] {
@@ -236,9 +243,14 @@ function buildSingleExecutionTask(spec: string): Task[] {
   ];
 }
 
-async function runFullPlanning(spec: string, systemContext: string, config?: OrcaConfig): Promise<Task[]> {
+async function runFullPlanning(
+  spec: string,
+  systemContext: string,
+  config?: OrcaConfig,
+  interactionContext?: SessionInteractionContext,
+): Promise<Task[]> {
   const planSpecImpl = resolvePlanSpecImpl(config);
-  const result = await planSpecImpl(spec, systemContext, config);
+  const result = await planSpecImpl(spec, systemContext, config, interactionContext);
 
   try {
     validateDAG(result.tasks);
@@ -249,7 +261,7 @@ async function runFullPlanning(spec: string, systemContext: string, config?: Orc
   const planReviewConfig = getPlanReviewConfig(config);
   let finalTasks = result.tasks;
   try {
-    const reviewed = await runTaskGraphReview(result.tasks, systemContext, config);
+    const reviewed = await runTaskGraphReview(result.tasks, systemContext, config, interactionContext);
     finalTasks = reviewed.finalTasks;
   } catch (error) {
     if (planReviewConfig.onInvalid === "warn_skip") {
@@ -275,21 +287,26 @@ export async function runPlanner(
   const spec = await fs.readFile(specPath, "utf8");
   const [skills, instructions] = await Promise.all([loadSkills(config), loadProjectInstructions(specPath)]);
   const systemContext = buildSystemContext(skills, instructions);
+  const interactiveContext = {
+    runId: runId as HookEvent["runId"],
+    store,
+    ...(options?.emitHook ? { emitHook: options.emitHook } : {}),
+  };
 
   let finalTasks: Task[];
 
   if (options?.allowPlanSkip === true) {
     const decidePlanningNeed = resolveDecidePlanningNeedImpl(config);
-    const decision = await decidePlanningNeed(spec, systemContext, config);
+    const decision = await decidePlanningNeed(spec, systemContext, config, interactiveContext);
     if (!decision.needsPlan) {
       logger.info(`Planning skipped: ${decision.reason}`);
       finalTasks = buildSingleExecutionTask(spec);
     } else {
       logger.info(`Planning required: ${decision.reason}`);
-      finalTasks = await runFullPlanning(spec, systemContext, config);
+      finalTasks = await runFullPlanning(spec, systemContext, config, interactiveContext);
     }
   } else {
-    finalTasks = await runFullPlanning(spec, systemContext, config);
+    finalTasks = await runFullPlanning(spec, systemContext, config, interactiveContext);
   }
 
   await store.writeTasks(runId, finalTasks);

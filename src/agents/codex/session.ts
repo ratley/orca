@@ -1,19 +1,32 @@
-import { readFile } from "node:fs/promises";
+import { readFile, unlink } from "node:fs/promises";
 import path from "node:path";
 
 import { CodexClient } from "@ratley/codex-client";
-import type { CompletedTurn } from "@ratley/codex-client";
+import type {
+  CompletedTurn,
+  RequestId,
+  ToolRequestUserInputParams,
+  ToolRequestUserInputResponse,
+} from "@ratley/codex-client";
 
 import type {
+  HookEvent,
   OrcaConfig,
   PlanResult,
+  RunId,
   Task,
   TaskExecutionResult,
   TaskGraphReviewOperation,
   TaskGraphReviewResult
 } from "../../types/index.js";
 import { isCodexMultiAgentActive } from "../../core/codex-config.js";
+import {
+  buildQuestionHookMessage,
+  createPendingQuestion,
+  parseQuestionAnswerInput,
+} from "../../core/question-flow.js";
 import { TaskGraphReviewPayloadSchema } from "../../core/task-graph-review.js";
+import { RunStore } from "../../state/store.js";
 import type { CodexEffort } from "../../types/effort.js";
 import { loadSkills, type LoadedSkill } from "../../utils/skill-loader.js";
 import { logger } from "../../utils/logger.js";
@@ -360,6 +373,8 @@ const DEFAULT_THINKING_BY_STEP: Record<ThinkingStep, CodexEffort> = {
   execution: "medium",
 };
 
+const ANSWER_FILE_POLL_MS = 500;
+
 function getEffort(config: OrcaConfig | undefined, step: ThinkingStep): CodexEffort {
   const explicitThinkingLevel = config?.codex?.thinkingLevel?.[step];
   if (explicitThinkingLevel !== undefined) {
@@ -640,6 +655,39 @@ async function warnAboutUnavailableMcpServers(client: CodexClient): Promise<void
   );
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function appendRunError(
+  store: RunStore,
+  runId: RunId,
+  message: string,
+  taskId?: string,
+): Promise<void> {
+  const run = await store.getRun(runId);
+  if (!run) {
+    return;
+  }
+
+  await store.updateRun(runId, {
+    errors: [...run.errors, { at: new Date().toISOString(), message, ...(taskId ? { taskId } : {}) }],
+  });
+}
+
+async function clearAnswerFile(store: RunStore, runId: RunId): Promise<void> {
+  const answerPath = path.join(store.getRunDir(runId), "answer.txt");
+  await unlink(answerPath).catch(() => undefined);
+}
+
+export interface SessionInteractionContext {
+  runId: RunId;
+  store: RunStore;
+  emitHook?: (event: HookEvent) => Promise<void>;
+}
+
 /**
  * Create a persistent Codex session. The thread persists across calls —
  * planSpec and executeTask share context within the same session.
@@ -652,6 +700,7 @@ export interface ConsultationResult {
 export async function createCodexSession(
   cwd: string,
   config?: OrcaConfig,
+  interactionContext?: SessionInteractionContext,
 ): Promise<{
   decidePlanningNeed: (spec: string, systemContext: string) => Promise<PlanNeedDecision>;
   planSpec: (spec: string, systemContext: string) => Promise<PlanResult>;
@@ -677,6 +726,152 @@ export async function createCodexSession(
   attachCodexStderrDiagnostics(client, codexPath);
   await client.connect();
   await warnAboutUnavailableMcpServers(client);
+
+  let activeTaskContext: { taskId: string; taskName: string } | undefined;
+
+  const respondToUserInputRequest = (requestId: RequestId, response: ToolRequestUserInputResponse): void => {
+    const specificResponder = Reflect.get(client as object, "respondToUserInputRequest");
+    if (typeof specificResponder === "function") {
+      specificResponder.call(client, requestId, response);
+      return;
+    }
+
+    const genericResponder = Reflect.get(client as object, "respondToServerRequest");
+    if (typeof genericResponder === "function") {
+      genericResponder.call(client, requestId, response);
+      return;
+    }
+
+    throw new Error("Codex client does not support responding to server requests");
+  };
+
+  const rejectUserInputRequest = (requestId: RequestId, message: string): void => {
+    const rejector = Reflect.get(client as object, "rejectServerRequest");
+    if (typeof rejector === "function") {
+      rejector.call(client, requestId, { code: -32603, message });
+      return;
+    }
+
+    throw new Error("Codex client does not support rejecting server requests");
+  };
+
+  const clearPendingQuestion = async (requestId: RequestId, overallStatus: "running" | "waiting_for_answer"): Promise<void> => {
+    if (!interactionContext) {
+      return;
+    }
+
+    const currentRun = await interactionContext.store.getRun(interactionContext.runId);
+    if (!currentRun || currentRun.pendingQuestion?.requestId !== requestId) {
+      return;
+    }
+
+    await interactionContext.store.updateRun(interactionContext.runId, {
+      overallStatus,
+      pendingQuestion: undefined,
+    });
+  };
+
+  const on = Reflect.get(client as object, "on");
+  if (typeof on === "function") {
+    on.call(
+      client,
+      "request:userInput",
+      (request: { requestId: RequestId } & ToolRequestUserInputParams) => {
+        void (async () => {
+          if (!interactionContext) {
+            rejectUserInputRequest(
+              request.requestId,
+              "Orca cannot answer Codex requestUserInput prompts without an interactive run context.",
+            );
+            return;
+          }
+
+          const pendingQuestion = createPendingQuestion(request.requestId, request);
+          await clearAnswerFile(interactionContext.store, interactionContext.runId);
+          await interactionContext.store.updateRun(interactionContext.runId, {
+            overallStatus: "waiting_for_answer",
+            pendingQuestion,
+          });
+
+          if (interactionContext.emitHook) {
+            await interactionContext.emitHook({
+              runId: interactionContext.runId,
+              hook: "onQuestion",
+              message: buildQuestionHookMessage(pendingQuestion),
+              timestamp: pendingQuestion.receivedAt,
+              requestId: pendingQuestion.requestId,
+              threadId: pendingQuestion.threadId,
+              turnId: pendingQuestion.turnId,
+              itemId: pendingQuestion.itemId,
+              questions: pendingQuestion.questions,
+              ...(activeTaskContext
+                ? { taskId: activeTaskContext.taskId, taskName: activeTaskContext.taskName }
+                : {}),
+              metadata: {
+                questionCount: pendingQuestion.questions.length,
+              },
+            });
+          }
+
+          const answerPath = path.join(interactionContext.store.getRunDir(interactionContext.runId), "answer.txt");
+
+          while (true) {
+            const currentRun = await interactionContext.store.getRun(interactionContext.runId);
+            if (!currentRun) {
+              rejectUserInputRequest(request.requestId, `Run not found while waiting for answer: ${interactionContext.runId}`);
+              return;
+            }
+
+            if (currentRun.overallStatus === "cancelled") {
+              rejectUserInputRequest(request.requestId, `Run ${interactionContext.runId} was cancelled while waiting for input.`);
+              await clearPendingQuestion(request.requestId, "waiting_for_answer");
+              return;
+            }
+
+            let rawAnswer: string;
+            try {
+              rawAnswer = await readFile(answerPath, "utf8");
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+                await sleep(ANSWER_FILE_POLL_MS);
+                continue;
+              }
+
+              throw error;
+            }
+
+            try {
+              const parsedAnswer = parseQuestionAnswerInput(rawAnswer, pendingQuestion);
+              respondToUserInputRequest(request.requestId, parsedAnswer);
+              await clearAnswerFile(interactionContext.store, interactionContext.runId);
+              await clearPendingQuestion(request.requestId, "running");
+              return;
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              logger.warn(`Invalid answer for run ${interactionContext.runId}; waiting for another response (${message})`);
+              await appendRunError(
+                interactionContext.store,
+                interactionContext.runId,
+                `invalid-answer: ${message}`,
+                activeTaskContext?.taskId,
+              );
+              await clearAnswerFile(interactionContext.store, interactionContext.runId);
+            }
+          }
+        })().catch(async (error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          logger.warn(`Failed while handling Codex requestUserInput: ${message}`);
+          if (interactionContext) {
+            await appendRunError(interactionContext.store, interactionContext.runId, `request-user-input-failed: ${message}`, activeTaskContext?.taskId);
+          }
+        });
+      },
+    );
+
+    on.call(client, "serverRequest:resolved", (notification: { requestId: RequestId }) => {
+      void clearPendingQuestion(notification.requestId, "running");
+    });
+  }
 
   let skills: LoadedSkill[];
   let threadId: string;
@@ -737,11 +932,17 @@ export async function createCodexSession(
       runId: string,
       systemContext?: string,
     ): Promise<TaskExecutionResult> {
-      const result = await client.runTurn({
-        threadId,
-        effort: getEffort(config, "execution"),
-        input: buildTurnInput(buildTaskExecutionPrompt(task, runId, cwd, systemContext, multiAgentActive), skills),
-      });
+      activeTaskContext = { taskId: task.id, taskName: task.name };
+      let result: CompletedTurn;
+      try {
+        result = await client.runTurn({
+          threadId,
+          effort: getEffort(config, "execution"),
+          input: buildTurnInput(buildTaskExecutionPrompt(task, runId, cwd, systemContext, multiAgentActive), skills),
+        });
+      } finally {
+        activeTaskContext = undefined;
+      }
 
       const rawResponse = extractAgentText(result);
 
@@ -826,8 +1027,9 @@ export async function decidePlanningNeed(
   spec: string,
   systemContext: string,
   config?: OrcaConfig,
+  interactionContext?: SessionInteractionContext,
 ): Promise<PlanNeedDecision> {
-  const session = await createCodexSession(process.cwd(), config);
+  const session = await createCodexSession(process.cwd(), config, interactionContext);
 
   try {
     return await session.decidePlanningNeed(spec, systemContext);
@@ -840,8 +1042,9 @@ export async function planSpec(
   spec: string,
   systemContext: string,
   config?: OrcaConfig,
+  interactionContext?: SessionInteractionContext,
 ): Promise<PlanResult> {
-  const session = await createCodexSession(process.cwd(), config);
+  const session = await createCodexSession(process.cwd(), config, interactionContext);
 
   try {
     return await session.planSpec(spec, systemContext);
@@ -854,8 +1057,9 @@ export async function reviewTaskGraph(
   tasks: Task[],
   systemContext: string,
   config?: OrcaConfig,
+  interactionContext?: SessionInteractionContext,
 ): Promise<TaskGraphReviewResult> {
-  const session = await createCodexSession(process.cwd(), config);
+  const session = await createCodexSession(process.cwd(), config, interactionContext);
 
   try {
     return await session.reviewTaskGraph(tasks, systemContext);
@@ -869,8 +1073,9 @@ export async function executeTask(
   runId: string,
   config?: OrcaConfig,
   systemContext?: string,
+  interactionContext?: SessionInteractionContext,
 ): Promise<TaskExecutionResult> {
-  const session = await createCodexSession(process.cwd(), config);
+  const session = await createCodexSession(process.cwd(), config, interactionContext);
 
   try {
     return await session.executeTask(task, runId, systemContext);

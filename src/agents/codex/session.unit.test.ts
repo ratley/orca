@@ -1,11 +1,29 @@
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { EventEmitter } from "node:events";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, mock, test } from "bun:test";
 
+import { RunStore } from "../../state/store.js";
+
 afterEach(() => {
   mock.restore();
 });
+
+async function waitFor<T>(load: () => Promise<T | null>, timeoutMs = 2_000): Promise<T> {
+  const start = Date.now();
+
+  while (Date.now() - start < timeoutMs) {
+    const value = await load();
+    if (value !== null) {
+      return value;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+
+  throw new Error(`Timed out after ${timeoutMs}ms`);
+}
 
 function mockMultiAgentDetection(active = false): void {
   mock.module("../../core/codex-config.js", () => ({
@@ -696,6 +714,165 @@ describe("codex session inline skill context", () => {
       }
     } finally {
       await session.disconnect();
+    }
+  });
+});
+
+describe("codex session question flow", () => {
+  test("persists pending questions, emits onQuestion, and resumes the same run after an answer", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-question-flow-"));
+    const store = new RunStore(path.join(tempDir, "runs"));
+    const runId = "run-1000-abcd";
+    await store.createRun(runId, "/tmp/spec.md");
+    await store.updateRun(runId, { mode: "run", overallStatus: "running" });
+
+    const hookEvents: Array<{ hook: string; message: string; taskId?: string; questions?: Array<{ id: string }> }> = [];
+    const responses: Array<{ requestId: string | number; response: unknown }> = [];
+    let resolveAnswerResponse: (() => void) | undefined;
+    const answerResponse = new Promise<void>((resolve) => {
+      resolveAnswerResponse = resolve;
+    });
+    let clientInstance: EventEmitter | null = null;
+
+    try {
+      mockMultiAgentDetection(false);
+      mock.module("@ratley/codex-client", () => ({
+        CodexClient: class extends EventEmitter {
+          constructor() {
+            super();
+            clientInstance = this;
+          }
+
+          async connect(): Promise<void> {}
+          async disconnect(): Promise<void> {}
+          async startThread(): Promise<{ id: string }> {
+            return { id: "thread-1" };
+          }
+          async runReview(): Promise<{ reviewText: string }> {
+            return { reviewText: "ok" };
+          }
+          respondToUserInputRequest(requestId: string | number, response: unknown): void {
+            responses.push({ requestId, response });
+            resolveAnswerResponse?.();
+          }
+          rejectServerRequest(): void {}
+          async runTurn(): Promise<{ agentMessage: string; turn: { status: "completed" }; items: [] }> {
+            queueMicrotask(() => {
+              clientInstance?.emit("request:userInput", {
+                requestId: "req-1",
+                itemId: "item-1",
+                threadId: "thread-1",
+                turnId: "turn-1",
+                questions: [
+                  {
+                    header: "Game Type",
+                    id: "game_type",
+                    question: "Which game type should I build?",
+                    isOther: true,
+                    isSecret: false,
+                    options: [
+                      { label: "Arcade", description: "Arcade style" },
+                      { label: "Puzzle", description: "Puzzle style" },
+                    ],
+                  },
+                ],
+              });
+            });
+
+            await answerResponse;
+            clientInstance?.emit("serverRequest:resolved", { requestId: "req-1" });
+
+            return {
+              agentMessage: '{"outcome":"done"}',
+              turn: { status: "completed" },
+              items: [],
+            };
+          }
+        },
+      }));
+
+      mock.module("../../utils/skill-loader.js", () => ({
+        loadSkills: async () => [],
+      }));
+
+      const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
+      const session = await createCodexSession(process.cwd(), undefined, {
+        runId: runId as `${string}-${number}-${string}`,
+        store,
+        emitHook: async (event) => {
+          hookEvents.push({
+            hook: event.hook,
+            message: event.message,
+            ...(event.taskId ? { taskId: event.taskId } : {}),
+            ...("questions" in event ? { questions: event.questions.map((question) => ({ id: question.id })) } : {}),
+          });
+        },
+      });
+
+      try {
+        const executionPromise = session.executeTask(
+          {
+            id: "task-1",
+            name: "Build the game",
+            description: "Implement the requested game.",
+            dependencies: [],
+            acceptance_criteria: ["Game is implemented"],
+            status: "pending",
+            retries: 0,
+            maxRetries: 3,
+          },
+          runId,
+          "context",
+        );
+
+        const waitingRun = await waitFor(async () => {
+          const run = await store.getRun(runId);
+          return run?.pendingQuestion ? run : null;
+        });
+
+        expect(waitingRun.overallStatus).toBe("waiting_for_answer");
+        expect(waitingRun.pendingQuestion?.requestId).toBe("req-1");
+        expect(waitingRun.pendingQuestion?.questions[0]?.id).toBe("game_type");
+        expect(hookEvents).toContainEqual({
+          hook: "onQuestion",
+          message: "Which game type should I build?",
+          taskId: "task-1",
+          questions: [{ id: "game_type" }],
+        });
+
+        const answerPath = path.join(store.getRunDir(runId), "answer.txt");
+        await writeFile(
+          answerPath,
+          `${JSON.stringify({ answers: { game_type: { answers: ["Arcade"] } } })}\n`,
+          "utf8",
+        );
+
+        const result = await executionPromise;
+        expect(result.outcome).toBe("done");
+        expect(responses).toEqual([
+          {
+            requestId: "req-1",
+            response: {
+              answers: {
+                game_type: {
+                  answers: ["Arcade"],
+                },
+              },
+            },
+          },
+        ]);
+
+        const resumedRun = await waitFor(async () => {
+          const run = await store.getRun(runId);
+          return run && run.pendingQuestion === undefined ? run : null;
+        });
+        expect(resumedRun.overallStatus).toBe("running");
+        await expect(readFile(answerPath, "utf8")).rejects.toThrow();
+      } finally {
+        await session.disconnect();
+      }
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
     }
   });
 });

@@ -4,7 +4,9 @@ import { promises as fs } from "node:fs";
 import { input } from "@inquirer/prompts";
 import type { Command } from "commander";
 
+import { parseQuestionAnswerInput, serializeQuestionAnswerResponse } from "../../core/question-flow.js";
 import { RunStore } from "../../state/store.js";
+import type { PendingQuestion } from "../../types/index.js";
 import { selectRun } from "../../utils/select-run.js";
 
 export interface AnswerCommandOptions {
@@ -24,7 +26,17 @@ function resolveRunId(positionalRunId: string | undefined, optionRunId: string |
   return positionalRunId ?? optionRunId;
 }
 
-async function resolveAnswer(answerArg: string | undefined): Promise<string> {
+function formatQuestionPrompt(question: PendingQuestion["questions"][number]): string {
+  const options = question.options && question.options.length > 0
+    ? ` Options: ${question.options.map((option) => option.label).join(", ")}.`
+    : "";
+  return `${question.header}: ${question.question}${options}`;
+}
+
+async function resolveAnswerPayload(
+  pendingQuestion: PendingQuestion | undefined,
+  answerArg: string | undefined,
+): Promise<string> {
   if (answerArg) {
     return answerArg;
   }
@@ -33,12 +45,26 @@ async function resolveAnswer(answerArg: string | undefined): Promise<string> {
     throw new Error("no answer provided");
   }
 
-  const value = await input({ message: "Answer:" });
-  if (!value) {
-    throw new Error("no answer provided");
+  if (!pendingQuestion || pendingQuestion.questions.length === 0) {
+    const value = await input({ message: "Answer:" });
+    if (!value) {
+      throw new Error("no answer provided");
+    }
+
+    return value;
   }
 
-  return value;
+  const answers: Record<string, { answers: string[] }> = {};
+  for (const question of pendingQuestion.questions) {
+    const value = await input({ message: formatQuestionPrompt(question) });
+    if (!value) {
+      throw new Error(`no answer provided for question '${question.id}'`);
+    }
+
+    answers[question.id] = { answers: [value] };
+  }
+
+  return JSON.stringify({ answers });
 }
 
 export async function answerCommandHandler(
@@ -75,12 +101,14 @@ export async function answerCommandHandler(
     return;
   }
 
-  const answer = await resolveAnswer(answerArg);
+  const answerPayload = await resolveAnswerPayload(run.pendingQuestion, answerArg);
+  const serialized = run.pendingQuestion
+    ? serializeQuestionAnswerResponse(parseQuestionAnswerInput(answerPayload, run.pendingQuestion))
+    : `${answerPayload}\n`;
   const answerPath = path.join(store.getRunDir(runId), "answer.txt");
   await fs.mkdir(path.dirname(answerPath), { recursive: true });
-  await fs.writeFile(answerPath, `${answer}\n`, "utf8");
+  await fs.writeFile(answerPath, serialized, "utf8");
 
-  await store.updateRun(runId, { overallStatus: "running" });
   console.log(`Answer submitted. Run ${runId} will resume shortly.`);
 }
 

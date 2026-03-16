@@ -9,6 +9,7 @@ import type { HookName, OrcaConfig } from "../types/index.js";
 
 const KNOWN_HOOK_NAMES: HookName[] = [
   "onMilestone",
+  "onQuestion",
   "onTaskComplete",
   "onTaskFail",
   "onInvalidPlan",

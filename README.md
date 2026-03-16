@@ -56,7 +56,7 @@ If a run hits `waiting_for_answer`, it's blocked until you respond:
 
 ```bash
 orca status --last                          # read the question
-orca answer <run-id> "yes, use migration A"  # unblock it
+orca answer <run-id> "yes, use migration A"  # answer and resume the live run
 ```
 
 ### Spec / plan files
@@ -247,7 +247,7 @@ orca setup                               Interactive setup wizard
 
 ### Hooks
 
-Available hook names: `onMilestone`, `onTaskComplete`, `onTaskFail`, `onInvalidPlan`, `onFindings`, `onComplete`, `onError`.
+Available hook names: `onMilestone`, `onQuestion`, `onTaskComplete`, `onTaskFail`, `onInvalidPlan`, `onFindings`, `onComplete`, `onError`.
 
 - Function hooks (`config.hooks`): receive `(event, context)` where `context = { cwd, pid, invokedAt }`
 - Command hooks (`config.hookCommands` / `--on-*` flags): receive full event JSON over stdin

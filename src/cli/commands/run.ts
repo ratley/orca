@@ -58,6 +58,7 @@ export interface RunCommandOptions {
   codexOnly?: boolean;
   codexEffort?: CodexEffort;
   onMilestone?: string;
+  onQuestion?: string;
   onTaskComplete?: string;
   onTaskFail?: string;
   onInvalidPlan?: string;
@@ -68,6 +69,7 @@ export interface RunCommandOptions {
 
 const ALL_HOOKS: HookName[] = [
   "onMilestone",
+  "onQuestion",
   "onTaskComplete",
   "onTaskFail",
   "onInvalidPlan",
@@ -77,6 +79,7 @@ const ALL_HOOKS: HookName[] = [
 ];
 const VALID_HOOK_NAMES = new Set<HookName>([
   "onMilestone",
+  "onQuestion",
   "onTaskComplete",
   "onTaskFail",
   "onInvalidPlan",
@@ -146,6 +149,7 @@ function computeFinalStatus(overallStatus: string, allTasksDone: boolean): "comp
 function buildCliCommandHooks(options: RunCommandOptions): Partial<Record<HookName, string>> {
   return {
     ...(options.onMilestone ? { onMilestone: options.onMilestone } : {}),
+    ...(options.onQuestion ? { onQuestion: options.onQuestion } : {}),
     ...(options.onTaskComplete ? { onTaskComplete: options.onTaskComplete } : {}),
     ...(options.onTaskFail ? { onTaskFail: options.onTaskFail } : {}),
     ...(options.onInvalidPlan ? { onInvalidPlan: options.onInvalidPlan } : {}),
@@ -440,7 +444,7 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
     };
 
     try {
-      await runPlanner(specPath, store, runId, effectiveConfig, { allowPlanSkip: true });
+      await runPlanner(specPath, store, runId, effectiveConfig, { allowPlanSkip: true, emitHook });
     } catch (error) {
       if (error instanceof InvalidPlanError) {
         await emitHook({
@@ -471,7 +475,11 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
         console.log(`Multi-agent: enabled (updated ${multiAgentResult.path})`);
       }
 
-      const codexSession = await createCodexSession(cwd, effectiveConfig);
+      const codexSession = await createCodexSession(cwd, effectiveConfig, {
+        runId: runId as HookEvent["runId"],
+        store,
+        emitHook,
+      });
 
       try {
         // Phase 4: Codex consults the task graph before execution begins.
@@ -498,7 +506,7 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
         console.log("Codex consultation passed. Starting execution...");
 
         await runTaskRunner({
-          runId,
+          runId: runId as HookEvent["runId"],
           store,
           ...(effectiveConfig ? { config: effectiveConfig } : {}),
           emitHook,
@@ -622,6 +630,7 @@ export function registerRunCommand(program: Command): void {
     .option("--codex-only", "Force Codex executor for this run (overrides config)")
     .option("--codex-effort <value>", "Codex thinking level override for this run", parseCodexEffortOption)
     .option("--on-milestone <cmd>", "Shell hook command for onMilestone")
+    .option("--on-question <cmd>", "Shell hook command for onQuestion")
     .option("--on-task-complete <cmd>", "Shell hook command for onTaskComplete")
     .option("--on-task-fail <cmd>", "Shell hook command for onTaskFail")
     .option("--on-invalid-plan <cmd>", "Shell hook command for onInvalidPlan")

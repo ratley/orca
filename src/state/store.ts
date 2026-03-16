@@ -103,7 +103,7 @@ export class RunStore {
   }
 
   private async writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
-    const tmpPath = `${filePath}.tmp`;
+    const tmpPath = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
     const payload = `${JSON.stringify(data, null, 2)}\n`;
 
     await fs.writeFile(tmpPath, payload, "utf8");

@@ -1,5 +1,6 @@
 import type { Command } from "commander";
 
+import { formatPendingQuestionForStatus } from "../../core/question-flow.js";
 import { RunStore } from "../../state/store.js";
 import type { RunStatus, Task } from "../../types/index.js";
 import { getLastRun } from "../../utils/last-run.js";
@@ -64,6 +65,12 @@ async function printDetailedRun(run: RunStatus): Promise<void> {
   console.log(`Updated: ${run.updatedAt}`);
   console.log(`Milestones: ${run.milestones.length}`);
   console.log(`Errors: ${run.errors.length}`);
+  if (run.pendingQuestion) {
+    console.log("");
+    for (const line of formatPendingQuestionForStatus(run.pendingQuestion)) {
+      console.log(line);
+    }
+  }
   console.log("");
   console.log("Tasks:");
   if (run.tasks.length === 0) {

@@ -34,6 +34,7 @@ function printStyledHelpPage(): void {
     { command: "orca status", description: "list all runs" },
     { command: "orca status --last", description: "show most recent run" },
     { command: "orca status --run <id>", description: "show run details" },
+    { command: "orca answer <run-id> <text>", description: "answer a waiting question" },
     { command: "orca resume --last", description: "resume most recent run" },
     { command: "orca resume --run <id>", description: "resume incomplete run" },
     { command: "orca cancel --run <id>", description: "cancel active run" }
@@ -59,6 +60,7 @@ function printStyledHelpPage(): void {
     { command: "--codex-effort <value>", description: "override Codex thinking level for the current run" },
     { command: "--full-auto", description: "skip all questions, proceed autonomously" },
     { command: "--on-complete <cmd>", description: "shell hook on run complete" },
+    { command: "--on-question <cmd>", description: "shell hook on question required" },
     { command: "--on-error <cmd>", description: "shell hook on run error" },
     { command: "-h, --help", description: "show help for any command" },
     { command: "-V, --version", description: "show version" }

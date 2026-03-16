@@ -28,6 +28,29 @@ const ErrorEntrySchema = z.object({
   taskId: z.string().optional()
 });
 
+const PendingQuestionOptionSchema = z.object({
+  label: z.string(),
+  description: z.string()
+});
+
+const PendingQuestionPromptSchema = z.object({
+  header: z.string(),
+  id: z.string(),
+  question: z.string(),
+  isOther: z.boolean(),
+  isSecret: z.boolean(),
+  options: z.array(PendingQuestionOptionSchema).nullable().optional()
+});
+
+const PendingQuestionSchema = z.object({
+  requestId: z.union([z.string(), z.number().int()]),
+  threadId: z.string(),
+  turnId: z.string(),
+  itemId: z.string(),
+  receivedAt: z.string(),
+  questions: z.array(PendingQuestionPromptSchema)
+});
+
 const PrStatusSchema = z.object({
   draftTitle: z.string().optional(),
   draftBody: z.string().optional(),
@@ -54,6 +77,7 @@ export const RunStatusSchema = z.object({
   tasks: z.array(TaskSchema),
   milestones: z.array(z.string()),
   errors: z.array(ErrorEntrySchema),
+  pendingQuestion: PendingQuestionSchema.optional(),
   pr: PrStatusSchema.optional()
 });
 

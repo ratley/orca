@@ -2,6 +2,10 @@ import { defineOrcaConfig } from "./index.js";
 
 defineOrcaConfig({
   hooks: {
+    onQuestion: async (event) => {
+      const questionId: string = event.questions[0]?.id ?? "";
+      void questionId;
+    },
     onTaskComplete: async (event, context) => {
       const taskId: string = event.taskId;
       const taskName: string = event.taskName;

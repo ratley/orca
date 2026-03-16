@@ -68,7 +68,7 @@ function hasPendingTasks(tasks: Task[]): boolean {
 }
 
 export interface TaskRunnerOptions {
-  runId: string;
+  runId: RunId;
   store: RunStore;
   config?: OrcaConfig;
   emitHook?: EmitHook;
@@ -153,7 +153,11 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
   if (mockFn) {
     executeTaskFn = mockFn;
   } else {
-    codexSession = await createCodexSession(process.cwd(), config);
+    codexSession = await createCodexSession(process.cwd(), config, {
+      runId,
+      store,
+      emitHook,
+    });
     executeTaskFn = (task, taskRunId, _cfg, systemContext) =>
       codexSession!.executeTask(task, taskRunId, systemContext);
   }

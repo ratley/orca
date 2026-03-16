@@ -48,6 +48,7 @@ export interface RunStatus {
   tasks: Task[];
   milestones: string[];
   errors: Array<{ at: string; message: string; taskId?: string }>;
+  pendingQuestion?: PendingQuestion | undefined;
   pr?: {
     draftTitle?: string;
     draftBody?: string;
@@ -55,6 +56,29 @@ export interface RunStatus {
     finalizedAt?: string;
     url?: string;
   };
+}
+
+export interface PendingQuestionOption {
+  label: string;
+  description: string;
+}
+
+export interface PendingQuestionPrompt {
+  header: string;
+  id: string;
+  question: string;
+  isOther: boolean;
+  isSecret: boolean;
+  options?: PendingQuestionOption[] | null;
+}
+
+export interface PendingQuestion {
+  requestId: string | number;
+  threadId: string;
+  turnId: string;
+  itemId: string;
+  receivedAt: string;
+  questions: PendingQuestionPrompt[];
 }
 
 export interface BaseHookEvent {
@@ -69,6 +93,14 @@ export interface BaseHookEvent {
 
 export interface HookEventMap {
   onMilestone: BaseHookEvent & { hook: "onMilestone" };
+  onQuestion: BaseHookEvent & {
+    hook: "onQuestion";
+    requestId: string | number;
+    threadId: string;
+    turnId: string;
+    itemId: string;
+    questions: PendingQuestionPrompt[];
+  };
   onTaskComplete: BaseHookEvent & { hook: "onTaskComplete"; taskId: string; taskName: string };
   onTaskFail: BaseHookEvent & { hook: "onTaskFail"; taskId: string; taskName: string; error: string };
   onInvalidPlan: BaseHookEvent & { hook: "onInvalidPlan"; error: string };
