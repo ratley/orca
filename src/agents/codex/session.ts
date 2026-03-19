@@ -755,7 +755,10 @@ export async function createCodexSession(
     throw new Error("Codex client does not support rejecting server requests");
   };
 
-  const clearPendingQuestion = async (requestId: RequestId, overallStatus: "running" | "waiting_for_answer"): Promise<void> => {
+  const clearPendingQuestion = async (
+    requestId: RequestId,
+    overallStatus?: "running" | "waiting_for_answer"
+  ): Promise<void> => {
     if (!interactionContext) {
       return;
     }
@@ -766,7 +769,7 @@ export async function createCodexSession(
     }
 
     await interactionContext.store.updateRun(interactionContext.runId, {
-      overallStatus,
+      ...(overallStatus ? { overallStatus } : {}),
       pendingQuestion: undefined,
     });
   };
@@ -824,7 +827,7 @@ export async function createCodexSession(
 
             if (currentRun.overallStatus === "cancelled") {
               rejectUserInputRequest(request.requestId, `Run ${interactionContext.runId} was cancelled while waiting for input.`);
-              await clearPendingQuestion(request.requestId, "waiting_for_answer");
+              await clearPendingQuestion(request.requestId);
               return;
             }
 

@@ -875,4 +875,134 @@ describe("codex session question flow", () => {
       await rm(tempDir, { recursive: true, force: true });
     }
   });
+
+  test("keeps a run cancelled when cancellation happens while waiting for input", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-question-flow-cancelled-"));
+    const store = new RunStore(path.join(tempDir, "runs"));
+    const runId = "run-1000-abcd";
+    await store.createRun(runId, "/tmp/spec.md");
+    await store.updateRun(runId, { mode: "run", overallStatus: "running" });
+
+    const rejectedRequests: Array<{ requestId: string | number; error: { code: number; message: string } }> = [];
+    let settleRequest: (() => void) | undefined;
+    const requestSettled = new Promise<void>((resolve) => {
+      settleRequest = resolve;
+    });
+    let clientInstance: EventEmitter | null = null;
+
+    try {
+      mockMultiAgentDetection(false);
+      mock.module("@ratley/codex-client", () => ({
+        CodexClient: class extends EventEmitter {
+          constructor() {
+            super();
+            clientInstance = this;
+          }
+
+          async connect(): Promise<void> {}
+          async disconnect(): Promise<void> {}
+          async startThread(): Promise<{ id: string }> {
+            return { id: "thread-1" };
+          }
+          async runReview(): Promise<{ reviewText: string }> {
+            return { reviewText: "ok" };
+          }
+          respondToUserInputRequest(): void {
+            throw new Error("request should be rejected when run is cancelled");
+          }
+          rejectServerRequest(requestId: string | number, error: { code: number; message: string }): void {
+            rejectedRequests.push({ requestId, error });
+            settleRequest?.();
+          }
+          async runTurn(): Promise<{ agentMessage: string; turn: { status: "completed" }; items: [] }> {
+            queueMicrotask(() => {
+              clientInstance?.emit("request:userInput", {
+                requestId: "req-1",
+                itemId: "item-1",
+                threadId: "thread-1",
+                turnId: "turn-1",
+                questions: [
+                  {
+                    header: "Game Type",
+                    id: "game_type",
+                    question: "Which game type should I build?",
+                    isOther: true,
+                    isSecret: false,
+                    options: [
+                      { label: "Arcade", description: "Arcade style" },
+                      { label: "Puzzle", description: "Puzzle style" },
+                    ],
+                  },
+                ],
+              });
+            });
+
+            await requestSettled;
+
+            return {
+              agentMessage: '{"outcome":"done"}',
+              turn: { status: "completed" },
+              items: [],
+            };
+          }
+        },
+      }));
+
+      mock.module("../../utils/skill-loader.js", () => ({
+        loadSkills: async () => [],
+      }));
+
+      const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
+      const session = await createCodexSession(process.cwd(), undefined, {
+        runId: runId as `${string}-${number}-${string}`,
+        store,
+      });
+
+      try {
+        const executionPromise = session.executeTask(
+          {
+            id: "task-1",
+            name: "Build the game",
+            description: "Implement the requested game.",
+            dependencies: [],
+            acceptance_criteria: ["Game is implemented"],
+            status: "pending",
+            retries: 0,
+            maxRetries: 3,
+          },
+          runId,
+          "context",
+        );
+
+        await waitFor(async () => {
+          const run = await store.getRun(runId);
+          return run?.pendingQuestion ? run : null;
+        });
+
+        await store.updateRun(runId, { overallStatus: "cancelled" });
+
+        await executionPromise;
+
+        const cancelledRun = await waitFor(async () => {
+          const run = await store.getRun(runId);
+          return run && run.pendingQuestion === undefined ? run : null;
+        });
+
+        expect(cancelledRun.overallStatus).toBe("cancelled");
+        expect(rejectedRequests).toEqual([
+          {
+            requestId: "req-1",
+            error: {
+              code: -32603,
+              message: `Run ${runId} was cancelled while waiting for input.`,
+            },
+          },
+        ]);
+      } finally {
+        await session.disconnect();
+      }
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
 });
