@@ -6,7 +6,7 @@
       "name": "orca",
       "dependencies": {
         "@inquirer/prompts": "^8.2.1",
-        "@ratley/codex-client": "^0.1.4",
+        "@ratley/codex-client": "^0.1.5",
         "chalk": "^5.3.0",
         "commander": "^13.1.0",
         "zod": "^4.3.6",
@@ -121,7 +121,7 @@
 
     "@publint/pack": ["@publint/pack@0.1.4", "", {}, "sha512-HDVTWq3H0uTXiU0eeSQntcVUTPP3GamzeXI41+x7uU9J65JgWQh3qWZHblR1i0npXfFtF+mxBiU2nJH8znxWnQ=="],
 
-    "@ratley/codex-client": ["@ratley/codex-client@0.1.4", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-lefQMXoR12cImkNnZiHN/MraDdxKzrwH5DZSft6cQJ1s+tIZllNyCBBD6dtGX8O+8uz19SL/NyyHbBIDUtlIlw=="],
+    "@ratley/codex-client": ["@ratley/codex-client@0.1.5", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-sYpKYpCXn//QZpKJyboWPCC1YuZrMBacKYmDBMyFRw3F59w4n1tec5n1yHRrfF19IBGsx5MtHevZjfu6tuEaXw=="],
 
     "@sindresorhus/is": ["@sindresorhus/is@4.6.0", "", {}, "sha512-t09vSN3MdfsyCHoFcTRCH/iUtG7OJ0CsjzB8cjAmKc/va/kIgeDI/TxsigdncE/4be734m0cvIYwNaV4i2XqAw=="],
 

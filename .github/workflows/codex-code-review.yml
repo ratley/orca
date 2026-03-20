@@ -1,0 +1,269 @@
+name: Codex Code Review
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+concurrency:
+  group: codex-structured-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  codex-structured-review:
+    name: Run Codex structured review
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GITHUB_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      REPOSITORY: ${{ github.repository }}
+      PR_TITLE: ${{ github.event.pull_request.title }}
+      PR_BODY: ${{ github.event.pull_request.body }}
+      CHECKOUT_DIR: repo-checkout
+      REVIEW_WORKSPACE: codex-review-workspace
+
+    steps:
+      - name: Checkout pull request merge commit
+        uses: actions/checkout@v5
+        with:
+          path: ${{ env.CHECKOUT_DIR }}
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge
+
+      - name: Fetch base and head refs
+        run: |
+          set -euxo pipefail
+          git -C "${CHECKOUT_DIR}" fetch --no-tags origin \
+            "${{ github.event.pull_request.base.ref }}" \
+            +refs/pull/${{ github.event.pull_request.number }}/head
+
+      - name: Prepare isolated review workspace
+        run: |
+          set -euo pipefail
+          rm -rf "${REVIEW_WORKSPACE}"
+          mkdir -p "${REVIEW_WORKSPACE}/.github/tmp"
+          python3 <<'PY'
+          import os
+          import pathlib
+          import shutil
+          import subprocess
+
+          checkout = pathlib.Path(os.environ["CHECKOUT_DIR"]).resolve()
+          workspace = pathlib.Path(os.environ["REVIEW_WORKSPACE"]).resolve()
+
+          def copy_file(rel_path: str) -> None:
+              src = checkout / rel_path
+              if not src.exists():
+                  return
+              dest = workspace / rel_path
+              dest.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(src, dest)
+
+          required_files = [
+              "README.md",
+              "SKILL.md",
+              "docs/PLAN.md",
+              "docs/codex-app-server.md",
+              "docs/codex-cli-reference.md",
+              ".orca/skills/code-simplifier/SKILL.md",
+          ]
+          for rel_path in required_files:
+              copy_file(rel_path)
+
+          changed_files = subprocess.run(
+              [
+                  "git",
+                  "-C",
+                  str(checkout),
+                  "diff",
+                  "--name-only",
+                  "--diff-filter=ACMR",
+                  os.environ["BASE_SHA"],
+                  os.environ["HEAD_SHA"],
+              ],
+              check=True,
+              capture_output=True,
+              text=True,
+          ).stdout.splitlines()
+
+          manifest = workspace / ".github" / "tmp" / "changed-files.txt"
+          manifest.write_text("\n".join(changed_files) + ("\n" if changed_files else ""))
+
+          for rel_path in changed_files:
+              copy_file(rel_path)
+          PY
+
+      - name: Generate structured output schema
+        run: |
+          set -euo pipefail
+          cat <<'JSON' > "${REVIEW_WORKSPACE}/codex-output-schema.json"
+          {
+            "type": "object",
+            "properties": {
+              "result": {
+                "type": "string",
+                "enum": ["NO_ISSUES", "HAS_FINDINGS"]
+              },
+              "comment_body": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["result", "comment_body"],
+            "additionalProperties": false
+          }
+          JSON
+
+      - name: Build Codex review prompt
+        run: |
+          set -euo pipefail
+          cat <<'PROMPT' > "${REVIEW_WORKSPACE}/codex-prompt.md"
+          REPO: ${REPOSITORY}
+          PR NUMBER: ${PR_NUMBER}
+
+          You are reviewing a PR for Orca, a TypeScript CLI that plans and executes task graphs through Codex.
+
+          REVIEW CONTEXT:
+          - Read `README.md` for the current public CLI/config surface.
+          - Read `SKILL.md` for project operating conventions and expected Orca behavior.
+          - Read `docs/PLAN.md` for architecture and run lifecycle expectations.
+          - If the diff touches Codex protocol, session, or config behavior, also read:
+            - `docs/codex-app-server.md`
+            - `docs/codex-cli-reference.md`
+          - `code-simplifier` is bundled for Orca, but this is still a correctness review, not a style review.
+
+          WORKSPACE SCOPE:
+          - The review workspace is intentionally isolated. It contains only:
+            1. required context files (`README.md`, `SKILL.md`, relevant docs, and bundled review skill context)
+            2. `.github/tmp/changed-files.txt`
+            3. the PR-changed files that still exist at HEAD
+          - Treat `.github/tmp/changed-files.txt` as the allowlist for code review targets.
+          - Do not raise findings against files that are not in the changed-files allowlist.
+          - If a deleted file matters, use the unified diff only. Do not go hunting through unrelated code.
+
+          SELF-REVIEW EXCLUSION:
+          - Ignore `.github/workflows/codex-code-review.yml` and the removed Claude review workflow file when reviewing this PR.
+
+          PR TITLE:
+          ${PR_TITLE}
+
+          PR BODY:
+          ${PR_BODY}
+
+          YOUR JOB: Find correctness bugs, regressions, and security/runtime breakage that will affect real Orca users.
+          NOT YOUR JOB: Style preferences, naming suggestions, speculative future improvements, or docs nitpicks.
+
+          RULES:
+          1. "No issues found" is a VALID and PREFERRED outcome. Most PRs by experienced engineers are correct. If you are hedging, delete the finding.
+          2. The diff is the source of truth, not the PR description. Review what changed, not what the description says should have changed.
+          3. Before including any finding, ask: "Would this break current Orca behavior, a documented CLI/config contract, or a real user workflow?" If no, do not include it.
+          4. Orca is Codex-only. Do not invent findings based on removed or unsupported Claude behavior.
+          5. For task-runner, state-store, question-flow, planning, review, and PR workflow changes, focus on observable run-state regressions, stuck states, lost updates, incorrect transitions, and broken CLI behavior.
+          6. For Codex session/app-server changes, focus on protocol mismatches, request/response handling, prompt/turn regressions, cancellation behavior, and failures caused by outdated or missing compatibility handling.
+          7. For config and docs changes, only flag issues when the docs/config surface is demonstrably inconsistent with the implemented behavior in the diff or with included source files. Do not nitpick wording.
+          8. Do not suggest tests unless the missing test is directly tied to a real bug or regression scenario in the changed code.
+          9. When you find a real issue, be specific: exact file:line references, the concrete failure scenario, and why the current code causes it.
+          10. Do not produce style-only findings such as extracting constants, renaming symbols, reorganizing helpers, or future-proofing abstractions.
+          11. FINAL SELF-CHECK: If a finding depends on "someone might add X later", "consider", "could be cleaner", or "the abstraction feels wrong", delete it.
+
+          SEVERITY LEVELS (only use these):
+          - CRITICAL: Production breakage, security issue, data loss, or a run-state/protocol bug that makes Orca unusable.
+          - BUG: Incorrect current behavior that users will hit.
+          - RISK: A concrete reproducible failure scenario with current inputs and callers.
+
+          You MUST return valid JSON matching the schema.
+          - result: "NO_ISSUES" or "HAS_FINDINGS"
+          - comment_body: a complete PR comment for humans. If issues are found, list findings by severity with file:line references. If no issues are found, write: "No issues found. [one sentence summary of what the PR does]."
+          PROMPT
+
+          {
+            echo ""
+            echo "Repository: ${REPOSITORY}"
+            echo "Pull Request #: ${PR_NUMBER}"
+            echo "Base SHA: ${BASE_SHA}"
+            echo "Head SHA: ${HEAD_SHA}"
+            echo ""
+            echo "Changed files allowlist:"
+            cat "${REVIEW_WORKSPACE}/.github/tmp/changed-files.txt"
+            echo ""
+            echo "Changed files:"
+            git -C "${CHECKOUT_DIR}" --no-pager diff --name-status "${BASE_SHA}" "${HEAD_SHA}"
+            echo ""
+            echo "Unified diff (context=5):"
+            git -C "${CHECKOUT_DIR}" --no-pager diff --unified=5 "${BASE_SHA}" "${HEAD_SHA}"
+          } >> "${REVIEW_WORKSPACE}/codex-prompt.md"
+
+      - name: Remove full checkout before review
+        run: |
+          set -euo pipefail
+          rm -rf "${CHECKOUT_DIR}"
+
+      - name: Run Codex structured review
+        id: run-codex
+        uses: openai/codex-action@main
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: ${{ env.REVIEW_WORKSPACE }}/codex-prompt.md
+          output-schema-file: ${{ env.REVIEW_WORKSPACE }}/codex-output-schema.json
+          output-file: ${{ env.REVIEW_WORKSPACE }}/codex-output.json
+          working-directory: ${{ env.REVIEW_WORKSPACE }}
+          sandbox: read-only
+          safety-strategy: unsafe
+          allow-bots: true
+          model: gpt-5.4-2026-03-05
+
+      - name: Inspect structured output
+        if: ${{ always() }}
+        run: |
+          if [ -s "${REVIEW_WORKSPACE}/codex-output.json" ]; then
+            jq '.' "${REVIEW_WORKSPACE}/codex-output.json"
+          else
+            echo "Codex output file missing"
+            exit 1
+          fi
+
+      - name: Publish review comment
+        if: ${{ steps.run-codex.outcome == 'success' }}
+        env:
+          REVIEW_JSON: ${{ env.REVIEW_WORKSPACE }}/codex-output.json
+        run: |
+          set -euo pipefail
+          comment_body=$(jq -r '.comment_body' "$REVIEW_JSON")
+
+          curl -sS \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${REPOSITORY}/issues/${PR_NUMBER}/comments" \
+            -d "$(jq -n --arg body "$comment_body" '{body: $body}')" >/dev/null
+
+      - name: Gate PR on Codex result
+        if: ${{ steps.run-codex.outcome == 'success' }}
+        env:
+          REVIEW_JSON: ${{ env.REVIEW_WORKSPACE }}/codex-output.json
+        run: |
+          set -euo pipefail
+          result=$(jq -r '.result' "$REVIEW_JSON")
+          if [ "$result" != "NO_ISSUES" ]; then
+            echo "Codex review gate failed: result=$result"
+            exit 1
+          fi
+          echo "Codex review gate passed: NO_ISSUES"
+
+      - name: Upload Codex artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-review-artifacts
+          path: |
+            ${{ env.REVIEW_WORKSPACE }}/codex-prompt.md
+            ${{ env.REVIEW_WORKSPACE }}/codex-output-schema.json
+            ${{ env.REVIEW_WORKSPACE }}/codex-output.json
+            ${{ env.REVIEW_WORKSPACE }}/.github/tmp/changed-files.txt
