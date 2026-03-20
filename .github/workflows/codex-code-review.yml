@@ -123,7 +123,7 @@ jobs:
       - name: Build Codex review prompt
         run: |
           set -euo pipefail
-          cat <<'PROMPT' > "${REVIEW_WORKSPACE}/codex-prompt.md"
+          cat <<PROMPT > "${REVIEW_WORKSPACE}/codex-prompt.md"
           REPO: ${REPOSITORY}
           PR NUMBER: ${PR_NUMBER}
 
@@ -206,7 +206,7 @@ jobs:
 
       - name: Run Codex structured review
         id: run-codex
-        uses: openai/codex-action@main
+        uses: openai/codex-action@v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           prompt-file: ${{ env.REVIEW_WORKSPACE }}/codex-prompt.md
@@ -214,7 +214,6 @@ jobs:
           output-file: ${{ env.REVIEW_WORKSPACE }}/codex-output.json
           working-directory: ${{ env.REVIEW_WORKSPACE }}
           sandbox: read-only
-          safety-strategy: unsafe
           allow-bots: true
           model: gpt-5.4-2026-03-05
 
