@@ -117,6 +117,61 @@ describe("codex session effort wiring", () => {
     }
   });
 
+  test("executeTask respects an assistant failure marker even when turn status is completed", async () => {
+    const runTurnMock = mock(async () => ({
+      agentMessage: '{"outcome":"failed","error":"missing dependency"}',
+      turn: { status: "completed" },
+      items: [],
+    }));
+
+    mockMultiAgentDetection(false);
+    mock.module("@ratley/codex-client", () => ({
+      CodexClient: class {
+        async connect(): Promise<void> {}
+        async disconnect(): Promise<void> {}
+        async startThread(): Promise<{ id: string }> {
+          return { id: "thread-1" };
+        }
+        runTurn = runTurnMock;
+        async runReview(): Promise<{ reviewText: string }> {
+          return { reviewText: "ok" };
+        }
+      },
+    }));
+
+    mock.module("../../utils/skill-loader.js", () => ({
+      loadSkills: async () => [],
+    }));
+
+    const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
+    const session = await createCodexSession(process.cwd());
+
+    try {
+      const result = await session.executeTask(
+        {
+          id: "t1",
+          name: "Task",
+          description: "Do thing",
+          dependencies: [],
+          acceptance_criteria: ["Done"],
+          status: "pending",
+          retries: 0,
+          maxRetries: 3,
+        },
+        "run-1",
+        "context",
+      );
+
+      expect(result).toEqual({
+        outcome: "failed",
+        error: "missing dependency",
+        rawResponse: '{"outcome":"failed","error":"missing dependency"}',
+      });
+    } finally {
+      await session.disconnect();
+    }
+  });
+
   test("smoke: uses per-step thinkingLevel values for decision/planning/review/execution turns", async () => {
     const efforts: string[] = [];
     const runTurnMock = mock(async (params: { effort?: string; input?: Array<{ text?: string }> }) => {
@@ -1380,6 +1435,125 @@ describe("codex session question flow", () => {
         await expect(readFile(path.join(store.getRunDir(runId), "answer.txt"), "utf8")).rejects.toThrow();
       } finally {
         sessionModule.setSecretAnswerChannelFactoryForTests(null);
+        await session.disconnect();
+      }
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("stops waiting when app-server resolves a user-input request before any answer is provided", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-question-flow-resolved-"));
+    const store = new RunStore(path.join(tempDir, "runs"));
+    const runId = "run-1000-abcd";
+    await store.createRun(runId, "/tmp/spec.md");
+    await store.updateRun(runId, { mode: "run", overallStatus: "running" });
+
+    const responses: Array<{ requestId: string | number; response: unknown }> = [];
+    let clientInstance: EventEmitter | null = null;
+
+    try {
+      mockMultiAgentDetection(false);
+      mock.module("@ratley/codex-client", () => ({
+        CodexClient: class extends EventEmitter {
+          constructor() {
+            super();
+            clientInstance = this;
+          }
+
+          async connect(): Promise<void> {}
+          async disconnect(): Promise<void> {}
+          async startThread(): Promise<{ id: string }> {
+            return { id: "thread-1" };
+          }
+          async runReview(): Promise<{ reviewText: string }> {
+            return { reviewText: "ok" };
+          }
+          respondToUserInputRequest(requestId: string | number, response: unknown): void {
+            responses.push({ requestId, response });
+          }
+          rejectServerRequest(): void {}
+          async runTurn(): Promise<{ agentMessage: string; turn: { status: "completed" }; items: [] }> {
+            queueMicrotask(() => {
+              clientInstance?.emit("request:userInput", {
+                requestId: "req-1",
+                itemId: "item-1",
+                threadId: "thread-1",
+                turnId: "turn-1",
+                questions: [
+                  {
+                    header: "Framework",
+                    id: "framework",
+                    question: "Which framework should I target?",
+                    isOther: true,
+                    isSecret: false,
+                    options: null,
+                  },
+                ],
+              });
+            });
+
+            queueMicrotask(() => {
+              setTimeout(() => {
+                clientInstance?.emit("serverRequest:resolved", { requestId: "req-1" });
+              }, 20);
+            });
+
+            return {
+              agentMessage: '{"outcome":"done"}',
+              turn: { status: "completed" },
+              items: [],
+            };
+          }
+        },
+      }));
+
+      mock.module("../../utils/skill-loader.js", () => ({
+        loadSkills: async () => [],
+      }));
+
+      const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
+      const session = await createCodexSession(process.cwd(), undefined, {
+        runId: runId as `${string}-${number}-${string}`,
+        store,
+        resumeOverallStatus: "running",
+      });
+
+      try {
+        const executionPromise = session.executeTask(
+          {
+            id: "task-1",
+            name: "Build the game",
+            description: "Implement the requested game.",
+            dependencies: [],
+            acceptance_criteria: ["Game is implemented"],
+            status: "pending",
+            retries: 0,
+            maxRetries: 3,
+          },
+          runId,
+          "context",
+        );
+
+        const waitingRun = await waitFor(async () => {
+          const run = await store.getRun(runId);
+          return run?.pendingQuestion ? run : null;
+        });
+
+        expect(waitingRun.overallStatus).toBe("waiting_for_answer");
+
+        const result = await executionPromise;
+        expect(result.outcome).toBe("done");
+        expect(responses).toEqual([]);
+
+        const resumedRun = await waitFor(async () => {
+          const run = await store.getRun(runId);
+          return run && run.pendingQuestion === undefined ? run : null;
+        });
+
+        expect(resumedRun.overallStatus).toBe("running");
+        await expect(readFile(path.join(store.getRunDir(runId), "answer.txt"), "utf8")).rejects.toThrow();
+      } finally {
         await session.disconnect();
       }
     } finally {

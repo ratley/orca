@@ -882,6 +882,7 @@ export async function createCodexSession(
   let activeTaskContext: { taskId: string; taskName: string } | undefined;
   let activeSecretAnswerChannel: SecretAnswerChannelState | undefined;
   const resumedOverallStatus: ResumeOverallStatus = interactionContext?.resumeOverallStatus ?? "running";
+  const resolvedServerRequests = new Set<RequestId>();
 
   const respondToUserInputRequest = (requestId: RequestId, response: ToolRequestUserInputResponse): void => {
     const specificResponder = Reflect.get(client as object, "respondToUserInputRequest");
@@ -1002,6 +1003,11 @@ export async function createCodexSession(
               return;
             }
 
+            if (resolvedServerRequests.delete(request.requestId)) {
+              await clearPendingQuestion(request.requestId, resumedOverallStatus);
+              return;
+            }
+
             let rawAnswer: string;
             if (secretAnswerChannel) {
               const submittedSecretAnswer = await Promise.race([
@@ -1056,6 +1062,7 @@ export async function createCodexSession(
     );
 
     on.call(client, "serverRequest:resolved", (notification: { requestId: RequestId }) => {
+      resolvedServerRequests.add(notification.requestId);
       void clearPendingQuestion(notification.requestId, resumedOverallStatus);
     });
   }
@@ -1132,25 +1139,20 @@ export async function createCodexSession(
       }
 
       const rawResponse = extractAgentText(result);
-
-      // Primary signal: use the SDK's structured turn status.
+      const parsedResult = parseTaskExecution(rawResponse);
       const status = result.turn.status;
-      if (status === "completed") {
-        return { outcome: "done", rawResponse };
-      }
       if (status === "failed") {
         return {
           outcome: "failed",
-          error: result.turn.error?.message ?? "Turn failed",
+          error: parsedResult.error ?? result.turn.error?.message ?? "Turn failed",
           rawResponse,
         };
       }
       if (status === "interrupted") {
-        return { outcome: "failed", error: "Turn was interrupted", rawResponse };
+        return { outcome: "failed", error: parsedResult.error ?? "Turn was interrupted", rawResponse };
       }
 
-      // Fallback: status is unexpected/missing — parse text as before.
-      return parseTaskExecution(rawResponse);
+      return parsedResult;
     },
 
     async consultTaskGraph(tasks: Task[]): Promise<ConsultationResult> {
