@@ -290,6 +290,7 @@ export async function runPlanner(
   const interactiveContext = {
     runId: runId as HookEvent["runId"],
     store,
+    resumeOverallStatus: "planning" as const,
     ...(options?.emitHook ? { emitHook: options.emitHook } : {}),
   };
 

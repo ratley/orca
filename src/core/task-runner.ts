@@ -156,6 +156,7 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
     codexSession = await createCodexSession(process.cwd(), config, {
       runId,
       store,
+      resumeOverallStatus: "running",
       emitHook,
     });
     executeTaskFn = (task, taskRunId, _cfg, systemContext) =>

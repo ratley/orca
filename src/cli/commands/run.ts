@@ -478,6 +478,7 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
       const codexSession = await createCodexSession(cwd, effectiveConfig, {
         runId: runId as HookEvent["runId"],
         store,
+        resumeOverallStatus: "running",
         emitHook,
       });
 

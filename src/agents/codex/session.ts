@@ -1,4 +1,7 @@
+import { randomUUID } from "node:crypto";
+import { createServer } from "node:net";
 import { readFile, unlink } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 import { CodexClient } from "@ratley/codex-client";
@@ -12,6 +15,7 @@ import type {
 import type {
   HookEvent,
   OrcaConfig,
+  PendingAnswerChannel,
   PlanResult,
   RunId,
   Task,
@@ -682,9 +686,127 @@ async function clearAnswerFile(store: RunStore, runId: RunId): Promise<void> {
   await unlink(answerPath).catch(() => undefined);
 }
 
+type ResumeOverallStatus = "planning" | "running";
+
+type SecretAnswerChannelState = {
+  requestId: RequestId;
+  descriptor: PendingAnswerChannel;
+  nextSubmission: () => Promise<string>;
+  close: () => Promise<void>;
+};
+
+type SecretAnswerChannelFactory = (requestId: RequestId) => Promise<SecretAnswerChannelState>;
+
+let testSecretAnswerChannelFactory: SecretAnswerChannelFactory | null = null;
+
+export function setSecretAnswerChannelFactoryForTests(factory: SecretAnswerChannelFactory | null): void {
+  testSecretAnswerChannelFactory = factory;
+}
+
+function hasSecretQuestions(params: ToolRequestUserInputParams | { questions: Array<{ isSecret?: boolean }> }): boolean {
+  return params.questions.some((question) => question.isSecret === true);
+}
+
+async function createSecretAnswerChannel(requestId: RequestId): Promise<SecretAnswerChannelState> {
+  if (testSecretAnswerChannelFactory) {
+    return await testSecretAnswerChannelFactory(requestId);
+  }
+
+  const token = randomUUID();
+  const socketPath = process.platform === "win32"
+    ? `\\\\.\\pipe\\orca-answer-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    : path.join(os.tmpdir(), `orca-answer-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.sock`);
+  const queuedAnswers: string[] = [];
+  const waitingResolvers: Array<(answer: string) => void> = [];
+  const server = createServer((socket) => {
+    socket.setEncoding("utf8");
+    let buffer = "";
+    let handled = false;
+
+    socket.on("data", (chunk) => {
+      buffer += chunk;
+      if (handled || !buffer.includes("\n")) {
+        return;
+      }
+
+      handled = true;
+      let response: { ok: boolean; error?: string } = { ok: true };
+
+      try {
+        const parsed = JSON.parse(buffer.trim()) as { token?: unknown; answer?: unknown };
+        if (parsed.token !== token) {
+          throw new Error("invalid secret answer token");
+        }
+        if (typeof parsed.answer !== "string" || parsed.answer.trim().length === 0) {
+          throw new Error("secret answer payload must include a non-empty answer string");
+        }
+
+        const resolver = waitingResolvers.shift();
+        if (resolver) {
+          resolver(parsed.answer);
+        } else {
+          queuedAnswers.push(parsed.answer);
+        }
+      } catch (error) {
+        response = {
+          ok: false as const,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+
+      socket.end(`${JSON.stringify(response)}\n`);
+    });
+
+    socket.on("error", () => {
+      socket.destroy();
+    });
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(socketPath, () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+
+  return {
+    requestId,
+    descriptor: {
+      transport: "ipc",
+      path: socketPath,
+      token,
+    },
+    nextSubmission: async () => {
+      const next = queuedAnswers.shift();
+      if (next !== undefined) {
+        return next;
+      }
+
+      return await new Promise<string>((resolve) => {
+        waitingResolvers.push(resolve);
+      });
+    },
+    close: async () => {
+      for (const resolve of waitingResolvers.splice(0)) {
+        resolve("");
+      }
+
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+      });
+
+      if (process.platform !== "win32") {
+        await unlink(socketPath).catch(() => undefined);
+      }
+    },
+  };
+}
+
 export interface SessionInteractionContext {
   runId: RunId;
   store: RunStore;
+  resumeOverallStatus?: ResumeOverallStatus;
   emitHook?: (event: HookEvent) => Promise<void>;
 }
 
@@ -728,6 +850,8 @@ export async function createCodexSession(
   await warnAboutUnavailableMcpServers(client);
 
   let activeTaskContext: { taskId: string; taskName: string } | undefined;
+  let activeSecretAnswerChannel: SecretAnswerChannelState | undefined;
+  const resumedOverallStatus: ResumeOverallStatus = interactionContext?.resumeOverallStatus ?? "running";
 
   const respondToUserInputRequest = (requestId: RequestId, response: ToolRequestUserInputResponse): void => {
     const specificResponder = Reflect.get(client as object, "respondToUserInputRequest");
@@ -757,8 +881,13 @@ export async function createCodexSession(
 
   const clearPendingQuestion = async (
     requestId: RequestId,
-    overallStatus?: "running" | "waiting_for_answer"
+    overallStatus?: ResumeOverallStatus | "waiting_for_answer"
   ): Promise<void> => {
+    if (activeSecretAnswerChannel?.requestId === requestId) {
+      await activeSecretAnswerChannel.close().catch(() => undefined);
+      activeSecretAnswerChannel = undefined;
+    }
+
     if (!interactionContext) {
       return;
     }
@@ -771,6 +900,7 @@ export async function createCodexSession(
     await interactionContext.store.updateRun(interactionContext.runId, {
       ...(overallStatus ? { overallStatus } : {}),
       pendingQuestion: undefined,
+      answerChannel: undefined,
     });
   };
 
@@ -791,9 +921,19 @@ export async function createCodexSession(
 
           const pendingQuestion = createPendingQuestion(request.requestId, request);
           await clearAnswerFile(interactionContext.store, interactionContext.runId);
+          let secretAnswerChannel: SecretAnswerChannelState | undefined;
+          if (hasSecretQuestions(request)) {
+            secretAnswerChannel = await createSecretAnswerChannel(request.requestId);
+            activeSecretAnswerChannel = secretAnswerChannel;
+          } else if (activeSecretAnswerChannel) {
+            await activeSecretAnswerChannel.close().catch(() => undefined);
+            activeSecretAnswerChannel = undefined;
+          }
+
           await interactionContext.store.updateRun(interactionContext.runId, {
             overallStatus: "waiting_for_answer",
             pendingQuestion,
+            ...(secretAnswerChannel ? { answerChannel: secretAnswerChannel.descriptor } : { answerChannel: undefined }),
           });
 
           if (interactionContext.emitHook) {
@@ -817,6 +957,7 @@ export async function createCodexSession(
           }
 
           const answerPath = path.join(interactionContext.store.getRunDir(interactionContext.runId), "answer.txt");
+          let nextSecretAnswer = secretAnswerChannel?.nextSubmission();
 
           while (true) {
             const currentRun = await interactionContext.store.getRun(interactionContext.runId);
@@ -832,22 +973,35 @@ export async function createCodexSession(
             }
 
             let rawAnswer: string;
-            try {
-              rawAnswer = await readFile(answerPath, "utf8");
-            } catch (error) {
-              if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-                await sleep(ANSWER_FILE_POLL_MS);
+            if (secretAnswerChannel) {
+              const submittedSecretAnswer = await Promise.race([
+                nextSecretAnswer ?? Promise.resolve(""),
+                sleep(ANSWER_FILE_POLL_MS).then(() => null),
+              ]);
+              if (submittedSecretAnswer === null) {
                 continue;
               }
 
-              throw error;
+              rawAnswer = submittedSecretAnswer;
+              nextSecretAnswer = secretAnswerChannel.nextSubmission();
+            } else {
+              try {
+                rawAnswer = await readFile(answerPath, "utf8");
+              } catch (error) {
+                if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+                  await sleep(ANSWER_FILE_POLL_MS);
+                  continue;
+                }
+
+                throw error;
+              }
             }
 
             try {
               const parsedAnswer = parseQuestionAnswerInput(rawAnswer, pendingQuestion);
               respondToUserInputRequest(request.requestId, parsedAnswer);
               await clearAnswerFile(interactionContext.store, interactionContext.runId);
-              await clearPendingQuestion(request.requestId, "running");
+              await clearPendingQuestion(request.requestId, resumedOverallStatus);
               return;
             } catch (error) {
               const message = error instanceof Error ? error.message : String(error);
@@ -872,7 +1026,7 @@ export async function createCodexSession(
     );
 
     on.call(client, "serverRequest:resolved", (notification: { requestId: RequestId }) => {
-      void clearPendingQuestion(notification.requestId, "running");
+      void clearPendingQuestion(notification.requestId, resumedOverallStatus);
     });
   }
 
@@ -1016,6 +1170,10 @@ export async function createCodexSession(
     },
 
     async disconnect(): Promise<void> {
+      if (activeSecretAnswerChannel) {
+        await activeSecretAnswerChannel.close().catch(() => undefined);
+        activeSecretAnswerChannel = undefined;
+      }
       await client.disconnect();
     },
   };

@@ -719,6 +719,130 @@ describe("codex session inline skill context", () => {
 });
 
 describe("codex session question flow", () => {
+  test("restores planning status after answering a planning-time clarification", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-question-flow-planning-"));
+    const store = new RunStore(path.join(tempDir, "runs"));
+    const runId = "run-1000-abcd";
+    await store.createRun(runId, "/tmp/spec.md");
+    await store.updateRun(runId, { mode: "plan", overallStatus: "planning" });
+
+    const responses: Array<{ requestId: string | number; response: unknown }> = [];
+    let resolveAnswerResponse: (() => void) | undefined;
+    const answerResponse = new Promise<void>((resolve) => {
+      resolveAnswerResponse = resolve;
+    });
+    let clientInstance: EventEmitter | null = null;
+
+    try {
+      mockMultiAgentDetection(false);
+      mock.module("@ratley/codex-client", () => ({
+        CodexClient: class extends EventEmitter {
+          constructor() {
+            super();
+            clientInstance = this;
+          }
+
+          async connect(): Promise<void> {}
+          async disconnect(): Promise<void> {}
+          async startThread(): Promise<{ id: string }> {
+            return { id: "thread-1" };
+          }
+          async runReview(): Promise<{ reviewText: string }> {
+            return { reviewText: "ok" };
+          }
+          respondToUserInputRequest(requestId: string | number, response: unknown): void {
+            responses.push({ requestId, response });
+            resolveAnswerResponse?.();
+          }
+          rejectServerRequest(): void {}
+          async runTurn(): Promise<{ agentMessage: string; turn: { status: "completed" }; items: [] }> {
+            queueMicrotask(() => {
+              clientInstance?.emit("request:userInput", {
+                requestId: "req-1",
+                itemId: "item-1",
+                threadId: "thread-1",
+                turnId: "turn-1",
+                questions: [
+                  {
+                    header: "Framework",
+                    id: "framework",
+                    question: "Which framework should I target?",
+                    isOther: true,
+                    isSecret: false,
+                    options: null,
+                  },
+                ],
+              });
+            });
+
+            await answerResponse;
+            clientInstance?.emit("serverRequest:resolved", { requestId: "req-1" });
+
+            return {
+              agentMessage: "[]",
+              turn: { status: "completed" },
+              items: [],
+            };
+          }
+        },
+      }));
+
+      mock.module("../../utils/skill-loader.js", () => ({
+        loadSkills: async () => [],
+      }));
+
+      const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
+      const session = await createCodexSession(process.cwd(), undefined, {
+        runId: runId as `${string}-${number}-${string}`,
+        store,
+        resumeOverallStatus: "planning",
+      });
+
+      try {
+        const planningPromise = session.planSpec("spec", "context");
+
+        const waitingRun = await waitFor(async () => {
+          const run = await store.getRun(runId);
+          return run?.pendingQuestion ? run : null;
+        });
+
+        expect(waitingRun.overallStatus).toBe("waiting_for_answer");
+
+        const answerPath = path.join(store.getRunDir(runId), "answer.txt");
+        await writeFile(
+          answerPath,
+          `${JSON.stringify({ answers: { framework: { answers: ["bun"] } } })}\n`,
+          "utf8",
+        );
+
+        await planningPromise;
+
+        const resumedRun = await waitFor(async () => {
+          const run = await store.getRun(runId);
+          return run && run.pendingQuestion === undefined ? run : null;
+        });
+
+        expect(resumedRun.overallStatus).toBe("planning");
+        expect(responses).toEqual([
+          {
+            requestId: "req-1",
+            response: {
+              answers: {
+                framework: {
+                  answers: ["bun"],
+                },
+              },
+            },
+          },
+        ]);
+      } finally {
+        await session.disconnect();
+      }
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   test("persists pending questions, emits onQuestion, and resumes the same run after an answer", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-question-flow-"));
     const store = new RunStore(path.join(tempDir, "runs"));
@@ -999,6 +1123,186 @@ describe("codex session question flow", () => {
           },
         ]);
       } finally {
+      await session.disconnect();
+      }
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("uses a direct answer channel for secret questions and clears it after resume", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-question-flow-secret-"));
+    const store = new RunStore(path.join(tempDir, "runs"));
+    const runId = "run-1000-abcd";
+    await store.createRun(runId, "/tmp/spec.md");
+    await store.updateRun(runId, { mode: "run", overallStatus: "running" });
+
+    const responses: Array<{ requestId: string | number; response: unknown }> = [];
+    let resolveAnswerResponse: (() => void) | undefined;
+    const answerResponse = new Promise<void>((resolve) => {
+      resolveAnswerResponse = resolve;
+    });
+    let clientInstance: EventEmitter | null = null;
+    let submitSecretAnswer: ((answer: string) => void) | undefined;
+
+    try {
+      mockMultiAgentDetection(false);
+      mock.module("@ratley/codex-client", () => ({
+        CodexClient: class extends EventEmitter {
+          constructor() {
+            super();
+            clientInstance = this;
+          }
+
+          async connect(): Promise<void> {}
+          async disconnect(): Promise<void> {}
+          async startThread(): Promise<{ id: string }> {
+            return { id: "thread-1" };
+          }
+          async runReview(): Promise<{ reviewText: string }> {
+            return { reviewText: "ok" };
+          }
+          respondToUserInputRequest(requestId: string | number, response: unknown): void {
+            responses.push({ requestId, response });
+            resolveAnswerResponse?.();
+          }
+          rejectServerRequest(): void {}
+          async runTurn(): Promise<{ agentMessage: string; turn: { status: "completed" }; items: [] }> {
+            queueMicrotask(() => {
+              clientInstance?.emit("request:userInput", {
+                requestId: "req-1",
+                itemId: "item-1",
+                threadId: "thread-1",
+                turnId: "turn-1",
+                questions: [
+                  {
+                    header: "API Key",
+                    id: "api_key",
+                    question: "Which API key should I use?",
+                    isOther: true,
+                    isSecret: true,
+                    options: null,
+                  },
+                ],
+              });
+            });
+
+            await answerResponse;
+            clientInstance?.emit("serverRequest:resolved", { requestId: "req-1" });
+
+            return {
+              agentMessage: '{"outcome":"done"}',
+              turn: { status: "completed" },
+              items: [],
+            };
+          }
+        },
+      }));
+
+      mock.module("../../utils/skill-loader.js", () => ({
+        loadSkills: async () => [],
+      }));
+
+      const sessionModule = await import(`./session.ts?test=${Math.random()}`);
+      sessionModule.setSecretAnswerChannelFactoryForTests(async (requestId) => {
+        let queuedAnswer: string | undefined;
+        let waitingResolver: ((answer: string) => void) | undefined;
+
+        submitSecretAnswer = (answer: string) => {
+          if (waitingResolver) {
+            const resolve = waitingResolver;
+            waitingResolver = undefined;
+            resolve(answer);
+            return;
+          }
+
+          queuedAnswer = answer;
+        };
+
+        return {
+          requestId,
+          descriptor: {
+            transport: "ipc",
+            path: "/tmp/orca-test-secret-answer.sock",
+            token: "secret-token",
+          },
+          nextSubmission: async () => {
+            if (queuedAnswer !== undefined) {
+              const answer = queuedAnswer;
+              queuedAnswer = undefined;
+              return answer;
+            }
+
+            return await new Promise<string>((resolve) => {
+              waitingResolver = resolve;
+            });
+          },
+          close: async () => {
+            if (waitingResolver) {
+              const resolve = waitingResolver;
+              waitingResolver = undefined;
+              resolve("");
+            }
+          },
+        };
+      });
+      const session = await sessionModule.createCodexSession(process.cwd(), undefined, {
+        runId: runId as `${string}-${number}-${string}`,
+        store,
+        resumeOverallStatus: "running",
+      });
+
+      try {
+        const executionPromise = session.executeTask(
+          {
+            id: "task-1",
+            name: "Configure auth",
+            description: "Use the provided secret.",
+            dependencies: [],
+            acceptance_criteria: ["Auth is configured"],
+            status: "pending",
+            retries: 0,
+            maxRetries: 3,
+          },
+          runId,
+          "context",
+        );
+
+        const waitingRun = await waitFor(async () => {
+          const run = await store.getRun(runId);
+          return run?.answerChannel ? run : null;
+        });
+
+        expect(waitingRun.overallStatus).toBe("waiting_for_answer");
+        expect(waitingRun.answerChannel?.transport).toBe("ipc");
+
+        submitSecretAnswer?.("super-secret");
+
+        const result = await executionPromise;
+        expect(result.outcome).toBe("done");
+        expect(responses).toEqual([
+          {
+            requestId: "req-1",
+            response: {
+              answers: {
+                api_key: {
+                  answers: ["super-secret"],
+                },
+              },
+            },
+          },
+        ]);
+
+        const resumedRun = await waitFor(async () => {
+          const run = await store.getRun(runId);
+          return run && run.pendingQuestion === undefined ? run : null;
+        });
+
+        expect(resumedRun.answerChannel).toBeUndefined();
+        expect(resumedRun.overallStatus).toBe("running");
+        await expect(readFile(path.join(store.getRunDir(runId), "answer.txt"), "utf8")).rejects.toThrow();
+      } finally {
+        sessionModule.setSecretAnswerChannelFactoryForTests(null);
         await session.disconnect();
       }
     } finally {

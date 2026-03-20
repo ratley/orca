@@ -51,6 +51,12 @@ const PendingQuestionSchema = z.object({
   questions: z.array(PendingQuestionPromptSchema)
 });
 
+const PendingAnswerChannelSchema = z.object({
+  transport: z.literal("ipc"),
+  path: z.string(),
+  token: z.string(),
+});
+
 const PrStatusSchema = z.object({
   draftTitle: z.string().optional(),
   draftBody: z.string().optional(),
@@ -78,6 +84,7 @@ export const RunStatusSchema = z.object({
   milestones: z.array(z.string()),
   errors: z.array(ErrorEntrySchema),
   pendingQuestion: PendingQuestionSchema.optional(),
+  answerChannel: PendingAnswerChannelSchema.optional(),
   pr: PrStatusSchema.optional()
 });
 

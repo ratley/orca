@@ -1,8 +1,12 @@
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, test } from "bun:test";
 
 import {
   clearResolvedCodexPathCacheForTests,
   compareCodexCliVersions,
+  resolveCodexPathsOnPath,
   parseCodexCliVersion,
   selectPreferredCodexBinary,
 } from "./codex-path.js";
@@ -65,6 +69,30 @@ describe("codex-path", () => {
         { path: "/second/codex", versionOutput: null },
       ]),
     ).toBe("/first/codex");
+  });
+
+  test("resolveCodexPathsOnPath includes all executable codex binaries on PATH", () => {
+    const tempRoot = mkdtempSync(path.join(os.tmpdir(), "orca-codex-path-"));
+    const firstDir = path.join(tempRoot, "first");
+    const secondDir = path.join(tempRoot, "second");
+    const firstCodex = path.join(firstDir, "codex");
+    const secondCodex = path.join(secondDir, "codex");
+
+    mkdirSync(firstDir, { recursive: true });
+    mkdirSync(secondDir, { recursive: true });
+    writeFileSync(firstCodex, "#!/bin/sh\necho codex-cli 0.77.0\n", { mode: 0o755 });
+    writeFileSync(secondCodex, "#!/bin/sh\necho codex-cli 0.115.0\n", { mode: 0o755 });
+    chmodSync(firstCodex, 0o755);
+    chmodSync(secondCodex, 0o755);
+
+    try {
+      expect(resolveCodexPathsOnPath([firstDir, secondDir].join(path.delimiter))).toEqual([
+        firstCodex,
+        secondCodex,
+      ]);
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
   });
 
   test("clearResolvedCodexPathCacheForTests is callable", () => {

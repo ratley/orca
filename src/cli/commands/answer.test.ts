@@ -27,17 +27,25 @@ function setStdoutTty(value: boolean): void {
 async function loadAnswerModule(options?: {
   input?: () => Promise<string>;
   select?: () => Promise<string>;
-}): Promise<{ answerModule: AnswerModule; inputMock: ReturnType<typeof mock>; selectMock: ReturnType<typeof mock> }> {
+  password?: () => Promise<string>;
+}): Promise<{
+  answerModule: AnswerModule;
+  inputMock: ReturnType<typeof mock>;
+  selectMock: ReturnType<typeof mock>;
+  passwordMock: ReturnType<typeof mock>;
+}> {
   const inputMock = mock(options?.input ?? (async () => "prompt answer"));
   const selectMock = mock(options?.select ?? (async () => "selected-run-1000-abcd"));
+  const passwordMock = mock(options?.password ?? (async () => "prompt secret"));
 
   mock.module("@inquirer/prompts", () => ({
     input: inputMock,
+    password: passwordMock,
     select: selectMock
   }));
 
   const answerModule = await import(`./answer.js?test=${Math.random()}`);
-  return { answerModule, inputMock, selectMock };
+  return { answerModule, inputMock, selectMock, passwordMock };
 }
 
 beforeEach(async () => {
@@ -282,6 +290,58 @@ describe("answer command", () => {
     await expect(answerModule.answerCommandHandler(runId, "just one answer", {})).rejects.toThrow(
       "multiple pending questions require a JSON object mapping question ids to answers",
     );
+  });
+
+  test("uses password prompt and direct answer channel for secret questions", async () => {
+    const runId = "answer-secret-1000-abcd";
+    const submissions: string[] = [];
+
+    const store = new RunStore(runsDir);
+    await store.createRun(runId, "/tmp/spec.md");
+    await store.updateRun(runId, {
+      overallStatus: "waiting_for_answer",
+      pendingQuestion: {
+        requestId: "req-1",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "item-1",
+        receivedAt: new Date().toISOString(),
+        questions: [
+          {
+            header: "API Key",
+            id: "api_key",
+            question: "What API key should I use?",
+            isOther: true,
+            isSecret: true,
+            options: null,
+          },
+        ],
+      },
+      answerChannel: {
+        transport: "ipc",
+        path: path.join(tempDir, "secret-answer.sock"),
+        token: "secret-token",
+      },
+    });
+    setStdoutTty(true);
+
+    const { answerModule, passwordMock, inputMock } = await loadAnswerModule({
+      password: async () => "super-secret",
+    });
+    answerModule.setAnswerChannelSubmitterForTests(async (channel, payload) => {
+      submissions.push(JSON.stringify({ channel, payload }));
+    });
+
+    await answerModule.answerCommandHandler(runId, undefined, {});
+
+    expect(passwordMock).toHaveBeenCalled();
+    expect(inputMock).not.toHaveBeenCalled();
+    expect(submissions).toHaveLength(1);
+    expect(submissions[0]).toContain('"token":"secret-token"');
+    expect(submissions[0]).toContain('\\"super-secret\\"');
+
+    const answerPath = path.join(runsDir, runId, "answer.txt");
+    await expect(readFile(answerPath, "utf8")).rejects.toThrow();
   });
 
   test("fails when positional run-id and --run are both provided", async () => {

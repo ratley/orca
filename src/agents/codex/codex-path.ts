@@ -143,13 +143,14 @@ export function selectPreferredCodexBinary(probes: CodexBinaryProbe[]): string |
   return best.path;
 }
 
-function resolveCodexPathOnPath(): string | null {
-  const pathValue = process.env.PATH?.trim();
-  if (!pathValue) {
-    return null;
+export function resolveCodexPathsOnPath(pathValue: string | undefined = process.env.PATH): string[] {
+  const normalizedPath = pathValue?.trim();
+  if (!normalizedPath) {
+    return [];
   }
 
-  for (const entry of pathValue.split(path.delimiter)) {
+  const discovered: string[] = [];
+  for (const entry of normalizedPath.split(path.delimiter)) {
     const trimmed = entry.trim();
     if (trimmed.length === 0) {
       continue;
@@ -158,19 +159,19 @@ function resolveCodexPathOnPath(): string | null {
     const candidatePath = path.join(trimmed, "codex");
     try {
       accessSync(candidatePath, fsConstants.X_OK);
-      return candidatePath;
+      discovered.push(candidatePath);
     } catch {
       continue;
     }
   }
 
-  return null;
+  return discovered;
 }
 
 function getCandidatePaths(): string[] {
   return Array.from(
     new Set(
-      [resolveCodexPathOnPath(), ...KNOWN_CODEX_BINARY_CANDIDATES].filter(
+      [...resolveCodexPathsOnPath(), ...KNOWN_CODEX_BINARY_CANDIDATES].filter(
         (value): value is string => typeof value === "string" && value.trim().length > 0,
       ),
     ),
