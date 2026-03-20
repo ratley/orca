@@ -584,6 +584,83 @@ describe("codex session skill discovery", () => {
       await session.disconnect();
     }
   });
+
+  test("keeps metadata-only skills/list entries when path is omitted", async () => {
+    type TurnInputItem = { type: "text"; text: string };
+
+    let capturedInput: TurnInputItem[] = [];
+
+    mockMultiAgentDetection(false);
+    mock.module("@ratley/codex-client", () => ({
+      CodexClient: class {
+        async connect(): Promise<void> {}
+        async disconnect(): Promise<void> {}
+        async startThread(): Promise<{ id: string }> {
+          return { id: "thread-1" };
+        }
+        async runTurn(params: { input?: TurnInputItem[] }): Promise<{ agentMessage: string; turn: { status: "completed" }; items: [] }> {
+          capturedInput = params.input ?? [];
+          return { agentMessage: "[]", turn: { status: "completed" }, items: [] };
+        }
+        async request(): Promise<{
+          data: Array<{
+            cwd: string;
+            skills: Array<{
+              name: string;
+              description: string;
+              enabled: boolean;
+              interface: { displayName: string };
+              dependencies: { tools: Array<{ type: string; value: string }> };
+            }>;
+            errors: [];
+          }>;
+        }> {
+          return {
+            data: [
+              {
+                cwd: process.cwd(),
+                skills: [
+                  {
+                    name: "metadata-only-skill",
+                    description: "Use metadata when path is absent.",
+                    enabled: true,
+                    interface: { displayName: "Metadata Skill" },
+                    dependencies: { tools: [{ type: "env_var", value: "OPENAI_API_KEY" }] },
+                  },
+                ],
+                errors: [],
+              },
+            ],
+          };
+        }
+        async runReview(): Promise<{ reviewText: string }> {
+          return { reviewText: "ok" };
+        }
+      },
+    }));
+
+    mock.module("../../utils/skill-loader.js", () => ({
+      loadSkills: async () => [],
+    }));
+
+    const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
+    const session = await createCodexSession(process.cwd());
+
+    try {
+      await session.planSpec("spec", "context");
+
+      const prompt = capturedInput[0]?.text ?? "";
+      expect(prompt).toContain("Referenced Orca skills:");
+      expect(prompt).toContain("Skill: metadata-only-skill");
+      expect(prompt).toContain("Use metadata when path is absent.");
+      expect(prompt).toContain("Interface:");
+      expect(prompt).toContain('"displayName": "Metadata Skill"');
+      expect(prompt).toContain("Dependencies:");
+      expect(prompt).toContain('"OPENAI_API_KEY"');
+    } finally {
+      await session.disconnect();
+    }
+  });
 });
 
 describe("codex session inline skill context", () => {

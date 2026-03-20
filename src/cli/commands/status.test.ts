@@ -77,7 +77,49 @@ describe("status command", () => {
 
     const output = logs.join("\n");
     expect(output).toContain("Pending Question:");
-    expect(output).toContain("Game Type: Which game type should I build?");
+    expect(output).toContain("Game Type (game_type): Which game type should I build?");
     expect(output).toContain("Options: Arcade, Puzzle.");
+  });
+
+  test("prints question ids for multi-question answer payloads", async () => {
+    const runId = "run-2000-abcd";
+    const store = new RunStore(runsDir);
+    await store.createRun(runId, "/tmp/spec.md");
+    await store.updateRun(runId, {
+      mode: "run",
+      overallStatus: "waiting_for_answer",
+      pendingQuestion: {
+        requestId: "req-2",
+        threadId: "thread-2",
+        turnId: "turn-2",
+        itemId: "item-2",
+        receivedAt: new Date().toISOString(),
+        questions: [
+          {
+            header: "Backend",
+            id: "backend",
+            question: "Which backend should I use?",
+            isOther: true,
+            isSecret: false,
+            options: null,
+          },
+          {
+            header: "Frontend",
+            id: "frontend",
+            question: "Which frontend should I use?",
+            isOther: true,
+            isSecret: false,
+            options: null,
+          },
+        ],
+      },
+    });
+
+    const statusModule = await loadStatusModule();
+    await statusModule.statusCommandHandler({ run: runId });
+
+    const output = logs.join("\n");
+    expect(output).toContain("Backend (backend): Which backend should I use?");
+    expect(output).toContain("Frontend (frontend): Which frontend should I use?");
   });
 });

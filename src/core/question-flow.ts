@@ -47,7 +47,7 @@ function formatQuestionBlock(question: PendingQuestionPrompt): string {
     ? ` Options: ${question.options.map((option) => option.label).join(", ")}.`
     : "";
 
-  return `${question.header}: ${question.question}${optionText}`;
+  return `${question.header} (${question.id}): ${question.question}${optionText}`;
 }
 
 export function createPendingQuestion(

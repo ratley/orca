@@ -416,12 +416,36 @@ function buildTurnInput(text: string, skills: LoadedSkill[]): Array<{ type: "tex
 
 interface RawSkill {
   name?: unknown;
+  description?: unknown;
+  shortDescription?: unknown;
+  interface?: unknown;
+  dependencies?: unknown;
   path?: unknown;
 }
 
 interface RawSkillsListEntry {
   cwd?: unknown;
   skills?: unknown;
+}
+
+function renderSkillMetadataBody(skill: RawSkill): string {
+  const sections: string[] = [];
+
+  if (typeof skill.description === "string" && skill.description.trim().length > 0) {
+    sections.push(skill.description.trim());
+  } else if (typeof skill.shortDescription === "string" && skill.shortDescription.trim().length > 0) {
+    sections.push(skill.shortDescription.trim());
+  }
+
+  if (skill.interface && typeof skill.interface === "object") {
+    sections.push(`Interface:\n${JSON.stringify(skill.interface, null, 2)}`);
+  }
+
+  if (skill.dependencies && typeof skill.dependencies === "object") {
+    sections.push(`Dependencies:\n${JSON.stringify(skill.dependencies, null, 2)}`);
+  }
+
+  return sections.join("\n\n").trim();
 }
 
 function normalizePerCwdExtraUserRoots(config?: OrcaConfig): Array<{ cwd: string; extraUserRoots: string[] }> {
@@ -499,28 +523,34 @@ async function loadCodexListedSkills(client: CodexClient, cwd: string, config?: 
     }
 
     for (const skill of entry.skills as RawSkill[]) {
-      if (!skill || typeof skill !== "object" || typeof skill.name !== "string" || typeof skill.path !== "string") {
-        continue;
-      }
-
-      const normalizedSkillPath = skill.path.trim();
-      if (normalizedSkillPath.length === 0) {
+      if (!skill || typeof skill !== "object" || typeof skill.name !== "string") {
         continue;
       }
 
       let skillBody = "";
-      try {
-        skillBody = await readFile(normalizedSkillPath, "utf8");
-      } catch {
-        skillBody = "";
+      let normalizedSkillPath: string | null = null;
+      if (typeof skill.path === "string" && skill.path.trim().length > 0) {
+        normalizedSkillPath = skill.path.trim();
+        try {
+          skillBody = await readFile(normalizedSkillPath, "utf8");
+        } catch {
+          skillBody = "";
+        }
+      }
+
+      if (skillBody.trim().length === 0) {
+        skillBody = renderSkillMetadataBody(skill);
       }
 
       discovered.push({
         name: skill.name,
-        description: "",
+        description:
+          typeof skill.description === "string"
+            ? skill.description
+            : (typeof skill.shortDescription === "string" ? skill.shortDescription : ""),
         body: skillBody,
-        dirPath: path.dirname(normalizedSkillPath),
-        filePath: normalizedSkillPath,
+        dirPath: normalizedSkillPath ? path.dirname(normalizedSkillPath) : cwd,
+        filePath: normalizedSkillPath ?? `${cwd}#skills/list:${skill.name}`,
       });
     }
   }
