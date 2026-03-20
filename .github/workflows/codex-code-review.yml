@@ -12,7 +12,7 @@ jobs:
   codex-structured-review:
     name: Run Codex structured review
     if: ${{ !github.event.pull_request.draft }}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions:
       contents: read
       pull-requests: write
@@ -206,7 +206,7 @@ jobs:
 
       - name: Run Codex structured review
         id: run-codex
-        uses: openai/codex-action@v1
+        uses: openai/codex-action@main
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           prompt-file: ${{ env.REVIEW_WORKSPACE }}/codex-prompt.md
@@ -214,6 +214,7 @@ jobs:
           output-file: ${{ env.REVIEW_WORKSPACE }}/codex-output.json
           working-directory: ${{ env.REVIEW_WORKSPACE }}
           sandbox: read-only
+          safety-strategy: unsafe
           allow-bots: true
           model: gpt-5.4-2026-03-05
 
