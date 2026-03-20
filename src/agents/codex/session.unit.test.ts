@@ -640,80 +640,83 @@ describe("codex session skill discovery", () => {
     }
   });
 
-  test("keeps metadata-only skills/list entries when path is omitted", async () => {
+  test("loads real skill bodies from configured perCwdExtraUserRoots even when skills/list omits path", async () => {
     type TurnInputItem = { type: "text"; text: string };
 
     let capturedInput: TurnInputItem[] = [];
-
-    mockMultiAgentDetection(false);
-    mock.module("@ratley/codex-client", () => ({
-      CodexClient: class {
-        async connect(): Promise<void> {}
-        async disconnect(): Promise<void> {}
-        async startThread(): Promise<{ id: string }> {
-          return { id: "thread-1" };
-        }
-        async runTurn(params: { input?: TurnInputItem[] }): Promise<{ agentMessage: string; turn: { status: "completed" }; items: [] }> {
-          capturedInput = params.input ?? [];
-          return { agentMessage: "[]", turn: { status: "completed" }, items: [] };
-        }
-        async request(): Promise<{
-          data: Array<{
-            cwd: string;
-            skills: Array<{
-              name: string;
-              description: string;
-              enabled: boolean;
-              interface: { displayName: string };
-              dependencies: { tools: Array<{ type: string; value: string }> };
-            }>;
-            errors: [];
-          }>;
-        }> {
-          return {
-            data: [
-              {
-                cwd: process.cwd(),
-                skills: [
-                  {
-                    name: "metadata-only-skill",
-                    description: "Use metadata when path is absent.",
-                    enabled: true,
-                    interface: { displayName: "Metadata Skill" },
-                    dependencies: { tools: [{ type: "env_var", value: "OPENAI_API_KEY" }] },
-                  },
-                ],
-                errors: [],
-              },
-            ],
-          };
-        }
-        async runReview(): Promise<{ reviewText: string }> {
-          return { reviewText: "ok" };
-        }
-      },
-    }));
-
-    mock.module("../../utils/skill-loader.js", () => ({
-      loadSkills: async () => [],
-    }));
-
-    const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
-    const session = await createCodexSession(process.cwd());
+    const sharedRoot = await mkdtemp(path.join(os.tmpdir(), "orca-extra-skill-root-"));
+    const skillName = "shared-root-skill";
+    const sharedSkillPath = path.join(sharedRoot, ".agents", "skills", skillName, "SKILL.md");
+    await mkdir(path.dirname(sharedSkillPath), { recursive: true });
+    await writeFile(sharedSkillPath, "Real shared skill workflow body", "utf8");
 
     try {
+      mockMultiAgentDetection(false);
+      mock.module("@ratley/codex-client", () => ({
+        CodexClient: class {
+          async connect(): Promise<void> {}
+          async disconnect(): Promise<void> {}
+          async startThread(): Promise<{ id: string }> {
+            return { id: "thread-1" };
+          }
+          async runTurn(params: { input?: TurnInputItem[] }): Promise<{ agentMessage: string; turn: { status: "completed" }; items: [] }> {
+            capturedInput = params.input ?? [];
+            return { agentMessage: "[]", turn: { status: "completed" }, items: [] };
+          }
+          async request(): Promise<{
+            data: Array<{
+              cwd: string;
+              skills: Array<{
+                name: string;
+                description: string;
+                enabled: boolean;
+                interface: { displayName: string };
+                dependencies: { tools: Array<{ type: string; value: string }> };
+              }>;
+              errors: [];
+            }>;
+          }> {
+            return {
+              data: [
+                {
+                  cwd: process.cwd(),
+                  skills: [
+                    {
+                      name: skillName,
+                      description: "Use metadata when path is absent.",
+                      enabled: true,
+                      interface: { displayName: "Metadata Skill" },
+                      dependencies: { tools: [{ type: "env_var", value: "OPENAI_API_KEY" }] },
+                    },
+                  ],
+                  errors: [],
+                },
+              ],
+            };
+          }
+          async runReview(): Promise<{ reviewText: string }> {
+            return { reviewText: "ok" };
+          }
+        },
+      }));
+
+      const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
+      const session = await createCodexSession(process.cwd(), {
+        codex: {
+          perCwdExtraUserRoots: [{ cwd: process.cwd(), extraUserRoots: [sharedRoot] }],
+        },
+      });
+
       await session.planSpec("spec", "context");
 
       const prompt = capturedInput[0]?.text ?? "";
       expect(prompt).toContain("Referenced Orca skills:");
-      expect(prompt).toContain("Skill: metadata-only-skill");
-      expect(prompt).toContain("Use metadata when path is absent.");
-      expect(prompt).toContain("Interface:");
-      expect(prompt).toContain('"displayName": "Metadata Skill"');
-      expect(prompt).toContain("Dependencies:");
-      expect(prompt).toContain('"OPENAI_API_KEY"');
-    } finally {
+      expect(prompt).toContain(`Skill: ${skillName}`);
+      expect(prompt).toContain("Real shared skill workflow body");
+      expect(prompt).not.toContain("Use metadata when path is absent.");
       await session.disconnect();
+    } finally {
+      await rm(sharedRoot, { recursive: true, force: true });
     }
   });
 });
@@ -1400,13 +1403,19 @@ describe("codex session question flow", () => {
           "context",
         );
 
+        const { readSecretAnswerChannel } = await import("../../core/secret-answer-channel.js");
+
         const waitingRun = await waitFor(async () => {
           const run = await store.getRun(runId);
-          return run?.answerChannel ? run : null;
+          return run?.pendingQuestion ? run : null;
         });
 
         expect(waitingRun.overallStatus).toBe("waiting_for_answer");
-        expect(waitingRun.answerChannel?.transport).toBe("ipc");
+        await expect(readSecretAnswerChannel(runId as `${string}-${number}-${string}`)).resolves.toEqual({
+          transport: "ipc",
+          path: "/tmp/orca-test-secret-answer.sock",
+          token: "secret-token",
+        });
 
         submitSecretAnswer?.("super-secret");
 
@@ -1430,7 +1439,7 @@ describe("codex session question flow", () => {
           return run && run.pendingQuestion === undefined ? run : null;
         });
 
-        expect(resumedRun.answerChannel).toBeUndefined();
+        await expect(readSecretAnswerChannel(runId as `${string}-${number}-${string}`)).resolves.toBeNull();
         expect(resumedRun.overallStatus).toBe("running");
         await expect(readFile(path.join(store.getRunDir(runId), "answer.txt"), "utf8")).rejects.toThrow();
       } finally {

@@ -13,9 +13,13 @@ const ORCA_MULTI_AGENT_BLOCK = `# Added by orca — remove or set multi_agent = 
 multi_agent = true
 `;
 
+function getExplicitMultiAgentSetting(config?: OrcaConfig): boolean | undefined {
+  return typeof config?.codex?.multiAgent === "boolean" ? config.codex.multiAgent : undefined;
+}
+
 function isMultiAgentEnabled(config?: OrcaConfig): boolean {
   // Default: off. Only enable if explicitly set to true.
-  return config?.codex?.multiAgent === true;
+  return getExplicitMultiAgentSetting(config) === true;
 }
 
 function containsMultiAgentSetting(content: string): boolean {
@@ -72,8 +76,9 @@ export async function isCodexMultiAgentActive(
   config?: OrcaConfig,
   _configFile?: string,
 ): Promise<boolean> {
-  if (isMultiAgentEnabled(config)) {
-    return true;
+  const explicitMultiAgentSetting = getExplicitMultiAgentSetting(config);
+  if (explicitMultiAgentSetting !== undefined) {
+    return explicitMultiAgentSetting;
   }
 
   const configFile = _configFile ?? GLOBAL_CONFIG_FILE;

@@ -49,7 +49,6 @@ export interface RunStatus {
   milestones: string[];
   errors: Array<{ at: string; message: string; taskId?: string }>;
   pendingQuestion?: PendingQuestion | undefined;
-  answerChannel?: PendingAnswerChannel | undefined;
   pr?: {
     draftTitle?: string;
     draftBody?: string;

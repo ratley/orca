@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:net";
-import { readFile, unlink } from "node:fs/promises";
+import { readdir, readFile, unlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -29,10 +29,15 @@ import {
   createPendingQuestion,
   parseQuestionAnswerInput,
 } from "../../core/question-flow.js";
+import {
+  clearSecretAnswerChannel,
+  writeSecretAnswerChannel,
+} from "../../core/secret-answer-channel.js";
 import { TaskGraphReviewPayloadSchema } from "../../core/task-graph-review.js";
 import { RunStore } from "../../state/store.js";
 import type { CodexEffort } from "../../types/effort.js";
-import { loadSkills, type LoadedSkill } from "../../utils/skill-loader.js";
+import * as skillLoader from "../../utils/skill-loader.js";
+import type { LoadedSkill } from "../../utils/skill-loader.js";
 import { logger } from "../../utils/logger.js";
 import { resolveCodexPath } from "./codex-path.js";
 
@@ -476,6 +481,70 @@ function getPerCwdExtraUserRootsForCwd(config: OrcaConfig | undefined, cwd: stri
   return normalizePerCwdExtraUserRoots(config).filter((entry) => entry.cwd === normalizedCwd);
 }
 
+async function loadConfiguredPerCwdExtraRootSkills(
+  config: OrcaConfig | undefined,
+  cwd: string,
+): Promise<LoadedSkill[]> {
+  const configuredRoots = getPerCwdExtraUserRootsForCwd(config, cwd);
+  if (configuredRoots.length === 0) {
+    return [];
+  }
+
+  const candidateDirs = new Set<string>();
+  for (const entry of configuredRoots) {
+    for (const root of entry.extraUserRoots) {
+      const resolvedRoot = path.resolve(root);
+      candidateDirs.add(resolvedRoot);
+      candidateDirs.add(path.join(resolvedRoot, "skills"));
+      candidateDirs.add(path.join(resolvedRoot, ".agents", "skills"));
+      candidateDirs.add(path.join(resolvedRoot, ".codex", "skills"));
+    }
+  }
+
+  const discovered: LoadedSkill[] = [];
+  for (const candidateDir of candidateDirs) {
+    let entries;
+    try {
+      entries = await readdir(candidateDir, { withFileTypes: true, encoding: "utf8" });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        continue;
+      }
+
+      throw error;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+
+      const skillDir = path.join(candidateDir, entry.name);
+      const skillFile = path.join(skillDir, "SKILL.md");
+      let skillFileContent: string;
+      try {
+        skillFileContent = await readFile(skillFile, "utf8");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          continue;
+        }
+
+        throw error;
+      }
+
+      const frontmatterMatch = skillFileContent.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/u);
+      discovered.push({
+        name: entry.name,
+        description: "",
+        body: frontmatterMatch ? skillFileContent.slice(frontmatterMatch[0].length) : skillFileContent,
+        dirPath: skillDir,
+        filePath: skillFile,
+      });
+    }
+  }
+  return discovered;
+}
+
 async function loadCodexListedSkills(client: CodexClient, cwd: string, config?: OrcaConfig): Promise<LoadedSkill[]> {
   const perCwdExtraUserRoots = getPerCwdExtraUserRootsForCwd(config, cwd);
 
@@ -575,17 +644,23 @@ async function loadCodexListedSkills(client: CodexClient, cwd: string, config?: 
 }
 
 async function resolveTurnSkills(client: CodexClient, config: OrcaConfig | undefined, cwd: string): Promise<LoadedSkill[]> {
-  const baseSkills = await loadSkills(config);
+  const baseSkills = await skillLoader.loadSkills(config);
+  const configuredExtraRootSkills = await loadConfiguredPerCwdExtraRootSkills(config, cwd);
 
   const listedSkills = await loadCodexListedSkills(client, cwd, config);
 
-  if (listedSkills.length === 0) {
+  if (configuredExtraRootSkills.length === 0 && listedSkills.length === 0) {
     return baseSkills;
   }
 
   const mergedByName = new Map<string, LoadedSkill>();
   for (const skill of baseSkills) {
     mergedByName.set(skill.name, skill);
+  }
+  for (const skill of configuredExtraRootSkills) {
+    if (!mergedByName.has(skill.name)) {
+      mergedByName.set(skill.name, skill);
+    }
   }
   for (const skill of listedSkills) {
     if (!mergedByName.has(skill.name)) {
@@ -914,9 +989,15 @@ export async function createCodexSession(
     requestId: RequestId,
     overallStatus?: ResumeOverallStatus | "waiting_for_answer"
   ): Promise<void> => {
-    if (activeSecretAnswerChannel?.requestId === requestId) {
-      await activeSecretAnswerChannel.close().catch(() => undefined);
-      activeSecretAnswerChannel = undefined;
+    const secretAnswerChannel = activeSecretAnswerChannel;
+    if (secretAnswerChannel?.requestId === requestId) {
+      if (interactionContext) {
+        await clearSecretAnswerChannel(interactionContext.runId).catch(() => undefined);
+      }
+      await secretAnswerChannel.close().catch(() => undefined);
+      if (activeSecretAnswerChannel === secretAnswerChannel) {
+        activeSecretAnswerChannel = undefined;
+      }
     }
 
     if (!interactionContext) {
@@ -931,7 +1012,6 @@ export async function createCodexSession(
     await interactionContext.store.updateRun(interactionContext.runId, {
       ...(overallStatus ? { overallStatus } : {}),
       pendingQuestion: undefined,
-      answerChannel: undefined,
     });
   };
 
@@ -956,7 +1036,9 @@ export async function createCodexSession(
           if (hasSecretQuestions(request)) {
             secretAnswerChannel = await createSecretAnswerChannel(request.requestId);
             activeSecretAnswerChannel = secretAnswerChannel;
+            await writeSecretAnswerChannel(interactionContext.runId, secretAnswerChannel.descriptor);
           } else if (activeSecretAnswerChannel) {
+            await clearSecretAnswerChannel(interactionContext.runId).catch(() => undefined);
             await activeSecretAnswerChannel.close().catch(() => undefined);
             activeSecretAnswerChannel = undefined;
           }
@@ -964,7 +1046,6 @@ export async function createCodexSession(
           await interactionContext.store.updateRun(interactionContext.runId, {
             overallStatus: "waiting_for_answer",
             pendingQuestion,
-            ...(secretAnswerChannel ? { answerChannel: secretAnswerChannel.descriptor } : { answerChannel: undefined }),
           });
 
           if (interactionContext.emitHook) {
@@ -1203,6 +1284,9 @@ export async function createCodexSession(
 
     async disconnect(): Promise<void> {
       if (activeSecretAnswerChannel) {
+        if (interactionContext) {
+          await clearSecretAnswerChannel(interactionContext.runId).catch(() => undefined);
+        }
         await activeSecretAnswerChannel.close().catch(() => undefined);
         activeSecretAnswerChannel = undefined;
       }

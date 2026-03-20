@@ -295,6 +295,7 @@ describe("answer command", () => {
   test("uses password prompt and direct answer channel for secret questions", async () => {
     const runId = "answer-secret-1000-abcd";
     const submissions: string[] = [];
+    const { writeSecretAnswerChannel } = await import("../../core/secret-answer-channel.js");
 
     const store = new RunStore(runsDir);
     await store.createRun(runId, "/tmp/spec.md");
@@ -317,11 +318,11 @@ describe("answer command", () => {
           },
         ],
       },
-      answerChannel: {
-        transport: "ipc",
-        path: path.join(tempDir, "secret-answer.sock"),
-        token: "secret-token",
-      },
+    });
+    await writeSecretAnswerChannel(runId as `${string}-${number}-${string}`, {
+      transport: "ipc",
+      path: path.join(tempDir, "secret-answer.sock"),
+      token: "secret-token",
     });
     setStdoutTty(true);
 

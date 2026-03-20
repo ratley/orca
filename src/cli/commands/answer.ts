@@ -6,6 +6,7 @@ import { input, password } from "@inquirer/prompts";
 import type { Command } from "commander";
 
 import { parseQuestionAnswerInput, serializeQuestionAnswerResponse } from "../../core/question-flow.js";
+import { readSecretAnswerChannel } from "../../core/secret-answer-channel.js";
 import { RunStore } from "../../state/store.js";
 import type { PendingAnswerChannel, PendingQuestion } from "../../types/index.js";
 import { selectRun } from "../../utils/select-run.js";
@@ -160,11 +161,12 @@ export async function answerCommandHandler(
     : `${answerPayload}\n`;
 
   if (hasSecretQuestions(run.pendingQuestion)) {
-    if (!run.answerChannel) {
+    const answerChannel = await readSecretAnswerChannel(runId as `${string}-${number}-${string}`);
+    if (!answerChannel) {
       throw new Error("run is waiting for a secret answer but has no active answer channel");
     }
 
-    await submitAnswerViaChannel(run.answerChannel, answerPayload);
+    await submitAnswerViaChannel(answerChannel, answerPayload);
     console.log(`Answer submitted. Run ${runId} will resume shortly.`);
     return;
   }

@@ -111,6 +111,13 @@ describe("isCodexMultiAgentActive", () => {
     await expect(isCodexMultiAgentActive({ codex: { multiAgent: false } }, tmpConfigFile)).resolves.toBe(false);
   });
 
+  it("returns false when Orca config explicitly disables multi-agent even if root config enables it", async () => {
+    const fs = await import("node:fs/promises");
+    await fs.writeFile(tmpConfigFile, "[features]\nmulti_agent = true\n", "utf8");
+
+    await expect(isCodexMultiAgentActive({ codex: { multiAgent: false } }, tmpConfigFile)).resolves.toBe(false);
+  });
+
   it("returns false when root config contains multi_agent = false", async () => {
     const fs = await import("node:fs/promises");
     await fs.writeFile(tmpConfigFile, "[features]\nmulti_agent = false\n", "utf8");
