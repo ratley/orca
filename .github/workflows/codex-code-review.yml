@@ -30,6 +30,14 @@ jobs:
       REVIEW_WORKSPACE: codex-review-workspace
 
     steps:
+      - name: Validate OpenAI secret
+        run: |
+          set -euo pipefail
+          if [ -z "${OPENAI_API_KEY:-}" ]; then
+            echo "::error::OPENAI_API_KEY is not configured for this repository or organization."
+            exit 1
+          fi
+
       - name: Checkout pull request merge commit
         uses: actions/checkout@v5
         with:
@@ -123,10 +131,7 @@ jobs:
       - name: Build Codex review prompt
         run: |
           set -euo pipefail
-          cat <<PROMPT > "${REVIEW_WORKSPACE}/codex-prompt.md"
-          REPO: ${REPOSITORY}
-          PR NUMBER: ${PR_NUMBER}
-
+          cat <<'PROMPT' > "${REVIEW_WORKSPACE}/codex-prompt.md"
           You are reviewing a PR for Orca, a TypeScript CLI that plans and executes task graphs through Codex.
 
           REVIEW CONTEXT:
@@ -149,12 +154,6 @@ jobs:
 
           SELF-REVIEW EXCLUSION:
           - Ignore `.github/workflows/codex-code-review.yml` and the removed Claude review workflow file when reviewing this PR.
-
-          PR TITLE:
-          ${PR_TITLE}
-
-          PR BODY:
-          ${PR_BODY}
 
           YOUR JOB: Find correctness bugs, regressions, and security/runtime breakage that will affect real Orca users.
           NOT YOUR JOB: Style preferences, naming suggestions, speculative future improvements, or docs nitpicks.
@@ -183,6 +182,14 @@ jobs:
           PROMPT
 
           {
+            echo "REPO: ${REPOSITORY}"
+            echo "PR NUMBER: ${PR_NUMBER}"
+            echo ""
+            echo "PR TITLE:"
+            printf '%s\n' "${PR_TITLE}"
+            echo ""
+            echo "PR BODY:"
+            printf '%s\n' "${PR_BODY}"
             echo ""
             echo "Repository: ${REPOSITORY}"
             echo "Pull Request #: ${PR_NUMBER}"
@@ -219,7 +226,7 @@ jobs:
           model: gpt-5.4-2026-03-05
 
       - name: Inspect structured output
-        if: ${{ always() }}
+        if: ${{ steps.run-codex.outcome == 'success' }}
         run: |
           if [ -s "${REVIEW_WORKSPACE}/codex-output.json" ]; then
             jq '.' "${REVIEW_WORKSPACE}/codex-output.json"
