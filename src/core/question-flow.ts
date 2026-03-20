@@ -84,6 +84,45 @@ export function serializeQuestionAnswerResponse(response: ToolRequestUserInputRe
   return `${JSON.stringify(response, null, 2)}\n`;
 }
 
+function buildSingleQuestionTextResponse(question: PendingQuestionPrompt, answer: string): ToolRequestUserInputResponse {
+  return {
+    answers: {
+      [question.id]: {
+        answers: [answer],
+      },
+    },
+  };
+}
+
+function normalizeStructuredAnswers(
+  answerRecord: Record<string, unknown>,
+  pendingQuestion: PendingQuestion,
+): Record<string, { answers: string[] }> {
+  const expectedQuestionIds = new Set(pendingQuestion.questions.map((question) => question.id));
+
+  for (const questionId of Object.keys(answerRecord)) {
+    if (!expectedQuestionIds.has(questionId)) {
+      throw new Error(`answer payload includes unknown question id '${questionId}'`);
+    }
+  }
+
+  const normalizedAnswers: Record<string, { answers: string[] }> = {};
+  for (const question of pendingQuestion.questions) {
+    if (!(question.id in answerRecord)) {
+      throw new Error(`answer payload is missing question id '${question.id}'`);
+    }
+
+    const answers = normalizeAnswerList(answerRecord[question.id]);
+    if (answers === null) {
+      throw new Error(`answer payload for '${question.id}' must be a string, string array, or { answers: string[] }`);
+    }
+
+    normalizedAnswers[question.id] = { answers };
+  }
+
+  return normalizedAnswers;
+}
+
 export function parseQuestionAnswerInput(
   rawInput: string,
   pendingQuestion: PendingQuestion,
@@ -93,65 +132,42 @@ export function parseQuestionAnswerInput(
     throw new Error("answer payload is empty");
   }
 
-  if (pendingQuestion.questions.length === 1 && !trimmed.startsWith("{")) {
-    const onlyQuestion = pendingQuestion.questions[0];
-    if (!onlyQuestion) {
-      throw new Error("pending question is missing its question definition");
-    }
+  const onlyQuestion = pendingQuestion.questions.length === 1 ? pendingQuestion.questions[0] : undefined;
+  if (pendingQuestion.questions.length === 1 && !onlyQuestion) {
+    throw new Error("pending question is missing its question definition");
+  }
 
-    return {
-      answers: {
-        [onlyQuestion.id]: {
-          answers: [trimmed],
-        },
-      },
-    };
+  if (pendingQuestion.questions.length === 1 && !trimmed.startsWith("{")) {
+    return buildSingleQuestionTextResponse(onlyQuestion!, trimmed);
   }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(trimmed);
-  } catch (error) {
-    throw new Error(
-      pendingQuestion.questions.length === 1
-        ? `answer payload is not valid JSON: ${error instanceof Error ? error.message : String(error)}`
-        : "multiple pending questions require a JSON object mapping question ids to answers",
-    );
+  } catch {
+    if (pendingQuestion.questions.length === 1) {
+      return buildSingleQuestionTextResponse(onlyQuestion!, trimmed);
+    }
+
+    throw new Error("multiple pending questions require a JSON object mapping question ids to answers");
   }
 
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    if (pendingQuestion.questions.length === 1) {
+      return buildSingleQuestionTextResponse(onlyQuestion!, trimmed);
+    }
+
     throw new Error("answer payload must be a JSON object");
   }
 
   const record = parsed as Record<string, unknown>;
   if ("answers" in record && record.answers && typeof record.answers === "object" && !Array.isArray(record.answers)) {
-    const normalizedAnswers: Record<string, { answers: string[] }> = {};
-
-    for (const [questionId, answerValue] of Object.entries(record.answers as Record<string, unknown>)) {
-      const answers = normalizeAnswerList(answerValue);
-      if (answers === null) {
-        throw new Error(`answer payload for '${questionId}' must be a string, string array, or { answers: string[] }`);
-      }
-
-      normalizedAnswers[questionId] = { answers };
-    }
-
-    return { answers: normalizedAnswers };
+    return { answers: normalizeStructuredAnswers(record.answers as Record<string, unknown>, pendingQuestion) };
   }
 
-  const normalizedAnswers: Record<string, { answers: string[] }> = {};
-  for (const question of pendingQuestion.questions) {
-    if (!(question.id in record)) {
-      throw new Error(`answer payload is missing question id '${question.id}'`);
-    }
-
-    const answers = normalizeAnswerList(record[question.id]);
-    if (answers === null) {
-      throw new Error(`answer payload for '${question.id}' must be a string, string array, or { answers: string[] }`);
-    }
-
-    normalizedAnswers[question.id] = { answers };
+  if (pendingQuestion.questions.length === 1 && !(onlyQuestion!.id in record)) {
+    return buildSingleQuestionTextResponse(onlyQuestion!, trimmed);
   }
 
-  return { answers: normalizedAnswers };
+  return { answers: normalizeStructuredAnswers(record, pendingQuestion) };
 }
