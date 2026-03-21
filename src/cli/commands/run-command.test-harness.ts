@@ -131,7 +131,8 @@ export function createRunCommandTestHarness(tempPrefix: string): RunCommandTestH
       InvalidPlanError: TestInvalidPlanError
     }));
     void mock.module("../../core/task-runner.js", () => ({
-      runTaskRunner: runTaskRunnerMock
+      runTaskRunner: runTaskRunnerMock,
+      writeSessionSummary: async () => {}
     }));
     void mock.module("../../core/config-loader.js", () => ({
       resolveConfig: resolveConfigMock

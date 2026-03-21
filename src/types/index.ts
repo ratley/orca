@@ -41,6 +41,7 @@ export interface RunStatus {
   overallStatus:
     | "planning"
     | "running"
+    | "reviewing"
     | "waiting_for_answer"
     | "completed"
     | "failed"

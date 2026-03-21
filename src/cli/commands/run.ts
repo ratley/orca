@@ -13,7 +13,7 @@ import { createCodexSession } from "../../agents/codex/session.js";
 import { ensureCodexMultiAgent } from "../../core/codex-config.js";
 import { resolveConfig } from "../../core/config-loader.js";
 import { InvalidPlanError, runPlanner } from "../../core/planner.js";
-import { runTaskRunner } from "../../core/task-runner.js";
+import { runTaskRunner, writeSessionSummary } from "../../core/task-runner.js";
 import { createOpenclawHookHandler, detectOpenclawAvailability } from "../../hooks/adapters/openclaw.js";
 import { createStdoutHookHandler } from "../../hooks/adapters/stdout.js";
 import { HookDispatcher } from "../../hooks/dispatcher.js";
@@ -246,10 +246,18 @@ async function runValidatorCommands(commands: string[]): Promise<ValidationResul
 }
 
 function buildPostExecutionReviewPrompt(cycleIndex: number, validationResults: ValidationResult[], extraPrompt?: string): string {
+  const failedValidations = validationResults.filter((result) => result.exitCode !== 0);
   return [
     "You are Orca's post-execution reviewer.",
     "Inspect uncommitted repository changes and validation command output.",
     "If there are fixable findings, apply fixes directly in the workspace before responding.",
+    "Any validator command with a non-zero exit code is a real finding until it is fixed.",
+    ...(failedValidations.length > 0
+      ? [
+          "One or more validators failed in this cycle.",
+          "Do not return findings=[] unless you have actually fixed the failures and rerun validation successfully.",
+        ]
+      : []),
     "Respond with JSON only using this exact shape:",
     '{"summary":"...","findings":["..."],"fixed":true|false}',
     `Cycle: ${cycleIndex}`,
@@ -506,16 +514,18 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
 
         console.log("Codex consultation passed. Starting execution...");
 
+        const reviewConfig = getExecutionReviewConfig(effectiveConfig);
+
         await runTaskRunner({
           runId: runId as HookEvent["runId"],
           store,
           ...(effectiveConfig ? { config: effectiveConfig } : {}),
           emitHook,
+          deferCompletion: reviewConfig.enabled,
           executeTask: (task, taskRunId, _config, systemContext) =>
             codexSession.executeTask(task, taskRunId, systemContext),
         });
 
-        const reviewConfig = getExecutionReviewConfig(effectiveConfig);
         const finalSummaries: string[] = [];
         const runAfterExecution = await store.getRun(runId);
 
@@ -528,12 +538,26 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
           for (let cycleIndex = 1; cycleIndex <= reviewConfig.maxCycles; cycleIndex += 1) {
             const validationResults = await runValidatorCommands(validatorCommands);
             const prompt = buildPostExecutionReviewPrompt(cycleIndex, validationResults, reviewConfig.prompt);
-            const reviewResult = await requestStructuredExecutionReview(
+            const initialReviewResult = await requestStructuredExecutionReview(
               (prompt) => codexSession.runPrompt(prompt, "review"),
               cycleIndex,
               prompt,
               reviewConfig.prompt
             );
+            const failedValidations = validationResults.filter((result) => result.exitCode !== 0);
+            const reviewResult =
+              failedValidations.length > 0 && initialReviewResult.findings.length === 0
+                ? {
+                    ...initialReviewResult,
+                    summary: initialReviewResult.summary.trim().length > 0
+                      ? `${initialReviewResult.summary} Validator failures still need attention.`
+                      : "Validator failures still need attention.",
+                    findings: failedValidations.map(
+                      (result) => `Validator failed: ${result.command} (exit ${result.exitCode})`,
+                    ),
+                    fixed: false,
+                  }
+                : initialReviewResult;
             finalSummaries.push(`cycle ${cycleIndex}: ${reviewResult.summary}`);
 
             if (reviewResult.findings.length === 0) {
@@ -568,7 +592,8 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
         }
 
         let fallbackReview = "";
-        if (reviewConfig.enabled) {
+        const shouldRunFallbackReview = reviewConfig.enabled && finalSummaries.length === 0;
+        if (shouldRunFallbackReview) {
           fallbackReview = await codexSession.reviewChanges();
         }
 
@@ -583,6 +608,20 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
 
         if (fallbackReview.length > 0) {
           console.log(fallbackReview);
+        }
+
+        const finalRun = await store.getRun(runId);
+        if (finalRun && finalRun.overallStatus !== "failed" && finalRun.overallStatus !== "cancelled") {
+          await store.updateRun(runId, { overallStatus: "completed" });
+          const completedAt = new Date().toISOString();
+          await emitHook({
+            runId: runId as HookEvent["runId"],
+            hook: "onComplete",
+            message: "run-completed",
+            timestamp: completedAt,
+            metadata: { overallStatus: "completed" }
+          });
+          await writeSessionSummary(store, runId, effectiveConfig?.sessionLogs);
         }
       } finally {
         await codexSession.disconnect();

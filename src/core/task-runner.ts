@@ -72,6 +72,7 @@ export interface TaskRunnerOptions {
   store: RunStore;
   config?: OrcaConfig;
   emitHook?: EmitHook;
+  deferCompletion?: boolean;
   /** Override executor — used by tests only. In production, use config.executor. */
   executeTask?: ExecuteTaskFn;
 }
@@ -118,7 +119,7 @@ function buildSessionSummary(run: RunStatus): string {
   ].join("\n");
 }
 
-async function writeSessionSummary(store: RunStore, runId: string, sessionLogsDir?: string): Promise<void> {
+export async function writeSessionSummary(store: RunStore, runId: string, sessionLogsDir?: string): Promise<void> {
   if (!sessionLogsDir) {
     return;
   }
@@ -138,7 +139,7 @@ async function writeSessionSummary(store: RunStore, runId: string, sessionLogsDi
 
 export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
   const emitHook = options.emitHook ?? defaultEmitHook;
-  const { runId, store, config } = options;
+  const { runId, store, config, deferCompletion = false } = options;
   const skills = await loadSkills(config);
   const taskSystemContext = skills.length === 0 ? undefined : formatSkillsSection(skills);
 
@@ -205,22 +206,25 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
         const allDone = run.tasks.every((task) => task.status === "done");
 
         if (allDone) {
-          await store.updateRun(runId, { overallStatus: "completed" });
+          const nextOverallStatus = deferCompletion ? "reviewing" : "completed";
+          await store.updateRun(runId, { overallStatus: nextOverallStatus });
           const completedAt = new Date().toISOString();
           await emitHook({
             runId: run.runId,
             hook: "onMilestone",
             message: "execution-completed",
             timestamp: completedAt,
-            metadata: { overallStatus: "completed" }
+            metadata: { overallStatus: nextOverallStatus }
           });
-          await emitHook({
-            runId: run.runId,
-            hook: "onComplete",
-            message: "run-completed",
-            timestamp: completedAt,
-            metadata: { overallStatus: "completed" }
-          });
+          if (!deferCompletion) {
+            await emitHook({
+              runId: run.runId,
+              hook: "onComplete",
+              message: "run-completed",
+              timestamp: completedAt,
+              metadata: { overallStatus: "completed" }
+            });
+          }
           await writeSessionSummary(store, runId, config?.sessionLogs);
           return;
         }

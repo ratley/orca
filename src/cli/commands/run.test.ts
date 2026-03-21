@@ -205,6 +205,52 @@ describe("run command executor flags", () => {
     expect(findingsEvent?.metadata?.cycleIndex).toBe(1);
   });
 
+  test("skips fallback review when structured execution review already ran", async () => {
+    const { runModule, createCodexSessionMock } = await loadRunModule();
+    const reviewChangesMock = mock(async () => "review");
+    createCodexSessionMock.mockImplementationOnce(async () => ({
+      consultTaskGraph: async () => ({ issues: [], ok: true }),
+      executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
+      runPrompt: async () => '{"summary":"clean","findings":[],"fixed":false}',
+      reviewChanges: reviewChangesMock,
+      disconnect: async () => {}
+    }));
+
+    const configPath = path.join(getTempDir(), "orca.config.js");
+    await writeFile(configPath, "export default { review: { execution: { validator: { auto: false } } } };\n", "utf8");
+
+    await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
+
+    expect(reviewChangesMock).not.toHaveBeenCalled();
+  });
+
+  test("treats failed validator commands as findings even if reviewer reports none", async () => {
+    const { runModule, createCodexSessionMock, hookDispatchMock } = await loadRunModule();
+    createCodexSessionMock.mockImplementationOnce(async () => ({
+      consultTaskGraph: async () => ({ issues: [], ok: true }),
+      executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
+      runPrompt: async () => '{"summary":"clean","findings":[],"fixed":false}',
+      reviewChanges: async () => "review",
+      disconnect: async () => {}
+    }));
+
+    const configPath = path.join(getTempDir(), "orca.config.js");
+    await writeFile(
+      configPath,
+      "export default { review: { execution: { onFindings: 'report_only', validator: { auto: false, commands: ['node -e \"process.exit(1)\"'] } } } };\n",
+      "utf8",
+    );
+
+    await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
+
+    const findingsEvent = hookDispatchMock.mock.calls.find(
+      (call) => (call[0] as { hook?: string })?.hook === "onFindings"
+    )?.[0] as { message?: string; metadata?: { findingsCount?: number } } | undefined;
+
+    expect(findingsEvent?.metadata?.findingsCount).toBe(1);
+    expect(findingsEvent?.message).toContain("Validator failures still need attention");
+  });
+
   test("auto_fix loop stops when clean", async () => {
     const { runModule, createCodexSessionMock } = await loadRunModule();
     const runPromptMock = mock(async () => '{"summary":"clean","findings":[],"fixed":false}');

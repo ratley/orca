@@ -172,6 +172,198 @@ describe("codex session effort wiring", () => {
     }
   });
 
+  test("falls back to completed turn items when streamed agentMessage text is missing", async () => {
+    const runTurnMock = mock(async () => ({
+      agentMessage: "",
+      turn: {
+        status: "completed",
+        items: [
+          {
+            type: "agentMessage",
+            id: "msg-1",
+            text: '{"outcome":"done"}',
+          },
+        ],
+      },
+      items: [],
+    }));
+
+    mockMultiAgentDetection(false);
+    mock.module("@ratley/codex-client", () => ({
+      CodexClient: class {
+        async connect(): Promise<void> {}
+        async disconnect(): Promise<void> {}
+        async startThread(): Promise<{ id: string }> {
+          return { id: "thread-1" };
+        }
+        runTurn = runTurnMock;
+        async runReview(): Promise<{ reviewText: string }> {
+          return { reviewText: "ok" };
+        }
+      },
+    }));
+
+    mock.module("../../utils/skill-loader.js", () => ({
+      loadSkills: async () => [],
+    }));
+
+    const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
+    const session = await createCodexSession(process.cwd());
+
+    try {
+      const result = await session.executeTask(
+        {
+          id: "t1",
+          name: "Task",
+          description: "Do thing",
+          dependencies: [],
+          acceptance_criteria: ["Done"],
+          status: "pending",
+          retries: 0,
+          maxRetries: 3,
+        },
+        "run-1",
+        "context",
+      );
+
+      expect(result).toEqual({
+        outcome: "done",
+        rawResponse: '{"outcome":"done"}',
+      });
+    } finally {
+      await session.disconnect();
+    }
+  });
+
+  test("starts a fresh Codex thread before executing each task", async () => {
+    const startThreadMock = mock(async () => ({ id: `thread-${startThreadMock.mock.calls.length + 1}` }));
+    const runTurnMock = mock(async () => {
+      if (runTurnMock.mock.calls.length === 1) {
+        return {
+          agentMessage: "[]",
+          turn: { status: "completed", items: [] },
+          items: [],
+        };
+      }
+
+      return {
+        agentMessage: '{"outcome":"done"}',
+        turn: { status: "completed", items: [] },
+        items: [],
+      };
+    });
+
+    mockMultiAgentDetection(false);
+    mock.module("@ratley/codex-client", () => ({
+      CodexClient: class {
+        async connect(): Promise<void> {}
+        async disconnect(): Promise<void> {}
+        startThread = startThreadMock;
+        runTurn = runTurnMock;
+        async runReview(): Promise<{ reviewText: string }> {
+          return { reviewText: "ok" };
+        }
+      },
+    }));
+
+    mock.module("../../utils/skill-loader.js", () => ({
+      loadSkills: async () => [],
+    }));
+
+    const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
+    const session = await createCodexSession(process.cwd());
+
+    try {
+      const initialThreadId = session.threadId;
+      await session.planSpec("spec", "context");
+      await session.executeTask(
+        {
+          id: "t1",
+          name: "Task",
+          description: "Update index.ts and run tests",
+          dependencies: [],
+          acceptance_criteria: ["Done"],
+          status: "pending",
+          retries: 0,
+          maxRetries: 3,
+        },
+        "run-1",
+        "context",
+      );
+
+      expect(startThreadMock).toHaveBeenCalledTimes(2);
+      const executeCall = (runTurnMock.mock.calls as Array<Array<{ threadId?: string }>>)[1]?.[0];
+      expect(executeCall?.threadId).toBe(session.threadId);
+      expect(session.threadId).not.toBe(initialThreadId);
+    } finally {
+      await session.disconnect();
+    }
+  });
+
+  test("fails fallback success for file-edit tasks when no file changes were recorded", async () => {
+    const runTurnMock = mock(async () => ({
+      agentMessage: "Implemented the requested update.",
+      turn: {
+        status: "completed",
+        items: [
+          {
+            type: "agentMessage",
+            id: "msg-1",
+            text: "Implemented the requested update.",
+          },
+        ],
+      },
+      items: [],
+    }));
+
+    mockMultiAgentDetection(false);
+    mock.module("@ratley/codex-client", () => ({
+      CodexClient: class {
+        async connect(): Promise<void> {}
+        async disconnect(): Promise<void> {}
+        async startThread(): Promise<{ id: string }> {
+          return { id: "thread-1" };
+        }
+        runTurn = runTurnMock;
+        async runReview(): Promise<{ reviewText: string }> {
+          return { reviewText: "ok" };
+        }
+      },
+    }));
+
+    mock.module("../../utils/skill-loader.js", () => ({
+      loadSkills: async () => [],
+    }));
+
+    const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
+    const session = await createCodexSession(process.cwd());
+
+    try {
+      const result = await session.executeTask(
+        {
+          id: "t1",
+          name: "Write file",
+          description: "Create codename.txt with the exact answer.",
+          dependencies: [],
+          acceptance_criteria: ["codename.txt exists"],
+          status: "pending",
+          retries: 0,
+          maxRetries: 3,
+        },
+        "run-1",
+        "context",
+      );
+
+      expect(result).toEqual({
+        outcome: "failed",
+        rawResponse: "Implemented the requested update.",
+        error: "Codex did not emit a JSON completion marker and no file changes were recorded for a task that required file edits.",
+      });
+    } finally {
+      await session.disconnect();
+    }
+  });
+
   test("smoke: uses per-step thinkingLevel values for decision/planning/review/execution turns", async () => {
     const efforts: string[] = [];
     const runTurnMock = mock(async (params: { effort?: string; input?: Array<{ text?: string }> }) => {
@@ -196,6 +388,14 @@ describe("codex session effort wiring", () => {
       if (prompt.includes("Review this Orca task graph before execution.")) {
         return {
           agentMessage: '{"issues":[],"ok":true}',
+          turn: { status: "completed" },
+          items: [],
+        };
+      }
+
+      if (prompt.includes("execution clarification gate")) {
+        return {
+          agentMessage: '{"needsInput":false,"context":"No extra clarification needed."}',
           turn: { status: "completed" },
           items: [],
         };
@@ -345,6 +545,10 @@ describe("codex session code-simplifier guidance", () => {
 describe("codex session multi-agent prompt guidance", () => {
   test("includes multi-agent guidance in planning, review, consultation, and execution prompts when active", async () => {
     const prompts: string[] = [];
+    const runsDir = await mkdtemp(path.join(os.tmpdir(), "orca-session-multi-agent-active-"));
+    const store = new RunStore(runsDir);
+    const runId = "multi-agent-active-run-1000-abcd";
+    await store.createRun(runId, "/tmp/spec.md");
     const runTurnMock = mock(async (params: { input?: Array<{ text?: string }> }) => {
       const prompt = params.input?.[0]?.text ?? "";
       prompts.push(prompt);
@@ -360,6 +564,14 @@ describe("codex session multi-agent prompt guidance", () => {
       if (prompt.includes("Review this Orca task graph before execution.")) {
         return {
           agentMessage: '{"issues":[],"ok":true}',
+          turn: { status: "completed" },
+          items: [],
+        };
+      }
+
+      if (prompt.includes("execution clarification gate")) {
+        return {
+          agentMessage: '{"needsInput":false,"context":"No extra clarification needed."}',
           turn: { status: "completed" },
           items: [],
         };
@@ -392,7 +604,11 @@ describe("codex session multi-agent prompt guidance", () => {
     }));
 
     const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
-    const session = await createCodexSession(process.cwd());
+    const session = await createCodexSession(process.cwd(), undefined, {
+      runId,
+      store,
+      resumeOverallStatus: "running",
+    });
 
     try {
       await session.planSpec("spec", "context");
@@ -424,6 +640,9 @@ describe("codex session multi-agent prompt guidance", () => {
       expect(reviewPrompt).toContain("Codex multi-agent mode is enabled for this run. Review the graph for safe subagent parallelization.");
       expect(reviewPrompt).toContain("Flag ownership collisions where multiple tasks would touch the same files or subsystem without coordination.");
 
+      expect(consultationPrompt).toContain("Execution tasks are allowed to pause and ask request_user_input questions when they truly need a user-provided value.");
+      expect(consultationPrompt).toContain("Do not ask the user whether Orca may pause during execution for clarification. Assume that execution-time request_user_input is available.");
+      expect(consultationPrompt).toContain("If a task already says it should ask for a missing user value during execution, treat that as a valid execution mechanism, not a reason to ask a meta-question about whether clarification is allowed.");
       expect(consultationPrompt).toContain("Codex multi-agent mode is enabled for this run.");
       expect(consultationPrompt).toContain("Treat missed safe parallelism, fake dependencies, overlapping ownership, or missing integration tasks as review concerns.");
 
@@ -432,11 +651,16 @@ describe("codex session multi-agent prompt guidance", () => {
       expect(executionPrompt).toContain("Integrate subagent results yourself before final completion.");
     } finally {
       await session.disconnect();
+      await rm(runsDir, { recursive: true, force: true });
     }
   });
 
   test("omits multi-agent guidance from planning, review, consultation, and execution prompts when inactive", async () => {
     const prompts: string[] = [];
+    const runsDir = await mkdtemp(path.join(os.tmpdir(), "orca-session-multi-agent-inactive-"));
+    const store = new RunStore(runsDir);
+    const runId = "multi-agent-inactive-run-1000-abcd";
+    await store.createRun(runId, "/tmp/spec.md");
     const runTurnMock = mock(async (params: { input?: Array<{ text?: string }> }) => {
       const prompt = params.input?.[0]?.text ?? "";
       prompts.push(prompt);
@@ -452,6 +676,14 @@ describe("codex session multi-agent prompt guidance", () => {
       if (prompt.includes("Review this Orca task graph before execution.")) {
         return {
           agentMessage: '{"issues":[],"ok":true}',
+          turn: { status: "completed" },
+          items: [],
+        };
+      }
+
+      if (prompt.includes("execution clarification gate")) {
+        return {
+          agentMessage: '{"needsInput":false,"context":"No extra clarification needed."}',
           turn: { status: "completed" },
           items: [],
         };
@@ -484,7 +716,11 @@ describe("codex session multi-agent prompt guidance", () => {
     }));
 
     const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
-    const session = await createCodexSession(process.cwd());
+    const session = await createCodexSession(process.cwd(), undefined, {
+      runId,
+      store,
+      resumeOverallStatus: "running",
+    });
 
     try {
       await session.planSpec("spec", "context");
@@ -506,12 +742,219 @@ describe("codex session multi-agent prompt guidance", () => {
       );
 
       for (const prompt of prompts) {
+        if (prompt.includes("Review this Orca task graph before execution.")) {
+          expect(prompt).toContain("Execution tasks are allowed to pause and ask request_user_input questions when they truly need a user-provided value.");
+          expect(prompt).toContain("Do not ask the user whether Orca may pause during execution for clarification. Assume that execution-time request_user_input is available.");
+        }
         expect(prompt).not.toContain("Codex multi-agent mode is enabled for this run.");
         expect(prompt).not.toContain("use subagents to parallelize them");
         expect(prompt).not.toContain("safe subagent parallelization");
       }
     } finally {
       await session.disconnect();
+      await rm(runsDir, { recursive: true, force: true });
+    }
+  });
+
+  test("uses a clarification turn before interactive execution", async () => {
+    type TurnInputItem = { type: "text"; text: string };
+
+    const runTurnCalls: Array<{
+      collaborationMode?: {
+        mode?: string;
+        settings?: {
+          model?: string | null;
+          reasoning_effort?: string | null;
+          developer_instructions?: string | null;
+        };
+      };
+      input?: TurnInputItem[];
+    }> = [];
+    const runsDir = await mkdtemp(path.join(os.tmpdir(), "orca-session-interactive-"));
+    const store = new RunStore(runsDir);
+    const runId = "interactive-run-1000-abcd";
+    await store.createRun(runId, "/tmp/spec.md");
+
+    mockMultiAgentDetection(false);
+    mock.module("@ratley/codex-client", () => ({
+      CodexClient: class {
+        async connect(): Promise<void> {}
+        async disconnect(): Promise<void> {}
+        async startThread(): Promise<{ id: string }> {
+          return { id: "thread-1" };
+        }
+        async runTurn(params: {
+          collaborationMode?: {
+            mode?: string;
+            settings?: {
+              model?: string | null;
+              reasoning_effort?: string | null;
+              developer_instructions?: string | null;
+            };
+          };
+          input?: TurnInputItem[];
+        }): Promise<{ agentMessage: string; turn: { status: "completed" }; items: [] }> {
+          runTurnCalls.push(params);
+          const prompt = params.input?.[0]?.text ?? "";
+          if (prompt.includes("decomposing a spec")) {
+            return { agentMessage: "[]", turn: { status: "completed" }, items: [] };
+          }
+
+          if (prompt.includes("execution clarification gate")) {
+            return {
+              agentMessage: '{"needsInput":true,"context":"Use the user-provided release codename when updating files."}',
+              turn: { status: "completed" },
+              items: [],
+            };
+          }
+
+          return { agentMessage: '{"outcome":"done"}', turn: { status: "completed" }, items: [] };
+        }
+        async runReview(): Promise<{ reviewText: string }> {
+          return { reviewText: "ok" };
+        }
+      },
+    }));
+
+    mock.module("../../utils/skill-loader.js", () => ({
+      loadSkills: async () => [],
+    }));
+
+    const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
+    const session = await createCodexSession(process.cwd(), undefined, {
+      runId: runId as `${string}-${number}-${string}`,
+      store,
+      resumeOverallStatus: "running",
+    });
+
+    try {
+      await session.planSpec("spec", "context");
+      await session.executeTask(
+        {
+          id: "T1",
+          name: "Collect Release Codename",
+          description: "Ask the user which release codename to use.",
+          dependencies: [],
+          acceptance_criteria: ["Ask exactly one clarification question and use the answer."],
+          status: "pending",
+          retries: 0,
+          maxRetries: 3,
+        },
+        runId,
+        "context",
+      );
+
+      const planningCall = runTurnCalls[0];
+      const clarificationCall = runTurnCalls[1];
+      const executionCall = runTurnCalls[2];
+      expect(planningCall?.collaborationMode).toEqual({
+        mode: "plan",
+        settings: {
+          model: "gpt-5.3-codex",
+          reasoning_effort: "high",
+          developer_instructions: null,
+        },
+      });
+      expect(clarificationCall?.collaborationMode).toEqual({
+        mode: "plan",
+        settings: {
+          model: "gpt-5.3-codex",
+          reasoning_effort: "medium",
+          developer_instructions: null,
+        },
+      });
+      expect(executionCall?.collaborationMode).toBeUndefined();
+
+      const clarificationPrompt = clarificationCall?.input?.[0]?.text ?? "";
+      expect(clarificationPrompt).toContain("You are Orca's execution clarification gate.");
+      expect(clarificationPrompt).toContain("use Codex's request_user_input tool instead of guessing, failing, or baking the question into a later task");
+
+      const executionPrompt = executionCall?.input?.[0]?.text ?? "";
+      expect(executionPrompt).toContain("Resolved Clarification Context:");
+      expect(executionPrompt).toContain("Use the user-provided release codename when updating files.");
+      expect(executionPrompt).not.toContain("request_user_input");
+    } finally {
+      await session.disconnect();
+      await rm(runsDir, { recursive: true, force: true });
+    }
+  });
+
+  test("runs a non-mutating clarification pass before ordinary interactive execution", async () => {
+    type TurnInputItem = { type: "text"; text: string };
+
+    const runTurnCalls: Array<{ collaborationMode?: { mode?: string }; input?: TurnInputItem[] }> = [];
+    const runsDir = await mkdtemp(path.join(os.tmpdir(), "orca-session-default-exec-"));
+    const store = new RunStore(runsDir);
+    const runId = "default-exec-1000-abcd";
+    await store.createRun(runId, "/tmp/spec.md");
+
+    mockMultiAgentDetection(false);
+    mock.module("@ratley/codex-client", () => ({
+      CodexClient: class {
+        async connect(): Promise<void> {}
+        async disconnect(): Promise<void> {}
+        async startThread(): Promise<{ id: string }> {
+          return { id: "thread-1" };
+        }
+        async runTurn(params: {
+          collaborationMode?: { mode?: string };
+          input?: TurnInputItem[];
+        }): Promise<{ agentMessage: string; turn: { status: "completed" }; items: [] }> {
+          runTurnCalls.push(params);
+          const prompt = params.input?.[0]?.text ?? "";
+          if (prompt.includes("execution clarification gate")) {
+            return {
+              agentMessage: '{"needsInput":false,"context":""}',
+              turn: { status: "completed" },
+              items: [],
+            };
+          }
+          return { agentMessage: '{"outcome":"done"}', turn: { status: "completed" }, items: [] };
+        }
+        async runReview(): Promise<{ reviewText: string }> {
+          return { reviewText: "ok" };
+        }
+      },
+    }));
+
+    mock.module("../../utils/skill-loader.js", () => ({
+      loadSkills: async () => [],
+    }));
+
+    const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
+    const session = await createCodexSession(process.cwd(), undefined, {
+      runId: runId as `${string}-${number}-${string}`,
+      store,
+      resumeOverallStatus: "running",
+    });
+
+    try {
+      await session.executeTask(
+        {
+          id: "T1",
+          name: "Add subtract export",
+          description: "Add subtract(a, b) and update tests.",
+          dependencies: [],
+          acceptance_criteria: ["bun test passes"],
+          status: "pending",
+          retries: 0,
+          maxRetries: 3,
+        },
+        runId,
+        "context",
+      );
+
+      expect(runTurnCalls[0]?.collaborationMode).toMatchObject({ mode: "plan" });
+      expect(runTurnCalls[1]?.collaborationMode).toBeUndefined();
+
+      const clarificationPrompt = runTurnCalls[0]?.input?.[0]?.text ?? "";
+      expect(clarificationPrompt).toContain("You are Orca's execution clarification gate.");
+
+      const executionPrompt = runTurnCalls[1]?.input?.[0]?.text ?? "";
+      expect(executionPrompt).not.toContain("request_user_input");
+    } finally {
+      await session.disconnect();
+      await rm(runsDir, { recursive: true, force: true });
     }
   });
 });
@@ -1015,31 +1458,41 @@ describe("codex session question flow", () => {
             resolveAnswerResponse?.();
           }
           rejectServerRequest(): void {}
+          private runTurnCount = 0;
           async runTurn(): Promise<{ agentMessage: string; turn: { status: "completed" }; items: [] }> {
-            queueMicrotask(() => {
-              clientInstance?.emit("request:userInput", {
-                requestId: "req-1",
-                itemId: "item-1",
-                threadId: "thread-1",
-                turnId: "turn-1",
-                questions: [
-                  {
-                    header: "Game Type",
-                    id: "game_type",
-                    question: "Which game type should I build?",
-                    isOther: true,
-                    isSecret: false,
-                    options: [
-                      { label: "Arcade", description: "Arcade style" },
-                      { label: "Puzzle", description: "Puzzle style" },
-                    ],
-                  },
-                ],
+            this.runTurnCount += 1;
+            if (this.runTurnCount === 1) {
+              queueMicrotask(() => {
+                clientInstance?.emit("request:userInput", {
+                  requestId: "req-1",
+                  itemId: "item-1",
+                  threadId: "thread-1",
+                  turnId: "turn-1",
+                  questions: [
+                    {
+                      header: "Game Type",
+                      id: "game_type",
+                      question: "Which game type should I build?",
+                      isOther: true,
+                      isSecret: false,
+                      options: [
+                        { label: "Arcade", description: "Arcade style" },
+                        { label: "Puzzle", description: "Puzzle style" },
+                      ],
+                    },
+                  ],
+                });
               });
-            });
 
-            await answerResponse;
-            clientInstance?.emit("serverRequest:resolved", { requestId: "req-1" });
+              await answerResponse;
+              clientInstance?.emit("serverRequest:resolved", { requestId: "req-1" });
+
+              return {
+                agentMessage: '{"needsInput":true,"context":"Game type selected by user: Arcade."}',
+                turn: { status: "completed" },
+                items: [],
+              };
+            }
 
             return {
               agentMessage: '{"outcome":"done"}',
@@ -1173,30 +1626,40 @@ describe("codex session question flow", () => {
             rejectedRequests.push({ requestId, error });
             settleRequest?.();
           }
+          private runTurnCount = 0;
           async runTurn(): Promise<{ agentMessage: string; turn: { status: "completed" }; items: [] }> {
-            queueMicrotask(() => {
-              clientInstance?.emit("request:userInput", {
-                requestId: "req-1",
-                itemId: "item-1",
-                threadId: "thread-1",
-                turnId: "turn-1",
-                questions: [
-                  {
-                    header: "Game Type",
-                    id: "game_type",
-                    question: "Which game type should I build?",
-                    isOther: true,
-                    isSecret: false,
-                    options: [
-                      { label: "Arcade", description: "Arcade style" },
-                      { label: "Puzzle", description: "Puzzle style" },
-                    ],
-                  },
-                ],
+            this.runTurnCount += 1;
+            if (this.runTurnCount === 1) {
+              queueMicrotask(() => {
+                clientInstance?.emit("request:userInput", {
+                  requestId: "req-1",
+                  itemId: "item-1",
+                  threadId: "thread-1",
+                  turnId: "turn-1",
+                  questions: [
+                    {
+                      header: "Game Type",
+                      id: "game_type",
+                      question: "Which game type should I build?",
+                      isOther: true,
+                      isSecret: false,
+                      options: [
+                        { label: "Arcade", description: "Arcade style" },
+                        { label: "Puzzle", description: "Puzzle style" },
+                      ],
+                    },
+                  ],
+                });
               });
-            });
 
-            await requestSettled;
+              await requestSettled;
+
+              return {
+                agentMessage: '{"needsInput":true,"context":"Game type must come from the user response."}',
+                turn: { status: "completed" },
+                items: [],
+              };
+            }
 
             return {
               agentMessage: '{"outcome":"done"}',
@@ -1302,28 +1765,38 @@ describe("codex session question flow", () => {
             resolveAnswerResponse?.();
           }
           rejectServerRequest(): void {}
+          private runTurnCount = 0;
           async runTurn(): Promise<{ agentMessage: string; turn: { status: "completed" }; items: [] }> {
-            queueMicrotask(() => {
-              clientInstance?.emit("request:userInput", {
-                requestId: "req-1",
-                itemId: "item-1",
-                threadId: "thread-1",
-                turnId: "turn-1",
-                questions: [
-                  {
-                    header: "API Key",
-                    id: "api_key",
-                    question: "Which API key should I use?",
-                    isOther: true,
-                    isSecret: true,
-                    options: null,
-                  },
-                ],
+            this.runTurnCount += 1;
+            if (this.runTurnCount === 1) {
+              queueMicrotask(() => {
+                clientInstance?.emit("request:userInput", {
+                  requestId: "req-1",
+                  itemId: "item-1",
+                  threadId: "thread-1",
+                  turnId: "turn-1",
+                  questions: [
+                    {
+                      header: "API Key",
+                      id: "api_key",
+                      question: "Which API key should I use?",
+                      isOther: true,
+                      isSecret: true,
+                      options: null,
+                    },
+                  ],
+                });
               });
-            });
 
-            await answerResponse;
-            clientInstance?.emit("serverRequest:resolved", { requestId: "req-1" });
+              await answerResponse;
+              clientInstance?.emit("serverRequest:resolved", { requestId: "req-1" });
+
+              return {
+                agentMessage: '{"needsInput":true,"context":"Use the secret API key provided by the user."}',
+                turn: { status: "completed" },
+                items: [],
+              };
+            }
 
             return {
               agentMessage: '{"outcome":"done"}',
@@ -1482,31 +1955,41 @@ describe("codex session question flow", () => {
             responses.push({ requestId, response });
           }
           rejectServerRequest(): void {}
+          private runTurnCount = 0;
           async runTurn(): Promise<{ agentMessage: string; turn: { status: "completed" }; items: [] }> {
-            queueMicrotask(() => {
-              clientInstance?.emit("request:userInput", {
-                requestId: "req-1",
-                itemId: "item-1",
-                threadId: "thread-1",
-                turnId: "turn-1",
-                questions: [
-                  {
-                    header: "Framework",
-                    id: "framework",
-                    question: "Which framework should I target?",
-                    isOther: true,
-                    isSecret: false,
-                    options: null,
-                  },
-                ],
+            this.runTurnCount += 1;
+            if (this.runTurnCount === 1) {
+              queueMicrotask(() => {
+                clientInstance?.emit("request:userInput", {
+                  requestId: "req-1",
+                  itemId: "item-1",
+                  threadId: "thread-1",
+                  turnId: "turn-1",
+                  questions: [
+                    {
+                      header: "Framework",
+                      id: "framework",
+                      question: "Which framework should I target?",
+                      isOther: true,
+                      isSecret: false,
+                      options: null,
+                    },
+                  ],
+                });
               });
-            });
 
-            queueMicrotask(() => {
-              setTimeout(() => {
-                clientInstance?.emit("serverRequest:resolved", { requestId: "req-1" });
-              }, 20);
-            });
+              queueMicrotask(() => {
+                setTimeout(() => {
+                  clientInstance?.emit("serverRequest:resolved", { requestId: "req-1" });
+                }, 20);
+              });
+
+              return {
+                agentMessage: '{"needsInput":false,"context":""}',
+                turn: { status: "completed" },
+                items: [],
+              };
+            }
 
             return {
               agentMessage: '{"outcome":"done"}',
@@ -1562,6 +2045,130 @@ describe("codex session question flow", () => {
 
         expect(resumedRun.overallStatus).toBe("running");
         await expect(readFile(path.join(store.getRunDir(runId), "answer.txt"), "utf8")).rejects.toThrow();
+      } finally {
+        await session.disconnect();
+      }
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("ignores late user-input requests after the run has already failed", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-question-flow-late-"));
+    const store = new RunStore(path.join(tempDir, "runs"));
+    const runId = "run-1000-abcd";
+    await store.createRun(runId, "/tmp/spec.md");
+    await store.updateRun(runId, { mode: "run", overallStatus: "running" });
+
+    const rejectedRequests: Array<{ requestId: string | number; error: { code: number; message: string } }> = [];
+    let clientInstance: EventEmitter | null = null;
+
+    try {
+      mockMultiAgentDetection(false);
+      mock.module("@ratley/codex-client", () => ({
+        CodexClient: class extends EventEmitter {
+          constructor() {
+            super();
+            clientInstance = this;
+          }
+
+          async connect(): Promise<void> {}
+          async disconnect(): Promise<void> {}
+          async startThread(): Promise<{ id: string }> {
+            return { id: "thread-1" };
+          }
+          async runReview(): Promise<{ reviewText: string }> {
+            return { reviewText: "ok" };
+          }
+          rejectServerRequest(requestId: string | number, error: { code: number; message: string }): void {
+            rejectedRequests.push({ requestId, error });
+          }
+          private runTurnCount = 0;
+          async runTurn(): Promise<{ agentMessage: string; turn: { status: "completed" }; items: [] }> {
+            this.runTurnCount += 1;
+            if (this.runTurnCount === 1) {
+              await store.updateRun(runId, { overallStatus: "failed" });
+              setTimeout(() => {
+                clientInstance?.emit("request:userInput", {
+                  requestId: "req-late",
+                  itemId: "item-1",
+                  threadId: "thread-1",
+                  turnId: "turn-1",
+                  questions: [
+                    {
+                      header: "Codename",
+                      id: "codename",
+                      question: "Which codename should I use?",
+                      isOther: true,
+                      isSecret: false,
+                      options: null,
+                    },
+                  ],
+                });
+              }, 10);
+
+              return {
+                agentMessage: '{"needsInput":false,"context":""}',
+                turn: { status: "completed" },
+                items: [],
+              };
+            }
+
+            return {
+              agentMessage: '{"outcome":"done"}',
+              turn: { status: "completed" },
+              items: [],
+            };
+          }
+        },
+      }));
+
+      mock.module("../../utils/skill-loader.js", () => ({
+        loadSkills: async () => [],
+      }));
+
+      const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
+      const session = await createCodexSession(process.cwd(), undefined, {
+        runId: runId as `${string}-${number}-${string}`,
+        store,
+        resumeOverallStatus: "running",
+      });
+
+      try {
+        const result = await session.executeTask(
+          {
+            id: "task-1",
+            name: "Configure release",
+            description: "Use the provided codename.",
+            dependencies: [],
+            acceptance_criteria: ["Release is configured"],
+            status: "pending",
+            retries: 0,
+            maxRetries: 3,
+          },
+          runId,
+          "context",
+        );
+
+        expect(result.outcome).toBe("done");
+
+        await waitFor(async () => {
+          const run = await store.getRun(runId);
+          return rejectedRequests.length > 0 && run ? run : null;
+        });
+
+        const run = await store.getRun(runId);
+        expect(run?.overallStatus).toBe("failed");
+        expect(run?.pendingQuestion).toBeUndefined();
+        expect(rejectedRequests).toEqual([
+          {
+            requestId: "req-late",
+            error: {
+              code: -32603,
+              message: `Run ${runId} is already failed; ignoring late requestUserInput prompt.`,
+            },
+          },
+        ]);
       } finally {
         await session.disconnect();
       }

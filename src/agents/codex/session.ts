@@ -8,6 +8,7 @@ import { CodexClient } from "@ratley/codex-client";
 import type {
   CompletedTurn,
   RequestId,
+  ThreadItem,
   ToolRequestUserInputParams,
   ToolRequestUserInputResponse,
 } from "@ratley/codex-client";
@@ -67,12 +68,41 @@ function getMultiAgentPlanningGuidance(multiAgentActive: boolean): string[] {
   ];
 }
 
-function buildPlanningPrompt(spec: string, systemContext: string, multiAgentActive: boolean): string {
+function getClarificationRequestGuidance(clarificationToolAvailable: boolean, scope: "planning" | "execution" | "review"): string[] {
+  if (!clarificationToolAvailable) {
+    return [];
+  }
+
+  const firstLine = scope === "execution"
+    ? "If you need any user-provided value, preference, approval, or clarification to complete this task correctly, use Codex's request_user_input tool instead of guessing, failing, or baking the question into a later task."
+    : "If a blocking ambiguity prevents correct work, use Codex's request_user_input tool to ask concise clarification questions instead of guessing.";
+
+  return [
+    firstLine,
+    "Ask at most 3 short questions with stable snake_case ids.",
+    "If you need a secret such as a token or password, mark that question as secret.",
+    ...(scope === "execution"
+      ? [
+          "If this task is itself about obtaining clarification, it is not complete until the question has been asked, answered, and the answer has been applied.",
+          "After the user answers, continue the same turn and finish the requested file changes, commands, and verification before responding.",
+          "Do not stop after acknowledging the answer. Resume implementation immediately and only finish once the requested edits are on disk and validated.",
+        ]
+      : []),
+  ];
+}
+
+function buildPlanningPrompt(
+  spec: string,
+  systemContext: string,
+  multiAgentActive: boolean,
+  clarificationToolAvailable: boolean,
+): string {
   return [
     systemContext,
     "You are decomposing a spec into an ordered task graph.",
     "Prefer task decomposition that maximizes safe parallelism for independent workstreams.",
     "Isolate task ownership (files/subsystems) to avoid cross-task collisions.",
+    ...getClarificationRequestGuidance(clarificationToolAvailable, "planning"),
     ...getMultiAgentPlanningGuidance(multiAgentActive),
     ...getCodeSimplifierGuidance(),
     "Return a JSON array of tasks.",
@@ -92,6 +122,7 @@ function buildTaskExecutionPrompt(
   cwd: string,
   systemContext?: string,
   multiAgentActive = false,
+  clarificationContext?: string,
 ): string {
   return [
     ...(systemContext ? [systemContext] : []),
@@ -111,6 +142,9 @@ function buildTaskExecutionPrompt(
     `Task Name: ${task.name}`,
     "Task Description:",
     task.description,
+    ...(clarificationContext && clarificationContext.trim().length > 0
+      ? ["Resolved Clarification Context:", clarificationContext.trim()]
+      : []),
     "Acceptance Criteria:",
     ...task.acceptance_criteria.map(
       (criterion, index) => `${index + 1}. ${criterion}`,
@@ -124,10 +158,44 @@ function buildTaskExecutionPrompt(
   ].join("\n\n");
 }
 
-function buildPlanDecisionPrompt(spec: string, systemContext: string): string {
+function buildTaskExecutionClarificationPrompt(
+  task: Task,
+  runId: string,
+  cwd: string,
+  systemContext?: string,
+): string {
+  return [
+    ...(systemContext ? [systemContext] : []),
+    "You are Orca's execution clarification gate.",
+    ...getClarificationRequestGuidance(true, "execution"),
+    `Run ID: ${runId}`,
+    `Repository CWD: ${cwd}`,
+    `Task ID: ${task.id}`,
+    `Task Name: ${task.name}`,
+    "Task Description:",
+    task.description,
+    "Acceptance Criteria:",
+    ...task.acceptance_criteria.map(
+      (criterion, index) => `${index + 1}. ${criterion}`,
+    ),
+    "Inspect the repository and task to decide whether execution needs any user-provided value or preference.",
+    "Do not edit files, do not run mutating commands, and do not claim the task is complete in this turn.",
+    "If user input is needed, ask via request_user_input, wait for the answer, then continue and summarize the resolved constraint.",
+    'Return JSON only with shape: {"needsInput":boolean,"context":string}',
+    "Set needsInput=true only if you actually asked the user in this clarification turn.",
+    "Set context to a concise execution-ready summary of the user-provided value(s) and any discovered constraints the execution turn must honor. Use an empty string when no extra context is needed.",
+  ].join("\n\n");
+}
+
+function buildPlanDecisionPrompt(
+  spec: string,
+  systemContext: string,
+  clarificationToolAvailable: boolean,
+): string {
   return [
     systemContext,
     "You are Orca's planning gate.",
+    ...getClarificationRequestGuidance(clarificationToolAvailable, "planning"),
     "Decide whether this spec needs multi-step planning or can run as one direct execution task.",
     "Set needsPlan=true when coordination/dependencies/research/design across multiple steps are required.",
     "Set needsPlan=false when a single focused execution task is sufficient.",
@@ -137,11 +205,17 @@ function buildPlanDecisionPrompt(spec: string, systemContext: string): string {
   ].join("\n\n");
 }
 
-function buildTaskGraphReviewPrompt(tasks: Task[], systemContext: string, multiAgentActive: boolean): string {
+function buildTaskGraphReviewPrompt(
+  tasks: Task[],
+  systemContext: string,
+  multiAgentActive: boolean,
+  clarificationToolAvailable: boolean,
+): string {
   return [
     systemContext,
     "You are Orca's pre-execution task-graph reviewer.",
     ...getCodeSimplifierGuidance(),
+    ...getClarificationRequestGuidance(clarificationToolAvailable, "review"),
     ...(multiAgentActive
       ? [
           "Codex multi-agent mode is enabled for this run. Review the graph for safe subagent parallelization.",
@@ -164,12 +238,25 @@ function buildTaskGraphReviewPrompt(tasks: Task[], systemContext: string, multiA
   ].join("\n\n");
 }
 
-function buildTaskGraphConsultationPrompt(tasks: Task[], multiAgentActive: boolean): string {
+function buildTaskGraphConsultationPrompt(
+  tasks: Task[],
+  multiAgentActive: boolean,
+  clarificationToolAvailable: boolean,
+): string {
   const taskGraphJson = JSON.stringify(tasks, null, 2);
 
   return [
     "Review this Orca task graph before execution.",
     "Flag any: missing steps, wrong dependency order, tasks that are underdefined, or potential blockers.",
+    ...getClarificationRequestGuidance(clarificationToolAvailable, "review"),
+    ...(clarificationToolAvailable
+      ? [
+          "Execution tasks are allowed to pause and ask request_user_input questions when they truly need a user-provided value.",
+          "Do not ask the user whether Orca may pause during execution for clarification. Assume that execution-time request_user_input is available.",
+          "If a task already says it should ask for a missing user value during execution, treat that as a valid execution mechanism, not a reason to ask a meta-question about whether clarification is allowed.",
+          "Only ask a review-time clarification question if the graph cannot be assessed or corrected without an answer right now.",
+        ]
+      : []),
     ...(multiAgentActive
       ? [
           "",
@@ -219,6 +306,14 @@ function extractAgentText(result: CompletedTurn): string {
     }
   }
 
+  const completedTurnAgentItems = result.turn.items.filter((item) => item.type === "agentMessage");
+  if (completedTurnAgentItems.length > 0) {
+    const last = completedTurnAgentItems[completedTurnAgentItems.length - 1];
+    if (last !== undefined && "text" in last && typeof last.text === "string") {
+      return last.text;
+    }
+  }
+
   throw new Error("Codex response was empty");
 }
 
@@ -262,6 +357,11 @@ export interface PlanNeedDecision {
   reason: string;
 }
 
+interface ExecutionClarificationDecision {
+  needsInput: boolean;
+  context: string;
+}
+
 function parsePlanDecision(raw: string): PlanNeedDecision {
   const json = extractJson(raw);
   const parsed = JSON.parse(json) as unknown;
@@ -281,6 +381,28 @@ function parsePlanDecision(raw: string): PlanNeedDecision {
   return {
     needsPlan: candidate.needsPlan,
     reason: candidate.reason,
+  };
+}
+
+function parseExecutionClarificationDecision(raw: string): ExecutionClarificationDecision {
+  const json = extractJson(raw);
+  const parsed = JSON.parse(json) as unknown;
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Codex execution clarification response was not a JSON object");
+  }
+
+  const candidate = parsed as { needsInput?: unknown; context?: unknown };
+  if (typeof candidate.needsInput !== "boolean") {
+    throw new Error("Codex execution clarification response missing boolean needsInput");
+  }
+
+  if (typeof candidate.context !== "string") {
+    throw new Error("Codex execution clarification response missing string context");
+  }
+
+  return {
+    needsInput: candidate.needsInput,
+    context: candidate.context,
   };
 }
 
@@ -336,7 +458,7 @@ function inferOutcomeFromText(raw: string): TaskExecutionResult {
   return { outcome: "done", rawResponse: raw };
 }
 
-function parseTaskExecution(raw: string): TaskExecutionResult {
+function parseTaskExecutionWithSource(raw: string): { result: TaskExecutionResult; usedCompletionMarker: boolean } {
   let json: string;
   let parsed: unknown;
 
@@ -344,18 +466,26 @@ function parseTaskExecution(raw: string): TaskExecutionResult {
     json = extractJson(raw);
     parsed = JSON.parse(json);
   } catch {
-    // Codex did not emit a JSON completion marker — fall back to text inference.
-    return inferOutcomeFromText(raw);
+    return {
+      result: inferOutcomeFromText(raw),
+      usedCompletionMarker: false,
+    };
   }
 
   if (!parsed || typeof parsed !== "object") {
-    return inferOutcomeFromText(raw);
+    return {
+      result: inferOutcomeFromText(raw),
+      usedCompletionMarker: false,
+    };
   }
 
   const candidate = parsed as { outcome?: unknown; error?: unknown };
 
   if (candidate.outcome !== "done" && candidate.outcome !== "failed") {
-    return inferOutcomeFromText(raw);
+    return {
+      result: inferOutcomeFromText(raw),
+      usedCompletionMarker: false,
+    };
   }
 
   if (candidate.error !== undefined && typeof candidate.error !== "string") {
@@ -363,10 +493,101 @@ function parseTaskExecution(raw: string): TaskExecutionResult {
   }
 
   return {
-    outcome: candidate.outcome,
-    rawResponse: raw,
-    ...(typeof candidate.error === "string" ? { error: candidate.error } : {}),
+    result: {
+      outcome: candidate.outcome,
+      rawResponse: raw,
+      ...(typeof candidate.error === "string" ? { error: candidate.error } : {}),
+    },
+    usedCompletionMarker: true,
   };
+}
+
+function collectCompletedTurnItems(result: CompletedTurn): ThreadItem[] {
+  return [...result.items, ...(Array.isArray(result.turn.items) ? result.turn.items : [])];
+}
+
+function taskLikelyMutatesFiles(task: Task): boolean {
+  const normalized = [
+    task.name,
+    task.description,
+    ...task.acceptance_criteria,
+  ]
+    .join("\n")
+    .toLowerCase();
+
+  return (
+    normalized.includes(".ts") ||
+    normalized.includes(".js") ||
+    normalized.includes(".tsx") ||
+    normalized.includes(".jsx") ||
+    normalized.includes(".json") ||
+    normalized.includes(".md") ||
+    normalized.includes(".txt") ||
+    normalized.includes("create ") ||
+    normalized.includes("update ") ||
+    normalized.includes("write ") ||
+    normalized.includes("edit ") ||
+    normalized.includes("export ")
+  );
+}
+
+function hasRecordedFileChanges(items: ThreadItem[]): boolean {
+  return items.some((item) => {
+    if (item.type !== "fileChange") {
+      return false;
+    }
+
+    const status = "status" in item ? item.status : undefined;
+    const changes = "changes" in item ? item.changes : undefined;
+    return status === "completed" && Array.isArray(changes) && changes.length > 0;
+  });
+}
+
+function hasSuccessfulVerificationCommand(items: ThreadItem[]): boolean {
+  return items.some((item) => {
+    if (item.type !== "commandExecution") {
+      return false;
+    }
+
+    const command = typeof item.command === "string" ? item.command : "";
+    return (
+      item.exitCode === 0 &&
+      /(bun test|npm run test|npm test|validate|lint|typecheck|tsc|build|pytest|cargo test)/i.test(command)
+    );
+  });
+}
+
+function enforceFallbackExecutionEvidence(
+  task: Task,
+  result: CompletedTurn,
+  parsedResult: TaskExecutionResult,
+  usedCompletionMarker: boolean,
+): TaskExecutionResult {
+  if (usedCompletionMarker || parsedResult.outcome !== "done") {
+    return parsedResult;
+  }
+
+  const items = collectCompletedTurnItems(result);
+  const fileChangesRecorded = hasRecordedFileChanges(items);
+  const verificationRan = hasSuccessfulVerificationCommand(items);
+
+  if (taskLikelyMutatesFiles(task) && !fileChangesRecorded) {
+    return {
+      outcome: "failed",
+      rawResponse: parsedResult.rawResponse,
+      error: "Codex did not emit a JSON completion marker and no file changes were recorded for a task that required file edits.",
+    };
+  }
+
+  if (!fileChangesRecorded && !verificationRan && parsedResult.rawResponse.trim().length === 0) {
+    return {
+      outcome: "failed",
+      rawResponse: parsedResult.rawResponse,
+      error: "Codex did not emit a JSON completion marker or any concrete execution artifacts.",
+    };
+  }
+
+  return parsedResult;
 }
 
 function getModel(config?: OrcaConfig): string {
@@ -958,6 +1179,52 @@ export async function createCodexSession(
   let activeSecretAnswerChannel: SecretAnswerChannelState | undefined;
   const resumedOverallStatus: ResumeOverallStatus = interactionContext?.resumeOverallStatus ?? "running";
   const resolvedServerRequests = new Set<RequestId>();
+  const clarificationToolAvailable = interactionContext !== undefined;
+
+  const buildRunTurnParams = (
+    step: ThinkingStep,
+    input: Array<{ type: "text"; text: string }>,
+    enableQuestionTool = false,
+  ) => {
+    const effort = getEffort(config, step);
+    const usePlanCollaborationMode = enableQuestionTool && step !== "execution";
+    return {
+      threadId,
+      effort,
+      input,
+      ...(usePlanCollaborationMode
+        ? {
+            collaborationMode: {
+              mode: "plan" as const,
+              settings: {
+                model: getModel(config),
+                reasoning_effort: effort,
+                developer_instructions: null,
+              },
+            },
+          }
+        : {}),
+    };
+  };
+
+  const buildExecutionClarificationTurnParams = (
+    input: Array<{ type: "text"; text: string }>,
+  ) => {
+    const effort = getEffort(config, "execution");
+    return {
+      threadId,
+      effort,
+      input,
+      collaborationMode: {
+        mode: "plan" as const,
+        settings: {
+          model: getModel(config),
+          reasoning_effort: effort,
+          developer_instructions: null,
+        },
+      },
+    };
+  };
 
   const respondToUserInputRequest = (requestId: RequestId, response: ToolRequestUserInputResponse): void => {
     const specificResponder = Reflect.get(client as object, "respondToUserInputRequest");
@@ -1031,6 +1298,24 @@ export async function createCodexSession(
           }
 
           const pendingQuestion = createPendingQuestion(request.requestId, request);
+          const currentRun = await interactionContext.store.getRun(interactionContext.runId);
+          if (!currentRun) {
+            rejectUserInputRequest(request.requestId, `Run not found while waiting for input: ${interactionContext.runId}`);
+            return;
+          }
+
+          if (
+            currentRun.overallStatus === "completed" ||
+            currentRun.overallStatus === "failed" ||
+            currentRun.overallStatus === "cancelled"
+          ) {
+            rejectUserInputRequest(
+              request.requestId,
+              `Run ${interactionContext.runId} is already ${currentRun.overallStatus}; ignoring late requestUserInput prompt.`,
+            );
+            return;
+          }
+
           await clearAnswerFile(interactionContext.store, interactionContext.runId);
           let secretAnswerChannel: SecretAnswerChannelState | undefined;
           if (hasSecretQuestions(request)) {
@@ -1150,24 +1435,32 @@ export async function createCodexSession(
 
   let skills: LoadedSkill[];
   let threadId: string;
-  try {
-    skills = await resolveTurnSkills(client, config, cwd);
+  const startNewThread = async (): Promise<string> => {
     const thread = await client.startThread({});
     threadId = thread.id;
+    return threadId;
+  };
+  try {
+    skills = await resolveTurnSkills(client, config, cwd);
+    await startNewThread();
   } catch (error) {
     await client.disconnect();
     throw error;
   }
 
   return {
-    threadId,
+    get threadId(): string {
+      return threadId;
+    },
 
     async decidePlanningNeed(spec: string, systemContext: string): Promise<PlanNeedDecision> {
-      const result = await client.runTurn({
-        threadId,
-        effort: getEffort(config, "decision"),
-        input: buildTurnInput(buildPlanDecisionPrompt(spec, systemContext), skills),
-      });
+      const result = await client.runTurn(
+        buildRunTurnParams(
+          "decision",
+          buildTurnInput(buildPlanDecisionPrompt(spec, systemContext, clarificationToolAvailable), skills),
+          clarificationToolAvailable,
+        ),
+      );
 
       const rawResponse = extractAgentText(result);
       return parsePlanDecision(rawResponse);
@@ -1178,9 +1471,11 @@ export async function createCodexSession(
       systemContext: string,
     ): Promise<PlanResult> {
       const result = await client.runTurn({
-        threadId,
-        effort: getEffort(config, "planning"),
-        input: buildTurnInput(buildPlanningPrompt(spec, systemContext, multiAgentActive), skills),
+        ...buildRunTurnParams(
+          "planning",
+          buildTurnInput(buildPlanningPrompt(spec, systemContext, multiAgentActive, clarificationToolAvailable), skills),
+          clarificationToolAvailable,
+        ),
       });
 
       const rawResponse = extractAgentText(result);
@@ -1193,9 +1488,14 @@ export async function createCodexSession(
 
     async reviewTaskGraph(tasks: Task[], systemContext: string): Promise<TaskGraphReviewResult> {
       const result = await client.runTurn({
-        threadId,
-        effort: getEffort(config, "review"),
-        input: buildTurnInput(buildTaskGraphReviewPrompt(tasks, systemContext, multiAgentActive), skills),
+        ...buildRunTurnParams(
+          "review",
+          buildTurnInput(
+            buildTaskGraphReviewPrompt(tasks, systemContext, multiAgentActive, clarificationToolAvailable),
+            skills,
+          ),
+          clarificationToolAvailable,
+        ),
       });
 
       const rawResponse = extractAgentText(result);
@@ -1208,19 +1508,49 @@ export async function createCodexSession(
       systemContext?: string,
     ): Promise<TaskExecutionResult> {
       activeTaskContext = { taskId: task.id, taskName: task.name };
+      let clarificationContext = "";
       let result: CompletedTurn;
       try {
+        if (clarificationToolAvailable) {
+          await startNewThread();
+          const clarificationResult = await client.runTurn(
+            buildExecutionClarificationTurnParams(
+              buildTurnInput(
+                buildTaskExecutionClarificationPrompt(task, runId, cwd, systemContext),
+                skills,
+              ),
+            ),
+          );
+          const clarificationRawResponse = extractAgentText(clarificationResult);
+          const clarificationDecision = parseExecutionClarificationDecision(clarificationRawResponse);
+          clarificationContext = clarificationDecision.context.trim();
+        }
+
+        await startNewThread();
         result = await client.runTurn({
-          threadId,
-          effort: getEffort(config, "execution"),
-          input: buildTurnInput(buildTaskExecutionPrompt(task, runId, cwd, systemContext, multiAgentActive), skills),
+          ...buildRunTurnParams(
+            "execution",
+            buildTurnInput(
+              buildTaskExecutionPrompt(
+                task,
+                runId,
+                cwd,
+                systemContext,
+                multiAgentActive,
+                clarificationContext,
+              ),
+              skills,
+            ),
+            false,
+          ),
         });
       } finally {
         activeTaskContext = undefined;
       }
 
       const rawResponse = extractAgentText(result);
-      const parsedResult = parseTaskExecution(rawResponse);
+      const { result: parsedTaskResult, usedCompletionMarker } = parseTaskExecutionWithSource(rawResponse);
+      const parsedResult = enforceFallbackExecutionEvidence(task, result, parsedTaskResult, usedCompletionMarker);
       const status = result.turn.status;
       if (status === "failed") {
         return {
@@ -1237,12 +1567,10 @@ export async function createCodexSession(
     },
 
     async consultTaskGraph(tasks: Task[]): Promise<ConsultationResult> {
-      const prompt = buildTaskGraphConsultationPrompt(tasks, multiAgentActive);
+      const prompt = buildTaskGraphConsultationPrompt(tasks, multiAgentActive, clarificationToolAvailable);
 
       const result = await client.runTurn({
-        threadId,
-        effort: getEffort(config, "review"),
-        input: buildTurnInput(prompt, skills),
+        ...buildRunTurnParams("review", buildTurnInput(prompt, skills), clarificationToolAvailable),
       });
 
       const rawResponse = extractAgentText(result);
@@ -1274,9 +1602,7 @@ export async function createCodexSession(
 
     async runPrompt(prompt: string, step: ThinkingStep = "execution"): Promise<string> {
       const result = await client.runTurn({
-        threadId,
-        effort: getEffort(config, step),
-        input: buildTurnInput(prompt, skills),
+        ...buildRunTurnParams(step, buildTurnInput(prompt, skills), clarificationToolAvailable && step !== "execution"),
       });
 
       return extractAgentText(result);

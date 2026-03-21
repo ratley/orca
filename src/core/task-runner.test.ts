@@ -76,6 +76,40 @@ describe("task-runner", () => {
     expect(hookEvents.some((event) => event.hook === "onComplete" && event.message === "run-completed")).toBe(true);
   });
 
+  test("defers final completion when configured for post-execution review", async () => {
+    const tasks = [makeTask("t1")];
+    await store.updateRun(runId, {
+      mode: "run",
+      overallStatus: "running",
+      tasks
+    });
+
+    const hookEvents: HookEvent[] = [];
+
+    setExecuteTaskForTests(async () => ({
+      outcome: "done",
+      rawResponse: '{"outcome":"done"}'
+    }));
+
+    await runTaskRunner({
+      runId,
+      store,
+      deferCompletion: true,
+      emitHook: async (event) => {
+        hookEvents.push(event);
+      }
+    });
+
+    const run = await store.getRun(runId);
+    if (!run) {
+      throw new Error("Run missing after deferred completion");
+    }
+
+    expect(run.overallStatus).toBe("reviewing");
+    expect(hookEvents.some((event) => event.hook === "onMilestone" && event.message === "execution-completed")).toBe(true);
+    expect(hookEvents.some((event) => event.hook === "onComplete")).toBe(false);
+  });
+
   test("retries transient task failure and then succeeds", async () => {
     const tasks = [makeTask("t1")];
     await store.updateRun(runId, {

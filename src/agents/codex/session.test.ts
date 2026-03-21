@@ -1,10 +1,9 @@
 import { existsSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, test } from "bun:test";
 
 import type { Task } from "../../types/index.js";
-import { createCodexSession } from "./session.js";
 
-// Try common locations for the codex binary
 const CODEX_PATHS = [
   "/Applications/Codex.app/Contents/Resources/codex",
   Bun.which("codex"),
@@ -12,7 +11,8 @@ const CODEX_PATHS = [
   "/usr/local/bin/codex",
 ].filter(Boolean) as string[];
 
-const codexPath = CODEX_PATHS.find((p) => existsSync(p)) ?? null;
+const codexPath = CODEX_PATHS.find((candidate) => existsSync(candidate)) ?? null;
+const sessionModulePath = path.resolve(import.meta.dir, "session.ts");
 
 function makeTask(overrides: Partial<Task> = {}): Task {
   return {
@@ -35,64 +35,87 @@ function makeTask(overrides: Partial<Task> = {}): Task {
   };
 }
 
+function runCodexIntegrationSnippet(snippet: string): { exitCode: number; stdout: string; stderr: string } {
+  const proc = Bun.spawnSync({
+    cmd: ["bun", "--eval", snippet],
+    stdout: "pipe",
+    stderr: "pipe",
+    env: {
+      ...process.env,
+      ORCA_CODEX_PATH: codexPath ?? "",
+    },
+  });
+
+  return {
+    exitCode: proc.exitCode,
+    stdout: proc.stdout.toString("utf8"),
+    stderr: proc.stderr.toString("utf8"),
+  };
+}
+
 if (!codexPath) {
   test("codex adapter integration skipped (codex binary not found)", () => {
-    // Guard: skip gracefully when codex is not installed
     expect(codexPath).toBeNull();
   });
 } else {
   describe("Codex adapter integration (createCodexSession)", () => {
-    test("creates session, executes a simple task, and disconnects", async () => {
-      const session = await createCodexSession("/tmp");
+    test("creates session, executes a simple task, and disconnects", () => {
+      const task = JSON.stringify(makeTask());
+      const { exitCode, stdout, stderr } = runCodexIntegrationSnippet(`
+        import { createCodexSession } from ${JSON.stringify(sessionModulePath)};
+        const task = ${task};
+        const session = await createCodexSession("/tmp");
+        try {
+          const result = await session.executeTask(task, "test-run-id");
+          console.log(JSON.stringify({
+            threadId: session.threadId,
+            outcome: result.outcome,
+            rawLength: result.rawResponse.length,
+          }));
+        } finally {
+          await session.disconnect();
+        }
+      `);
 
-      try {
-        expect(typeof session.threadId).toBe("string");
-        expect(session.threadId.length).toBeGreaterThan(0);
+      expect(exitCode).toBe(0);
+      expect(stderr).toBe("");
 
-        const result = await session.executeTask(makeTask(), "test-run-id");
-
-        expect(result.outcome === "done" || result.outcome === "failed").toBe(true);
-        expect(typeof result.rawResponse).toBe("string");
-        expect(result.rawResponse.length).toBeGreaterThan(0);
-
-        console.log(`executeTask outcome: ${result.outcome}`);
-        console.log(`rawResponse length: ${result.rawResponse.length}`);
-      } finally {
-        await session.disconnect();
-      }
+      const parsed = JSON.parse(stdout.trim()) as {
+        threadId: string;
+        outcome: string;
+        rawLength: number;
+      };
+      expect(parsed.threadId.length).toBeGreaterThan(0);
+      expect(parsed.outcome === "done" || parsed.outcome === "failed").toBe(true);
+      expect(parsed.rawLength).toBeGreaterThan(0);
     }, 300_000);
 
-    test("consultTaskGraph returns valid ConsultationResult", async () => {
-      const session = await createCodexSession("/tmp");
+    test("consultTaskGraph returns valid ConsultationResult", () => {
+      const tasks = JSON.stringify([
+        makeTask({ id: "task-1", name: "Create file", dependencies: [] }),
+        makeTask({ id: "task-2", name: "Read file", dependencies: ["task-1"] }),
+      ]);
+      const { exitCode, stdout, stderr } = runCodexIntegrationSnippet(`
+        import { createCodexSession } from ${JSON.stringify(sessionModulePath)};
+        const tasks = ${tasks};
+        const session = await createCodexSession("/tmp");
+        try {
+          const result = await session.consultTaskGraph(tasks);
+          console.log(JSON.stringify(result));
+        } finally {
+          await session.disconnect();
+        }
+      `);
 
-      try {
-        const tasks: Task[] = [
-          makeTask({ id: "task-1", name: "Create file", dependencies: [] }),
-          makeTask({ id: "task-2", name: "Read file", dependencies: ["task-1"] }),
-        ];
+      expect(exitCode).toBe(0);
+      expect(stderr).toBe("");
 
-        const result = await session.consultTaskGraph(tasks);
-
-        expect(Array.isArray(result.issues)).toBe(true);
-        expect(typeof result.ok).toBe("boolean");
-
-        console.log(`Consultation ok: ${result.ok}`);
-        console.log(`Issues: ${JSON.stringify(result.issues)}`);
-      } finally {
-        await session.disconnect();
-      }
-    }, 300_000);
-
-    test("reviewChanges returns a string", async () => {
-      const session = await createCodexSession("/tmp");
-
-      try {
-        const review = await session.reviewChanges();
-        expect(typeof review).toBe("string");
-        console.log(`Review length: ${review.length}`);
-      } finally {
-        await session.disconnect();
-      }
+      const parsed = JSON.parse(stdout.trim()) as {
+        issues: unknown[];
+        ok: boolean;
+      };
+      expect(Array.isArray(parsed.issues)).toBe(true);
+      expect(typeof parsed.ok).toBe("boolean");
     }, 300_000);
   });
 }

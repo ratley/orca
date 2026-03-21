@@ -69,6 +69,7 @@ export const RunStatusSchema = z.object({
   overallStatus: z.enum([
     "planning",
     "running",
+    "reviewing",
     "waiting_for_answer",
     "completed",
     "failed",
