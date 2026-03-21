@@ -357,7 +357,87 @@ describe("codex session effort wiring", () => {
       expect(result).toEqual({
         outcome: "failed",
         rawResponse: "Implemented the requested update.",
-        error: "Codex did not emit a JSON completion marker and no file changes were recorded for a task that required file edits.",
+        error:
+          "Codex did not emit a JSON completion marker, no file changes were recorded, and no successful verification command ran for a task that required file edits.",
+      });
+    } finally {
+      await session.disconnect();
+    }
+  });
+
+  test("accepts verification-backed shell edits when no file changes were recorded", async () => {
+    const runTurnMock = mock(async () => ({
+      agentMessage: "Implemented the requested update and verified it.",
+      turn: {
+        status: "completed",
+        items: [
+          {
+            type: "agentMessage",
+            id: "msg-1",
+            text: "Implemented the requested update and verified it.",
+          },
+          {
+            type: "commandExecution",
+            id: "cmd-1",
+            command: "python scripts/update_release.py",
+            status: "completed",
+            exitCode: 0,
+            commandActions: [],
+          },
+          {
+            type: "commandExecution",
+            id: "cmd-2",
+            command: "bun test",
+            status: "completed",
+            exitCode: 0,
+            commandActions: [],
+          },
+        ],
+      },
+      items: [],
+    }));
+
+    mockMultiAgentDetection(false);
+    mock.module("@ratley/codex-client", () => ({
+      CodexClient: class {
+        async connect(): Promise<void> {}
+        async disconnect(): Promise<void> {}
+        async startThread(): Promise<{ id: string }> {
+          return { id: "thread-1" };
+        }
+        runTurn = runTurnMock;
+        async runReview(): Promise<{ reviewText: string }> {
+          return { reviewText: "ok" };
+        }
+      },
+    }));
+
+    mock.module("../../utils/skill-loader.js", () => ({
+      loadSkills: async () => [],
+    }));
+
+    const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
+    const session = await createCodexSession(process.cwd());
+
+    try {
+      const result = await session.executeTask(
+        {
+          id: "t1",
+          name: "Write file",
+          description: "Create codename.txt with the exact answer.",
+          dependencies: [],
+          acceptance_criteria: ["codename.txt exists"],
+          status: "pending",
+          retries: 0,
+          maxRetries: 3,
+        },
+        "run-1",
+        "context",
+      );
+
+      expect(result).toEqual({
+        outcome: "done",
+        rawResponse: "Implemented the requested update and verified it.",
       });
     } finally {
       await session.disconnect();

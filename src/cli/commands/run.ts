@@ -611,7 +611,12 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
         }
 
         const finalRun = await store.getRun(runId);
-        if (finalRun && finalRun.overallStatus !== "failed" && finalRun.overallStatus !== "cancelled") {
+        if (
+          reviewConfig.enabled &&
+          finalRun &&
+          finalRun.overallStatus !== "failed" &&
+          finalRun.overallStatus !== "cancelled"
+        ) {
           await store.updateRun(runId, { overallStatus: "completed" });
           const completedAt = new Date().toISOString();
           await emitHook({

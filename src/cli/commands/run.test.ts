@@ -182,6 +182,53 @@ describe("run command executor flags", () => {
     expect(reviewChangesMock).not.toHaveBeenCalled();
   });
 
+  test("does not dispatch onComplete twice when execution review is disabled", async () => {
+    const { runModule, runTaskRunnerMock, hookDispatchMock } = await loadRunModule();
+    runTaskRunnerMock.mockImplementationOnce(
+      async (options: {
+        runId: string;
+        store: { updateRun: (runId: string, patch: unknown) => Promise<void> };
+        emitHook?: (event: unknown) => Promise<void>;
+      }) => {
+        await options.store.updateRun(options.runId, {
+          overallStatus: "completed",
+          tasks: [
+            {
+              id: "t1",
+              name: "task",
+              description: "task",
+              dependencies: [],
+              acceptance_criteria: ["done"],
+              status: "done",
+              retries: 0,
+              maxRetries: 3,
+              startedAt: new Date().toISOString(),
+              finishedAt: new Date().toISOString(),
+            },
+          ],
+        });
+
+        await options.emitHook?.({
+          runId: options.runId,
+          hook: "onComplete",
+          message: "run-completed",
+          timestamp: new Date().toISOString(),
+          metadata: { overallStatus: "completed" },
+        });
+      },
+    );
+
+    const configPath = path.join(getTempDir(), "orca.config.js");
+    await writeFile(configPath, "export default { review: { enabled: false } };\n", "utf8");
+
+    await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
+
+    const onCompleteCalls = hookDispatchMock.mock.calls.filter(
+      (call) => (call[0] as { hook?: string })?.hook === "onComplete",
+    );
+    expect(onCompleteCalls).toHaveLength(1);
+  });
+
   test("dispatches onFindings hook when post-execution review reports findings", async () => {
     const { runModule, createCodexSessionMock, hookDispatchMock } = await loadRunModule();
     createCodexSessionMock.mockImplementationOnce(async () => ({

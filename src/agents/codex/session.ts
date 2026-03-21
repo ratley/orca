@@ -571,11 +571,11 @@ function enforceFallbackExecutionEvidence(
   const fileChangesRecorded = hasRecordedFileChanges(items);
   const verificationRan = hasSuccessfulVerificationCommand(items);
 
-  if (taskLikelyMutatesFiles(task) && !fileChangesRecorded) {
+  if (taskLikelyMutatesFiles(task) && !fileChangesRecorded && !verificationRan) {
     return {
       outcome: "failed",
       rawResponse: parsedResult.rawResponse,
-      error: "Codex did not emit a JSON completion marker and no file changes were recorded for a task that required file edits.",
+      error: "Codex did not emit a JSON completion marker, no file changes were recorded, and no successful verification command ran for a task that required file edits.",
     };
   }
 
