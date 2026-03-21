@@ -1038,6 +1038,87 @@ describe("codex session multi-agent prompt guidance", () => {
     }
   });
 
+  test("falls back to non-interactive prompts when collaboration mode is unsupported", async () => {
+    type TurnInputItem = { type: "text"; text: string };
+
+    const runTurnCalls: Array<{ collaborationMode?: { mode?: string }; input?: TurnInputItem[] }> = [];
+    const runsDir = await mkdtemp(path.join(os.tmpdir(), "orca-session-unsupported-collab-"));
+    const store = new RunStore(runsDir);
+    const runId = "unsupported-collab-1000-abcd";
+    await store.createRun(runId, "/tmp/spec.md");
+
+    mockMultiAgentDetection(false);
+    mock.module("@ratley/codex-client", () => ({
+      CodexClient: class {
+        async connect(): Promise<void> {}
+        async disconnect(): Promise<void> {}
+        async startThread(): Promise<{ id: string }> {
+          return { id: "thread-1" };
+        }
+        async listCollaborationModes(): Promise<never> {
+          throw new Error("-32601: Method not found");
+        }
+        async runTurn(params: {
+          collaborationMode?: { mode?: string };
+          input?: TurnInputItem[];
+        }): Promise<{ agentMessage: string; turn: { status: "completed" }; items: [] }> {
+          runTurnCalls.push(params);
+          const prompt = params.input?.[0]?.text ?? "";
+          if (prompt.includes("decomposing a spec")) {
+            return { agentMessage: "[]", turn: { status: "completed" }, items: [] };
+          }
+          return { agentMessage: '{"outcome":"done"}', turn: { status: "completed" }, items: [] };
+        }
+        async runReview(): Promise<{ reviewText: string }> {
+          return { reviewText: "ok" };
+        }
+      },
+    }));
+
+    mock.module("../../utils/skill-loader.js", () => ({
+      loadSkills: async () => [],
+    }));
+
+    const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
+    const session = await createCodexSession(process.cwd(), undefined, {
+      runId: runId as `${string}-${number}-${string}`,
+      store,
+      resumeOverallStatus: "running",
+    });
+
+    try {
+      await session.planSpec("spec", "context");
+      await session.executeTask(
+        {
+          id: "T1",
+          name: "Add subtract export",
+          description: "Add subtract(a, b) and update tests.",
+          dependencies: [],
+          acceptance_criteria: ["bun test passes"],
+          status: "pending",
+          retries: 0,
+          maxRetries: 3,
+        },
+        runId,
+        "context",
+      );
+
+      expect(runTurnCalls).toHaveLength(2);
+      expect(runTurnCalls[0]?.collaborationMode).toBeUndefined();
+      expect(runTurnCalls[1]?.collaborationMode).toBeUndefined();
+
+      const planningPrompt = runTurnCalls[0]?.input?.[0]?.text ?? "";
+      expect(planningPrompt).not.toContain("request_user_input");
+
+      const executionPrompt = runTurnCalls[1]?.input?.[0]?.text ?? "";
+      expect(executionPrompt).not.toContain("execution clarification gate");
+      expect(executionPrompt).not.toContain("request_user_input");
+    } finally {
+      await session.disconnect();
+      await rm(runsDir, { recursive: true, force: true });
+    }
+  });
+
   test("does not force review prompts through plan collaboration mode", async () => {
     type TurnInputItem = { type: "text"; text: string };
 

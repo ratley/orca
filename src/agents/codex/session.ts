@@ -116,6 +116,47 @@ function buildPlanningPrompt(
   ].join("\n\n");
 }
 
+function isUnsupportedCollaborationModeError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes("-32601") ||
+    message.includes("Method not found") ||
+    message.includes("Invalid collaboration mode list response")
+  );
+}
+
+async function detectCollaborationModeSupport(
+  client: CodexClient,
+  codexPath: string,
+  interactiveRunEnabled: boolean,
+): Promise<boolean> {
+  if (!interactiveRunEnabled) {
+    return false;
+  }
+
+  const maybeListCollaborationModes = (
+    client as CodexClient & { listCollaborationModes?: () => Promise<unknown> }
+  ).listCollaborationModes;
+
+  if (typeof maybeListCollaborationModes !== "function") {
+    return true;
+  }
+
+  try {
+    await maybeListCollaborationModes.call(client);
+    return true;
+  } catch (error) {
+    if (!isUnsupportedCollaborationModeError(error)) {
+      throw error;
+    }
+
+    logger.warn(
+      `Codex binary at ${codexPath} does not support collaboration mode / question flow. Falling back to non-interactive prompts for this run.`,
+    );
+    return false;
+  }
+}
+
 function buildTaskExecutionPrompt(
   task: Task,
   runId: string,
@@ -1174,12 +1215,17 @@ export async function createCodexSession(
   attachCodexStderrDiagnostics(client, codexPath);
   await client.connect();
   await warnAboutUnavailableMcpServers(client);
+  const collaborationModeAvailable = await detectCollaborationModeSupport(
+    client,
+    codexPath,
+    interactionContext !== undefined,
+  );
 
   let activeTaskContext: { taskId: string; taskName: string } | undefined;
   let activeSecretAnswerChannel: SecretAnswerChannelState | undefined;
   const resumedOverallStatus: ResumeOverallStatus = interactionContext?.resumeOverallStatus ?? "running";
   const resolvedServerRequests = new Set<RequestId>();
-  const clarificationToolAvailable = interactionContext !== undefined;
+  const clarificationToolAvailable = interactionContext !== undefined && collaborationModeAvailable;
 
   const buildRunTurnParams = (
     step: ThinkingStep,
