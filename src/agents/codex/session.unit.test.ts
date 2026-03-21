@@ -235,7 +235,7 @@ describe("codex session effort wiring", () => {
     }
   });
 
-  test("starts a fresh Codex thread before executing each task", async () => {
+  test("reuses the persistent Codex thread across planning and execution", async () => {
     const startThreadMock = mock(async () => ({ id: `thread-${startThreadMock.mock.calls.length + 1}` }));
     const runTurnMock = mock(async () => {
       if (runTurnMock.mock.calls.length === 1) {
@@ -291,10 +291,10 @@ describe("codex session effort wiring", () => {
         "context",
       );
 
-      expect(startThreadMock).toHaveBeenCalledTimes(2);
+      expect(startThreadMock).toHaveBeenCalledTimes(1);
       const executeCall = (runTurnMock.mock.calls as Array<Array<{ threadId?: string }>>)[1]?.[0];
       expect(executeCall?.threadId).toBe(session.threadId);
-      expect(session.threadId).not.toBe(initialThreadId);
+      expect(session.threadId).toBe(initialThreadId);
     } finally {
       await session.disconnect();
     }
@@ -1032,6 +1032,57 @@ describe("codex session multi-agent prompt guidance", () => {
 
       const executionPrompt = runTurnCalls[1]?.input?.[0]?.text ?? "";
       expect(executionPrompt).not.toContain("request_user_input");
+    } finally {
+      await session.disconnect();
+      await rm(runsDir, { recursive: true, force: true });
+    }
+  });
+
+  test("does not force review prompts through plan collaboration mode", async () => {
+    type TurnInputItem = { type: "text"; text: string };
+
+    const runTurnCalls: Array<{ collaborationMode?: { mode?: string }; input?: TurnInputItem[] }> = [];
+    const runsDir = await mkdtemp(path.join(os.tmpdir(), "orca-session-review-prompt-"));
+    const store = new RunStore(runsDir);
+    const runId = "review-prompt-1000-abcd";
+    await store.createRun(runId, "/tmp/spec.md");
+
+    mockMultiAgentDetection(false);
+    mock.module("@ratley/codex-client", () => ({
+      CodexClient: class {
+        async connect(): Promise<void> {}
+        async disconnect(): Promise<void> {}
+        async startThread(): Promise<{ id: string }> {
+          return { id: "thread-1" };
+        }
+        async runTurn(params: {
+          collaborationMode?: { mode?: string };
+          input?: TurnInputItem[];
+        }): Promise<{ agentMessage: string; turn: { status: "completed" }; items: [] }> {
+          runTurnCalls.push(params);
+          return { agentMessage: '{"summary":"clean","findings":[],"fixed":false}', turn: { status: "completed" }, items: [] };
+        }
+        async runReview(): Promise<{ reviewText: string }> {
+          return { reviewText: "ok" };
+        }
+      },
+    }));
+
+    mock.module("../../utils/skill-loader.js", () => ({
+      loadSkills: async () => [],
+    }));
+
+    const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
+    const session = await createCodexSession(process.cwd(), undefined, {
+      runId: runId as `${string}-${number}-${string}`,
+      store,
+      resumeOverallStatus: "running",
+    });
+
+    try {
+      await session.runPrompt("review prompt", "review");
+      expect(runTurnCalls).toHaveLength(1);
+      expect(runTurnCalls[0]?.collaborationMode).toBeUndefined();
     } finally {
       await session.disconnect();
       await rm(runsDir, { recursive: true, force: true });

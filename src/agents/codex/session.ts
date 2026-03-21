@@ -1512,7 +1512,6 @@ export async function createCodexSession(
       let result: CompletedTurn;
       try {
         if (clarificationToolAvailable) {
-          await startNewThread();
           const clarificationResult = await client.runTurn(
             buildExecutionClarificationTurnParams(
               buildTurnInput(
@@ -1526,7 +1525,6 @@ export async function createCodexSession(
           clarificationContext = clarificationDecision.context.trim();
         }
 
-        await startNewThread();
         result = await client.runTurn({
           ...buildRunTurnParams(
             "execution",
@@ -1602,7 +1600,7 @@ export async function createCodexSession(
 
     async runPrompt(prompt: string, step: ThinkingStep = "execution"): Promise<string> {
       const result = await client.runTurn({
-        ...buildRunTurnParams(step, buildTurnInput(prompt, skills), clarificationToolAvailable && step !== "execution"),
+        ...buildRunTurnParams(step, buildTurnInput(prompt, skills), false),
       });
 
       return extractAgentText(result);
