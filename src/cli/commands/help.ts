@@ -27,16 +27,17 @@ function printStyledHelpPage(): void {
   printSection("RUNNING", [
     { command: 'orca "add auth to the app"', description: "run with inline goal" },
     { command: "orca --plan ./specs/feature.md", description: "run from plan file" },
-    { command: "orca plan --spec ./specs/feature.md", description: "plan only, no execution" }
+    { command: "orca plan --spec ./specs/feature.md", description: "plan only, no execution" },
   ]);
 
   printSection("RUN MANAGEMENT", [
     { command: "orca status", description: "list all runs" },
     { command: "orca status --last", description: "show most recent run" },
     { command: "orca status --run <id>", description: "show run details" },
+    { command: "orca answer <run-id> <text>", description: "answer a waiting question" },
     { command: "orca resume --last", description: "resume most recent run" },
     { command: "orca resume --run <id>", description: "resume incomplete run" },
-    { command: "orca cancel --run <id>", description: "cancel active run" }
+    { command: "orca cancel --run <id>", description: "cancel active run" },
   ]);
 
   printSection("PULL REQUESTS", [
@@ -44,7 +45,7 @@ function printStyledHelpPage(): void {
     { command: "orca pr draft --run <id>", description: "create draft PR" },
     { command: "orca pr create --run <id>", description: "create ready-for-review PR" },
     { command: "orca pr publish --run <id>", description: "publish draft → ready for review" },
-    { command: "orca pr status --run <id>", description: "check PR state and CI" }
+    { command: "orca pr status --run <id>", description: "check PR state and CI" },
   ]);
 
   printSection("SETUP", [{ command: "orca setup", description: "first-time setup and Codex environment checks" }]);
@@ -59,14 +60,18 @@ function printStyledHelpPage(): void {
     { command: "--codex-effort <value>", description: "override Codex thinking level for the current run" },
     { command: "--full-auto", description: "skip all questions, proceed autonomously" },
     { command: "--on-complete <cmd>", description: "shell hook on run complete" },
+    { command: "--on-question <cmd>", description: "shell hook on question required" },
     { command: "--on-error <cmd>", description: "shell hook on run error" },
     { command: "-h, --help", description: "show help for any command" },
-    { command: "-V, --version", description: "show version" }
+    { command: "-V, --version", description: "show version" },
   ]);
 }
 
 function findCommand(program: Command, pathText: string): Command | undefined {
-  const segments = pathText.split(" ").map((segment) => segment.trim()).filter((segment) => segment.length > 0);
+  const segments = pathText
+    .split(" ")
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
   let current: Command | undefined = program;
   for (const segment of segments) {
     current = current.commands.find((command) => command.name() === segment);
@@ -77,19 +82,22 @@ function findCommand(program: Command, pathText: string): Command | undefined {
 
 export function registerHelpCommand(program: Command): void {
   program.addHelpCommand(false);
-  program.command("help [command]").description("display help for command").action((commandPath?: string) => {
-    if (!commandPath) {
-      printStyledHelpPage();
-      return;
-    }
+  program
+    .command("help [command]")
+    .description("display help for command")
+    .action((commandPath?: string) => {
+      if (!commandPath) {
+        printStyledHelpPage();
+        return;
+      }
 
-    const target = findCommand(program, commandPath);
-    if (!target) {
-      console.error(`error: unknown command '${commandPath}'`);
-      process.exitCode = 1;
-      return;
-    }
+      const target = findCommand(program, commandPath);
+      if (!target) {
+        console.error(`error: unknown command '${commandPath}'`);
+        process.exitCode = 1;
+        return;
+      }
 
-    target.outputHelp();
-  });
+      target.outputHelp();
+    });
 }

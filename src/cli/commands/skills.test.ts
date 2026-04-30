@@ -12,17 +12,13 @@ let tempDir = "";
 let logs: string[] = [];
 const originalConsoleLog = console.log;
 
-function makeSkill(input: {
-  name: string;
-  description: string;
-  dirPath: string;
-}): LoadedSkill {
+function makeSkill(input: { name: string; description: string; dirPath: string }): LoadedSkill {
   return {
     name: input.name,
     description: input.description,
     body: `${input.name} body`,
     dirPath: input.dirPath,
-    filePath: path.join(input.dirPath, "SKILL.md")
+    filePath: path.join(input.dirPath, "SKILL.md"),
   };
 }
 
@@ -39,12 +35,12 @@ async function loadSkillsModule(options?: {
   const loadSkillsMock = mock(options?.loadSkills ?? (async () => []));
 
   mock.module("../../core/config-loader.js", () => ({
-    resolveConfig: resolveConfigMock
+    resolveConfig: resolveConfigMock,
   }));
 
   mock.module("../../utils/skill-loader.js", () => ({
     loadSkills: loadSkillsMock,
-    getBundledSkillsDir: () => options?.bundledSkillsDir ?? path.join(tempDir, "bundled", ".orca", "skills")
+    getBundledSkillsDir: () => options?.bundledSkillsDir ?? path.join(tempDir, "bundled", ".orca", "skills"),
   }));
 
   const skillsModule = await import(`./skills.js?test=${Math.random()}`);
@@ -73,7 +69,7 @@ describe("skills command", () => {
   test("prints 'No skills found.' when loader returns no skills", async () => {
     const { skillsModule } = await loadSkillsModule({
       resolveConfig: async () => undefined,
-      loadSkills: async () => []
+      loadSkills: async () => [],
     });
 
     await skillsModule.skillsCommandHandler({});
@@ -89,9 +85,9 @@ describe("skills command", () => {
         makeSkill({
           name: "Writer",
           description: "Generates copy",
-          dirPath: configSkillDir
-        })
-      ]
+          dirPath: configSkillDir,
+        }),
+      ],
     });
 
     await skillsModule.skillsCommandHandler({});
@@ -120,8 +116,8 @@ describe("skills command", () => {
         makeSkill({ name: "ConfigSkill", description: "From config", dirPath: configSkillDir }),
         makeSkill({ name: "ProjectSkill", description: "From project", dirPath: projectSkillDir }),
         makeSkill({ name: "GlobalSkill", description: "From global", dirPath: globalSkillDir }),
-        makeSkill({ name: "BundledSkill", description: "From bundled", dirPath: bundledSkillDir })
-      ]
+        makeSkill({ name: "BundledSkill", description: "From bundled", dirPath: bundledSkillDir }),
+      ],
     });
 
     await skillsModule.skillsCommandHandler({});
@@ -147,10 +143,10 @@ describe("skills command", () => {
         makeSkill({
           name: "code-simplifier",
           description: "Bundled default",
-          dirPath: overlappingSkillDir
-        })
+          dirPath: overlappingSkillDir,
+        }),
       ],
-      bundledSkillsDir: path.join(process.cwd(), ".orca", "skills")
+      bundledSkillsDir: path.join(process.cwd(), ".orca", "skills"),
     });
 
     await skillsModule.skillsCommandHandler({});
@@ -161,12 +157,12 @@ describe("skills command", () => {
 
   test("passes --config option through resolveConfig and loadSkills", async () => {
     const resolvedConfig: OrcaConfig = {
-      skills: [path.join(tempDir, "config", "one")]
+      skills: [path.join(tempDir, "config", "one")],
     };
 
     const { skillsModule, resolveConfigMock, loadSkillsMock } = await loadSkillsModule({
       resolveConfig: async () => resolvedConfig,
-      loadSkills: async () => []
+      loadSkills: async () => [],
     });
 
     await skillsModule.skillsCommandHandler({ config: "./custom-orca.config.js" });

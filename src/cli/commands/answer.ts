@@ -1,14 +1,26 @@
 import path from "node:path";
 import { promises as fs } from "node:fs";
+import { connect } from "node:net";
 
-import { input } from "@inquirer/prompts";
+import { input, password } from "@inquirer/prompts";
 import type { Command } from "commander";
 
+import { parseQuestionAnswerInput, serializeQuestionAnswerResponse } from "../../core/question-flow.js";
+import { readSecretAnswerChannel } from "../../core/secret-answer-channel.js";
 import { RunStore } from "../../state/store.js";
+import type { PendingAnswerChannel, PendingQuestion } from "../../types/index.js";
 import { selectRun } from "../../utils/select-run.js";
 
 export interface AnswerCommandOptions {
   run?: string;
+}
+
+type AnswerChannelSubmitter = (channel: PendingAnswerChannel, payload: string) => Promise<void>;
+
+let testAnswerChannelSubmitter: AnswerChannelSubmitter | null = null;
+
+export function setAnswerChannelSubmitterForTests(submitter: AnswerChannelSubmitter | null): void {
+  testAnswerChannelSubmitter = submitter;
 }
 
 function createStore(): RunStore {
@@ -24,7 +36,27 @@ function resolveRunId(positionalRunId: string | undefined, optionRunId: string |
   return positionalRunId ?? optionRunId;
 }
 
-async function resolveAnswer(answerArg: string | undefined): Promise<string> {
+function formatQuestionPrompt(question: PendingQuestion["questions"][number]): string {
+  const options =
+    question.options && question.options.length > 0
+      ? ` Options: ${question.options.map((option) => option.label).join(", ")}.`
+      : "";
+  return `${question.header}: ${question.question}${options}`;
+}
+
+function hasSecretQuestions(pendingQuestion: PendingQuestion | undefined): boolean {
+  return pendingQuestion?.questions.some((question) => question.isSecret) ?? false;
+}
+
+async function promptForQuestionAnswer(question: PendingQuestion["questions"][number]): Promise<string> {
+  const prompt = { message: formatQuestionPrompt(question) };
+  return question.isSecret ? await password(prompt) : await input(prompt);
+}
+
+async function resolveAnswerPayload(
+  pendingQuestion: PendingQuestion | undefined,
+  answerArg: string | undefined,
+): Promise<string> {
   if (answerArg) {
     return answerArg;
   }
@@ -33,18 +65,69 @@ async function resolveAnswer(answerArg: string | undefined): Promise<string> {
     throw new Error("no answer provided");
   }
 
-  const value = await input({ message: "Answer:" });
-  if (!value) {
-    throw new Error("no answer provided");
+  if (!pendingQuestion || pendingQuestion.questions.length === 0) {
+    const value = await input({ message: "Answer:" });
+    if (!value) {
+      throw new Error("no answer provided");
+    }
+
+    return value;
   }
 
-  return value;
+  const answers: Record<string, { answers: string[] }> = {};
+  for (const question of pendingQuestion.questions) {
+    const value = await promptForQuestionAnswer(question);
+    if (!value) {
+      throw new Error(`no answer provided for question '${question.id}'`);
+    }
+
+    answers[question.id] = { answers: [value] };
+  }
+
+  return JSON.stringify({ answers });
+}
+
+async function submitAnswerViaChannel(channel: PendingAnswerChannel, payload: string): Promise<void> {
+  if (testAnswerChannelSubmitter) {
+    await testAnswerChannelSubmitter(channel, payload);
+    return;
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const socket = connect(channel.path);
+    socket.setEncoding("utf8");
+
+    let responseBuffer = "";
+
+    socket.on("connect", () => {
+      socket.write(`${JSON.stringify({ token: channel.token, answer: payload })}\n`);
+    });
+
+    socket.on("data", (chunk) => {
+      responseBuffer += chunk;
+    });
+
+    socket.on("error", reject);
+    socket.on("end", () => {
+      try {
+        const parsed = JSON.parse(responseBuffer.trim()) as { ok?: boolean; error?: unknown };
+        if (parsed.ok !== true) {
+          throw new Error(
+            typeof parsed.error === "string" ? parsed.error : "secret answer channel rejected the payload",
+          );
+        }
+        resolve();
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
 }
 
 export async function answerCommandHandler(
   positionalRunId: string | undefined,
   answerArg: string | undefined,
-  options: AnswerCommandOptions
+  options: AnswerCommandOptions,
 ): Promise<void> {
   const store = createStore();
   let runId = resolveRunId(positionalRunId, options.run);
@@ -54,7 +137,7 @@ export async function answerCommandHandler(
       throw new Error("no run id provided");
     }
 
-    runId = await selectRun(store) ?? undefined;
+    runId = (await selectRun(store)) ?? undefined;
     if (!runId) {
       console.error("No runs found.");
       process.exitCode = 1;
@@ -75,12 +158,26 @@ export async function answerCommandHandler(
     return;
   }
 
-  const answer = await resolveAnswer(answerArg);
+  const answerPayload = await resolveAnswerPayload(run.pendingQuestion, answerArg);
+  const serialized = run.pendingQuestion
+    ? serializeQuestionAnswerResponse(parseQuestionAnswerInput(answerPayload, run.pendingQuestion))
+    : `${answerPayload}\n`;
+
+  if (hasSecretQuestions(run.pendingQuestion)) {
+    const answerChannel = await readSecretAnswerChannel(runId as `${string}-${number}-${string}`);
+    if (!answerChannel) {
+      throw new Error("run is waiting for a secret answer but has no active answer channel");
+    }
+
+    await submitAnswerViaChannel(answerChannel, answerPayload);
+    console.log(`Answer submitted. Run ${runId} will resume shortly.`);
+    return;
+  }
+
   const answerPath = path.join(store.getRunDir(runId), "answer.txt");
   await fs.mkdir(path.dirname(answerPath), { recursive: true });
-  await fs.writeFile(answerPath, `${answer}\n`, "utf8");
+  await fs.writeFile(answerPath, serialized, "utf8");
 
-  await store.updateRun(runId, { overallStatus: "running" });
   console.log(`Answer submitted. Run ${runId} will resume shortly.`);
 }
 

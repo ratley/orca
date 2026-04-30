@@ -2,6 +2,7 @@ import { afterEach, beforeEach, mock } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { Command } from "commander";
 
 type RunModule = typeof import("./run.js");
@@ -25,18 +26,23 @@ export function createRunCommandTestHarness(tempPrefix: string): RunCommandTestH
   const originalRunsDir = process.env.ORCA_RUNS_DIR;
   const originalSkipValidators = process.env.ORCA_SKIP_VALIDATORS;
   const originalOpenaiApiKey = process.env.OPENAI_API_KEY;
+  const originalHome = process.env.HOME;
+  const originalCwd = process.cwd();
 
   beforeEach(async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), tempPrefix));
     process.env.ORCA_RUNS_DIR = path.join(tempDir, "runs");
     process.env.ORCA_SKIP_VALIDATORS = "1";
     process.env.OPENAI_API_KEY = "test-openai-key";
+    process.env.HOME = tempDir;
+    process.chdir(tempDir);
     process.exitCode = 0;
   });
 
   afterEach(async () => {
     mock.restore();
     process.exitCode = 0;
+    process.chdir(originalCwd);
     if (originalRunsDir === undefined) {
       delete process.env.ORCA_RUNS_DIR;
     } else {
@@ -52,6 +58,11 @@ export function createRunCommandTestHarness(tempPrefix: string): RunCommandTestH
     } else {
       process.env.OPENAI_API_KEY = originalOpenaiApiKey;
     }
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
     await rm(tempDir, { recursive: true, force: true });
   });
 
@@ -65,24 +76,26 @@ export function createRunCommandTestHarness(tempPrefix: string): RunCommandTestH
     InvalidPlanErrorCtor: new (stage: "planner" | "review", message: string) => Error;
   }> {
     const runPlannerMock = mock(async () => {});
-    const runTaskRunnerMock = mock(async (options: { runId: string; store: { updateRun: (runId: string, patch: unknown) => Promise<void> } }) => {
-      await options.store.updateRun(options.runId, {
-        tasks: [
-          {
-            id: "t1",
-            name: "task",
-            description: "task",
-            dependencies: [],
-            acceptance_criteria: ["done"],
-            status: "done",
-            retries: 0,
-            maxRetries: 3,
-            startedAt: new Date().toISOString(),
-            finishedAt: new Date().toISOString()
-          }
-        ]
-      });
-    });
+    const runTaskRunnerMock = mock(
+      async (options: { runId: string; store: { updateRun: (runId: string, patch: unknown) => Promise<void> } }) => {
+        await options.store.updateRun(options.runId, {
+          tasks: [
+            {
+              id: "t1",
+              name: "task",
+              description: "task",
+              dependencies: [],
+              acceptance_criteria: ["done"],
+              status: "done",
+              retries: 0,
+              maxRetries: 3,
+              startedAt: new Date().toISOString(),
+              finishedAt: new Date().toISOString(),
+            },
+          ],
+        });
+      },
+    );
     const hookDispatchMock = mock(async () => {});
 
     class TestInvalidPlanError extends Error {
@@ -95,39 +108,46 @@ export function createRunCommandTestHarness(tempPrefix: string): RunCommandTestH
       }
     }
 
-    const { resolveConfig: realResolveConfig } = await import(`../../core/config-loader.js?real=${Math.random()}`);
-    const resolveConfigMock = mock((configPath?: string) => realResolveConfig(configPath));
+    const resolveConfigMock = mock(async (configPath?: string) => {
+      if (configPath) {
+        const imported = await import(`${pathToFileURL(configPath).href}?test=${Math.random()}`);
+        return imported.default;
+      }
+
+      return { executor: "codex" as const };
+    });
     const ensureCodexMultiAgentMock = mock(async () => ({
       action: "skipped" as const,
-      path: path.join(tempDir, "mock-codex-config.toml")
+      path: path.join(tempDir, "mock-codex-config.toml"),
     }));
     const createCodexSessionMock = mock(async () => ({
       consultTaskGraph: async () => ({ issues: [], ok: true }),
       executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
       runPrompt: async () => '{"summary":"clean","findings":[],"fixed":false}',
       reviewChanges: async () => "review",
-      disconnect: async () => {}
+      disconnect: async () => {},
     }));
 
     void mock.module("../../core/planner.js", () => ({
       runPlanner: runPlannerMock,
-      InvalidPlanError: TestInvalidPlanError
+      InvalidPlanError: TestInvalidPlanError,
     }));
     void mock.module("../../core/task-runner.js", () => ({
-      runTaskRunner: runTaskRunnerMock
+      runTaskRunner: runTaskRunnerMock,
+      writeSessionSummary: async () => {},
     }));
     void mock.module("../../core/config-loader.js", () => ({
-      resolveConfig: resolveConfigMock
+      resolveConfig: resolveConfigMock,
     }));
     void mock.module("../../core/codex-config.js", () => ({
-      ensureCodexMultiAgent: ensureCodexMultiAgentMock
+      ensureCodexMultiAgent: ensureCodexMultiAgentMock,
     }));
     void mock.module("../../agents/codex/session.js", () => ({
-      createCodexSession: createCodexSessionMock
+      createCodexSession: createCodexSessionMock,
     }));
     void mock.module("../../hooks/adapters/openclaw.js", () => ({
       detectOpenclawAvailability: () => ({ available: false }),
-      createOpenclawHookHandler: () => async () => {}
+      createOpenclawHookHandler: () => async () => {},
     }));
     void mock.module("../../hooks/dispatcher.js", () => ({
       HookDispatcher: class {
@@ -135,10 +155,10 @@ export function createRunCommandTestHarness(tempPrefix: string): RunCommandTestH
         async dispatch(event: unknown): Promise<void> {
           await (hookDispatchMock as (value: unknown) => Promise<void>)(event);
         }
-      }
+      },
     }));
     void mock.module("../../utils/ids.js", () => ({
-      generateRunId: () => "run-test-1000-abcd"
+      generateRunId: () => "run-test-1000-abcd",
     }));
     const runModule = await import(`./run.js?test=${Math.random()}`);
     return {
@@ -148,7 +168,7 @@ export function createRunCommandTestHarness(tempPrefix: string): RunCommandTestH
       createCodexSessionMock,
       ensureCodexMultiAgentMock,
       hookDispatchMock,
-      InvalidPlanErrorCtor: TestInvalidPlanError
+      InvalidPlanErrorCtor: TestInvalidPlanError,
     };
   }
 
@@ -162,6 +182,6 @@ export function createRunCommandTestHarness(tempPrefix: string): RunCommandTestH
   return {
     getTempDir: () => tempDir,
     loadRunModule,
-    parseRun
+    parseRun,
   };
 }

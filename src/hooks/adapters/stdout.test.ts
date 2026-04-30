@@ -14,7 +14,7 @@ describe("createStdoutHookHandler", () => {
       timestamp: "2026-02-19T00:00:00.000Z",
       taskId: "t1",
       taskName: "task one",
-      metadata: { retries: 1 }
+      metadata: { retries: 1 },
     };
 
     const handler = createStdoutHookHandler("[test-hook]", (line) => {
@@ -33,7 +33,7 @@ describe("createStdoutHookHandler", () => {
       timestamp: "2026-02-19T00:00:00.000Z",
       message: "task finished",
       error: undefined,
-      metadata: { retries: 1 }
+      metadata: { retries: 1 },
     });
   });
 });

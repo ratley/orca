@@ -66,7 +66,7 @@ export async function cancelCommandHandler(options: CancelCommandOptions): Promi
         ...task,
         status: "cancelled" as const,
         finishedAt: cancelledAt,
-        lastError: "Run cancelled"
+        lastError: "Run cancelled",
       };
     }
 
@@ -75,7 +75,7 @@ export async function cancelCommandHandler(options: CancelCommandOptions): Promi
 
   await store.updateRun(run.runId, {
     overallStatus: "cancelled",
-    tasks
+    tasks,
   });
 
   if (cancelledTaskId) {

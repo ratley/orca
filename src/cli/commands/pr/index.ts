@@ -9,9 +9,7 @@ import { prStatusCommandHandler, registerPrStatusCommand } from "./status.js";
 import { selectRun } from "../../../utils/select-run.js";
 
 export function registerPrCommand(program: Command): void {
-  const prCommand = program
-    .command("pr")
-    .description("Pull request workflow commands");
+  const prCommand = program.command("pr").description("Pull request workflow commands");
 
   registerPrDraftCommand(prCommand);
   registerPrCreateCommand(prCommand);
@@ -55,8 +53,8 @@ export function registerPrCommand(program: Command): void {
         { name: "Create draft PR", value: "draft" },
         { name: "Create PR (ready for review)", value: "create" },
         { name: "Publish draft → ready for review", value: "publish" },
-        { name: "View PR status & CI checks", value: "status" }
-      ]
+        { name: "View PR status & CI checks", value: "status" },
+      ],
     });
 
     const options = { run: runId };

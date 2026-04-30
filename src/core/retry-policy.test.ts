@@ -11,7 +11,7 @@ const baseTask: Task = {
   acceptance_criteria: ["ok"],
   status: "pending",
   retries: 0,
-  maxRetries: 3
+  maxRetries: 3,
 };
 
 describe("shouldRetry", () => {
@@ -30,7 +30,7 @@ describe("shouldRetry", () => {
     const exhaustedTask: Task = {
       ...baseTask,
       retries: 3,
-      maxRetries: 3
+      maxRetries: 3,
     };
 
     expect(shouldRetry(exhaustedTask, new Error("network timeout"))).toBe(false);

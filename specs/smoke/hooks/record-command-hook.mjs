@@ -14,14 +14,9 @@ for await (const chunk of process.stdin) {
 }
 
 const payload = JSON.parse(stdin);
-const payloadEnvKeys = [
-  "ORCA_HOOK",
-  "ORCA_MSG",
-  "ORCA_RUN_ID",
-  "ORCA_TASK_ID",
-  "ORCA_TASK_NAME",
-  "ORCA_ERROR"
-].filter((key) => process.env[key] !== undefined);
+const payloadEnvKeys = ["ORCA_HOOK", "ORCA_MSG", "ORCA_RUN_ID", "ORCA_TASK_ID", "ORCA_TASK_NAME", "ORCA_ERROR"].filter(
+  (key) => process.env[key] !== undefined,
+);
 
 const record = {
   source: "command",
@@ -30,7 +25,7 @@ const record = {
   message: payload.message,
   hasPayloadEnv: payloadEnvKeys.length > 0,
   payloadEnvKeys,
-  timestamp: new Date().toISOString()
+  timestamp: new Date().toISOString(),
 };
 
 await mkdir(path.dirname(logPath), { recursive: true });

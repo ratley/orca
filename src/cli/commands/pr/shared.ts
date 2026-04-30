@@ -24,13 +24,7 @@ export function buildPrTitle(run: RunStatus): string {
 
 export function buildPrBody(run: RunStatus): string {
   const completedTasks = run.tasks.filter((task) => task.status === "done");
-  const lines = [
-    `Automated PR for run \`${run.runId}\`.`,
-    "",
-    `Spec: \`${run.specPath}\``,
-    "",
-    "Completed tasks:"
-  ];
+  const lines = [`Automated PR for run \`${run.runId}\`.`, "", `Spec: \`${run.specPath}\``, "", "Completed tasks:"];
 
   if (completedTasks.length === 0) {
     lines.push("- (none)");
@@ -69,7 +63,7 @@ export function printGhMissingAndExit(): void {
 
 export async function resolveRunIdOrExit(
   options: PrCommandOptions,
-  commandName: "draft" | "create" | "publish" | "status"
+  commandName: "draft" | "create" | "publish" | "status",
 ): Promise<string | null> {
   if (options.last) {
     const store = createStore();

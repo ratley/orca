@@ -15,6 +15,11 @@ export interface PlanCommandOptions {
   onError?: string;
 }
 
+function createStore(): RunStore {
+  const runsDir = process.env.ORCA_RUNS_DIR;
+  return runsDir ? new RunStore(runsDir) : new RunStore();
+}
+
 export async function planCommand(options: { spec: string; config?: string }): Promise<void> {
   const specPath = path.resolve(options.spec);
   await access(specPath, fsConstants.R_OK);
@@ -23,7 +28,7 @@ export async function planCommand(options: { spec: string; config?: string }): P
   const runId = generateRunId(specPath);
   console.log(`Run ID: ${runId}`);
 
-  const store = new RunStore();
+  const store = createStore();
   await store.createRun(runId, specPath);
   await runPlanner(specPath, store, runId, orcaConfig);
 
@@ -40,9 +45,7 @@ export async function planCommand(options: { spec: string; config?: string }): P
 }
 
 export async function planCommandHandler(options: PlanCommandOptions): Promise<void> {
-  const commandOptions = options.config
-    ? { spec: options.spec, config: options.config }
-    : { spec: options.spec };
+  const commandOptions = options.config ? { spec: options.spec, config: options.config } : { spec: options.spec };
   await planCommand(commandOptions);
 }
 

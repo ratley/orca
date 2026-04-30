@@ -12,7 +12,7 @@ function makeTask(id: string, dependencies: string[] = []): Task {
     acceptance_criteria: ["ok"],
     status: "pending",
     retries: 0,
-    maxRetries: 3
+    maxRetries: 3,
   };
 }
 
@@ -22,7 +22,7 @@ describe("dependency-graph", () => {
       { ...makeTask("t1"), status: "done" },
       { ...makeTask("t2", ["t1"]), status: "pending" },
       { ...makeTask("t3", ["t2"]), status: "pending" },
-      { ...makeTask("t4"), status: "in_progress" }
+      { ...makeTask("t4"), status: "in_progress" },
     ];
 
     const runnable = getRunnable(tasks);

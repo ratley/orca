@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
-import { mergeConfigs, resolveConfig, resolveConfigFromPaths } from "./config-loader.js";
+import { mergeConfigs, resolveConfigFromPaths } from "./config-loader.js";
 
 describe("config-loader", () => {
   let tempDir: string;
@@ -26,14 +26,17 @@ describe("config-loader", () => {
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
-  test("resolveConfig prefers project ts config over project js config when both exist", async () => {
-    process.chdir(tempDir);
-    process.env.HOME = tempDir;
+  test("resolveConfigFromPaths prefers project ts config over project js config when both exist", async () => {
+    const projectJsPath = path.join(tempDir, "orca.config.js");
+    const projectTsPath = path.join(tempDir, "orca.config.ts");
+    await fs.writeFile(projectJsPath, "export default { runsDir: 'from-js' };\n", "utf8");
+    await fs.writeFile(projectTsPath, "export default { runsDir: 'from-ts' };\n", "utf8");
 
-    await fs.writeFile(path.join(tempDir, "orca.config.js"), "export default { runsDir: 'from-js' };\n", "utf8");
-    await fs.writeFile(path.join(tempDir, "orca.config.ts"), "export default { runsDir: 'from-ts' };\n", "utf8");
-
-    const resolved = await resolveConfig();
+    const resolved = await resolveConfigFromPaths(
+      path.join(tempDir, "missing-global.js"),
+      projectJsPath,
+      projectTsPath,
+    );
 
     expect(resolved?.runsDir).toBe("from-ts");
   });
@@ -52,7 +55,7 @@ describe("config-loader", () => {
   test("resolveConfigFromPaths returns undefined when no configs exist", async () => {
     const resolved = await resolveConfigFromPaths(
       path.join(tempDir, "missing-global.js"),
-      path.join(tempDir, "missing-project.js")
+      path.join(tempDir, "missing-project.js"),
     );
 
     expect(resolved).toBeUndefined();
@@ -63,30 +66,30 @@ describe("config-loader", () => {
     await fs.writeFile(
       cliPath,
       "export default { runsDir: 'from-cli', sessionLogs: '/tmp/orca-session-logs' };\n",
-      "utf8"
+      "utf8",
     );
 
     const resolved = await resolveConfigFromPaths(
       path.join(tempDir, "missing-global.js"),
       path.join(tempDir, "missing-project.js"),
-      cliPath
+      cliPath,
     );
 
     expect(resolved?.runsDir).toBe("from-cli");
     expect(resolved?.sessionLogs).toBe("/tmp/orca-session-logs");
   });
 
-  test("resolveConfigFromPaths throws on invalid executor value", async () => {
+  test("resolveConfigFromPaths coerces stale executor values to codex", async () => {
     const cliPath = path.join(tempDir, "cli.config.js");
-    await fs.writeFile(cliPath, "export default { executor: 'invalid-executor' };\n", "utf8");
+    await fs.writeFile(cliPath, "export default { executor: 'claude' };\n", "utf8");
 
-    await expect(
-      resolveConfigFromPaths(
-        path.join(tempDir, "missing-global.js"),
-        path.join(tempDir, "missing-project.js"),
-        cliPath
-      )
-    ).rejects.toThrow("Config.executor must be 'codex', got invalid-executor");
+    const resolved = await resolveConfigFromPaths(
+      path.join(tempDir, "missing-global.js"),
+      path.join(tempDir, "missing-project.js"),
+      cliPath,
+    );
+
+    expect(resolved?.executor).toBe("codex");
   });
 
   test("resolveConfigFromPaths rejects unknown hookCommands keys", async () => {
@@ -97,8 +100,8 @@ describe("config-loader", () => {
       resolveConfigFromPaths(
         path.join(tempDir, "missing-global.js"),
         path.join(tempDir, "missing-project.js"),
-        cliPath
-      )
+        cliPath,
+      ),
     ).rejects.toThrow("Unknown hook key in Config.hookCommands: onMystery");
   });
 
@@ -110,8 +113,8 @@ describe("config-loader", () => {
       resolveConfigFromPaths(
         path.join(tempDir, "missing-global.js"),
         path.join(tempDir, "missing-project.js"),
-        cliPath
-      )
+        cliPath,
+      ),
     ).rejects.toThrow("Unknown hook key in Config.hooks: onMystery");
   });
 
@@ -123,8 +126,8 @@ describe("config-loader", () => {
       resolveConfigFromPaths(
         path.join(tempDir, "missing-global.js"),
         path.join(tempDir, "missing-project.js"),
-        cliPath
-      )
+        cliPath,
+      ),
     ).rejects.toThrow("Config.review.enabled must be a boolean");
   });
 
@@ -136,8 +139,8 @@ describe("config-loader", () => {
       resolveConfigFromPaths(
         path.join(tempDir, "missing-global.js"),
         path.join(tempDir, "missing-project.js"),
-        cliPath
-      )
+        cliPath,
+      ),
     ).rejects.toThrow("Config.review.onInvalid must be 'fail' or 'warn_skip'");
   });
 
@@ -148,10 +151,102 @@ describe("config-loader", () => {
     const resolved = await resolveConfigFromPaths(
       path.join(tempDir, "missing-global.js"),
       path.join(tempDir, "missing-project.js"),
-      cliPath
+      cliPath,
     );
 
     expect(resolved?.executor).toBe("codex");
+  });
+
+  test("resolveConfigFromPaths accepts auto planner router and claude config", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(
+      cliPath,
+      "export default { planner: { agent: 'auto', router: { model: 'gpt-5.3-codex-spark' } }, claude: { command: '/bin/claude', model: 'claude-opus-4-7', effort: 'high', timeoutMs: 1000 } };\n",
+      "utf8",
+    );
+
+    const resolved = await resolveConfigFromPaths(
+      path.join(tempDir, "missing-global.js"),
+      path.join(tempDir, "missing-project.js"),
+      cliPath,
+    );
+
+    expect(resolved?.planner).toEqual({ agent: "auto", router: { model: "gpt-5.3-codex-spark" } });
+    expect(resolved?.claude).toEqual({
+      command: "/bin/claude",
+      model: "claude-opus-4-7",
+      effort: "high",
+      timeoutMs: 1000,
+    });
+  });
+
+  test("resolveConfigFromPaths accepts forced claude planner without router", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(cliPath, "export default { planner: { agent: 'claude' } };\n", "utf8");
+
+    const resolved = await resolveConfigFromPaths(
+      path.join(tempDir, "missing-global.js"),
+      path.join(tempDir, "missing-project.js"),
+      cliPath,
+    );
+
+    expect(resolved?.planner).toEqual({ agent: "claude" });
+  });
+
+  test("resolveConfigFromPaths rejects invalid planner agent", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(cliPath, "export default { planner: { agent: 'opus' } };\n", "utf8");
+
+    await expect(
+      resolveConfigFromPaths(
+        path.join(tempDir, "missing-global.js"),
+        path.join(tempDir, "missing-project.js"),
+        cliPath,
+      ),
+    ).rejects.toThrow("Config.planner.agent must be 'auto', 'codex', or 'claude'");
+  });
+
+  test("resolveConfigFromPaths validates planner.router.model shape", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(cliPath, "export default { planner: { router: { model: 123 } } };\n", "utf8");
+
+    await expect(
+      resolveConfigFromPaths(
+        path.join(tempDir, "missing-global.js"),
+        path.join(tempDir, "missing-project.js"),
+        cliPath,
+      ),
+    ).rejects.toThrow("Config.planner.router.model must be a string");
+  });
+
+  test("resolveConfigFromPaths rejects router for forced planner agents", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(
+      cliPath,
+      "export default { planner: { agent: 'claude', router: { model: 'gpt-5.3-codex-spark' } } };\n",
+      "utf8",
+    );
+
+    await expect(
+      resolveConfigFromPaths(
+        path.join(tempDir, "missing-global.js"),
+        path.join(tempDir, "missing-project.js"),
+        cliPath,
+      ),
+    ).rejects.toThrow("Config.planner.router is only used when Config.planner.agent is 'auto'");
+  });
+
+  test("resolveConfigFromPaths rejects invalid claude effort", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(cliPath, "export default { claude: { effort: 'extreme' } };\n", "utf8");
+
+    await expect(
+      resolveConfigFromPaths(
+        path.join(tempDir, "missing-global.js"),
+        path.join(tempDir, "missing-project.js"),
+        cliPath,
+      ),
+    ).rejects.toThrow("Config.claude.effort must be one of");
   });
 
   test("resolveConfigFromPaths throws on invalid codex effort value", async () => {
@@ -162,8 +257,8 @@ describe("config-loader", () => {
       resolveConfigFromPaths(
         path.join(tempDir, "missing-global.js"),
         path.join(tempDir, "missing-project.js"),
-        cliPath
-      )
+        cliPath,
+      ),
     ).rejects.toThrow("Codex thinking level must be one of");
   });
 
@@ -175,8 +270,8 @@ describe("config-loader", () => {
       resolveConfigFromPaths(
         path.join(tempDir, "missing-global.js"),
         path.join(tempDir, "missing-project.js"),
-        cliPath
-      )
+        cliPath,
+      ),
     ).rejects.toThrow("Codex thinking level must be one of");
   });
 
@@ -184,37 +279,34 @@ describe("config-loader", () => {
     const cliPath = path.join(tempDir, "cli.config.js");
     await fs.writeFile(
       cliPath,
-      "export default { codex: { thinkingLevel: { decision: 'low', planning: 'xhigh', execution: 'medium' } } };\n",
-      "utf8"
+      "export default { codex: { thinkingLevel: { decision: 'low', planning: 'xhigh', review: 'high', execution: 'medium' } } };\n",
+      "utf8",
     );
 
     const resolved = await resolveConfigFromPaths(
       path.join(tempDir, "missing-global.js"),
       path.join(tempDir, "missing-project.js"),
-      cliPath
+      cliPath,
     );
 
     expect(resolved?.codex?.thinkingLevel).toEqual({
       decision: "low",
       planning: "xhigh",
+      review: "high",
       execution: "medium",
     });
   });
 
   test("resolveConfigFromPaths rejects removed codex.thinking", async () => {
     const cliPath = path.join(tempDir, "cli.config.js");
-    await fs.writeFile(
-      cliPath,
-      "export default { codex: { thinking: { execution: 'high' } } };\n",
-      "utf8"
-    );
+    await fs.writeFile(cliPath, "export default { codex: { thinking: { execution: 'high' } } };\n", "utf8");
 
     await expect(
       resolveConfigFromPaths(
         path.join(tempDir, "missing-global.js"),
         path.join(tempDir, "missing-project.js"),
-        cliPath
-      )
+        cliPath,
+      ),
     ).rejects.toThrow("Config.codex.thinking is no longer supported");
   });
 
@@ -223,15 +315,15 @@ describe("config-loader", () => {
     await fs.writeFile(
       cliPath,
       "export default { codex: { perCwdExtraUserRoots: [{ cwd: '/repo', extraUserRoots: [123] }] } };\n",
-      "utf8"
+      "utf8",
     );
 
     await expect(
       resolveConfigFromPaths(
         path.join(tempDir, "missing-global.js"),
         path.join(tempDir, "missing-project.js"),
-        cliPath
-      )
+        cliPath,
+      ),
     ).rejects.toThrow("Config.codex.perCwdExtraUserRoots[].extraUserRoots entries must be strings");
   });
 
@@ -240,18 +332,16 @@ describe("config-loader", () => {
     await fs.writeFile(
       cliPath,
       "export default { codex: { perCwdExtraUserRoots: [{ cwd: '/repo', extraUserRoots: ['/tmp/skills'] }] } };\n",
-      "utf8"
+      "utf8",
     );
 
     const resolved = await resolveConfigFromPaths(
       path.join(tempDir, "missing-global.js"),
       path.join(tempDir, "missing-project.js"),
-      cliPath
+      cliPath,
     );
 
-    expect(resolved?.codex?.perCwdExtraUserRoots).toEqual([
-      { cwd: "/repo", extraUserRoots: ["/tmp/skills"] },
-    ]);
+    expect(resolved?.codex?.perCwdExtraUserRoots).toEqual([{ cwd: "/repo", extraUserRoots: ["/tmp/skills"] }]);
   });
 
   test("resolveConfigFromPaths merges global and project", async () => {
@@ -261,12 +351,12 @@ describe("config-loader", () => {
     await fs.writeFile(
       globalPath,
       "export default { runsDir: 'global-runs', maxRetries: 2, skills: ['/skills/global', '/skills/shared'], codex: { enabled: false, model: 'gpt-global' }, pr: { enabled: true, requireConfirmation: true }, hookCommands: { onError: 'echo global-error' } };\n",
-      "utf8"
+      "utf8",
     );
     await fs.writeFile(
       projectPath,
       "export default { runsDir: 'project-runs', sessionLogs: '/tmp/project-session-logs', skills: ['/skills/project', '/skills/shared'], codex: { model: 'gpt-project' }, pr: { requireConfirmation: false }, hookCommands: { onMilestone: 'echo project-milestone' } };\n",
-      "utf8"
+      "utf8",
     );
 
     const resolved = await resolveConfigFromPaths(globalPath, projectPath);
@@ -276,18 +366,18 @@ describe("config-loader", () => {
       sessionLogs: "/tmp/project-session-logs",
       maxRetries: 2,
       skills: ["/skills/global", "/skills/shared", "/skills/project"],
-            codex: {
+      codex: {
         enabled: false,
-        model: "gpt-project"
+        model: "gpt-project",
       },
       pr: {
         enabled: true,
-        requireConfirmation: false
+        requireConfirmation: false,
       },
       hookCommands: {
         onError: "echo global-error",
-        onMilestone: "echo project-milestone"
-      }
+        onMilestone: "echo project-milestone",
+      },
     });
   });
 
@@ -295,10 +385,11 @@ describe("config-loader", () => {
     const globalConfig = {
       runsDir: "global",
       maxRetries: 1,
-      sessionLogs: "global-logs",      skills: ["global-skill", "shared-skill"],
-            codex: { enabled: false },
+      sessionLogs: "global-logs",
+      skills: ["global-skill", "shared-skill"],
+      codex: { enabled: false },
       pr: { enabled: true },
-      hookCommands: { onError: "echo global-error" }
+      hookCommands: { onError: "echo global-error" },
     };
 
     const projectConfig = {
@@ -306,9 +397,9 @@ describe("config-loader", () => {
       maxRetries: 2,
       sessionLogs: "project-logs",
       skills: ["project-skill", "shared-skill"],
-            codex: { model: "gpt-project" },
+      codex: { model: "gpt-project" },
       pr: { requireConfirmation: true },
-      hookCommands: { onError: "echo project-error", onComplete: "echo project-complete" }
+      hookCommands: { onError: "echo project-error", onComplete: "echo project-complete" },
     };
 
     const cliConfig = {
@@ -317,9 +408,9 @@ describe("config-loader", () => {
       sessionLogs: "cli-logs",
       openaiApiKey: "cli-openai",
       skills: ["cli-skill", "project-skill"],
-            codex: { enabled: true },
+      codex: { enabled: true },
       pr: { requireConfirmation: false },
-      hookCommands: { onComplete: "echo cli-complete" }
+      hookCommands: { onComplete: "echo cli-complete" },
     };
 
     const merged = mergeConfigs(globalConfig, projectConfig, cliConfig);
@@ -327,20 +418,21 @@ describe("config-loader", () => {
     expect(merged).toEqual({
       runsDir: "cli",
       sessionLogs: "cli-logs",
-      maxRetries: 3,      openaiApiKey: "cli-openai",
+      maxRetries: 3,
+      openaiApiKey: "cli-openai",
       skills: ["global-skill", "shared-skill", "project-skill", "cli-skill"],
-            codex: {
+      codex: {
         enabled: true,
-        model: "gpt-project"
+        model: "gpt-project",
       },
       pr: {
         enabled: true,
-        requireConfirmation: false
+        requireConfirmation: false,
       },
       hookCommands: {
         onError: "echo project-error",
-        onComplete: "echo cli-complete"
-      }
+        onComplete: "echo cli-complete",
+      },
     });
   });
 
@@ -367,6 +459,7 @@ describe("config-loader", () => {
     const projectConfig = {
       codex: {
         thinkingLevel: {
+          review: "high" as const,
           execution: "medium" as const,
         },
       },
@@ -377,21 +470,53 @@ describe("config-loader", () => {
     expect(merged?.codex?.thinkingLevel).toEqual({
       decision: "low",
       planning: "high",
+      review: "high",
       execution: "medium",
     });
+  });
+
+  test("mergeConfigs merges planner and claude settings", () => {
+    const merged = mergeConfigs(
+      {
+        planner: { agent: "auto" as const, router: { model: "gpt-5.3-codex-spark" as const } },
+        claude: { command: "claude-a", effort: "high" as const, timeoutMs: 1000 },
+      },
+      {
+        planner: { agent: "claude" as const },
+        claude: { model: "sonnet" },
+      },
+    );
+
+    expect(merged?.planner).toEqual({ agent: "claude" });
+    expect(merged?.claude).toEqual({ command: "claude-a", model: "sonnet", effort: "high", timeoutMs: 1000 });
+  });
+
+  test("mergeConfigs does not materialize empty planner router", () => {
+    const merged = mergeConfigs({ planner: { agent: "claude" as const } });
+
+    expect(merged?.planner).toEqual({ agent: "claude" });
+  });
+
+  test("mergeConfigs drops router when later config forces planner agent", () => {
+    const merged = mergeConfigs(
+      { planner: { agent: "auto" as const, router: { model: "gpt-5.3-codex-spark" as const } } },
+      { planner: { agent: "codex" as const } },
+    );
+
+    expect(merged?.planner).toEqual({ agent: "codex" });
   });
 
   test("mergeConfigs deeply merges review plan/execution settings", () => {
     const globalConfig = {
       review: {
         plan: { enabled: true, onInvalid: "fail" as const },
-        execution: { enabled: true, maxCycles: 2, validator: { auto: true } }
-      }
+        execution: { enabled: true, maxCycles: 2, validator: { auto: true } },
+      },
     };
     const projectConfig = {
       review: {
-        execution: { onFindings: "auto_fix" as const, validator: { commands: ["npm run test"] } }
-      }
+        execution: { onFindings: "auto_fix" as const, validator: { commands: ["npm run test"] } },
+      },
     };
 
     const merged = mergeConfigs(globalConfig, projectConfig);
@@ -404,9 +529,9 @@ describe("config-loader", () => {
         onFindings: "auto_fix",
         validator: {
           auto: true,
-          commands: ["npm run test"]
-        }
-      }
+          commands: ["npm run test"],
+        },
+      },
     });
   });
 });

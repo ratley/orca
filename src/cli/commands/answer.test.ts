@@ -20,24 +20,32 @@ const originalStdoutIsTTY = Object.getOwnPropertyDescriptor(process.stdout, "isT
 function setStdoutTty(value: boolean): void {
   Object.defineProperty(process.stdout, "isTTY", {
     configurable: true,
-    value
+    value,
   });
 }
 
 async function loadAnswerModule(options?: {
   input?: () => Promise<string>;
   select?: () => Promise<string>;
-}): Promise<{ answerModule: AnswerModule; inputMock: ReturnType<typeof mock>; selectMock: ReturnType<typeof mock> }> {
+  password?: () => Promise<string>;
+}): Promise<{
+  answerModule: AnswerModule;
+  inputMock: ReturnType<typeof mock>;
+  selectMock: ReturnType<typeof mock>;
+  passwordMock: ReturnType<typeof mock>;
+}> {
   const inputMock = mock(options?.input ?? (async () => "prompt answer"));
   const selectMock = mock(options?.select ?? (async () => "selected-run-1000-abcd"));
+  const passwordMock = mock(options?.password ?? (async () => "prompt secret"));
 
   mock.module("@inquirer/prompts", () => ({
     input: inputMock,
-    select: selectMock
+    password: passwordMock,
+    select: selectMock,
   }));
 
   const answerModule = await import(`./answer.js?test=${Math.random()}`);
-  return { answerModule, inputMock, selectMock };
+  return { answerModule, inputMock, selectMock, passwordMock };
 }
 
 beforeEach(async () => {
@@ -85,21 +93,41 @@ afterEach(async () => {
 });
 
 describe("answer command", () => {
-  test("submits positional answer and resumes waiting run", async () => {
+  test("submits positional answer for a single pending question", async () => {
     const runId = "answer-positional-1000-abcd";
     const store = new RunStore(runsDir);
     await store.createRun(runId, "/tmp/spec.md");
-    await store.updateRun(runId, { overallStatus: "waiting_for_answer" });
+    await store.updateRun(runId, {
+      overallStatus: "waiting_for_answer",
+      pendingQuestion: {
+        requestId: "req-1",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "item-1",
+        receivedAt: new Date().toISOString(),
+        questions: [
+          {
+            header: "Migration",
+            id: "migration",
+            question: "Which migration should I use?",
+            isOther: true,
+            isSecret: false,
+            options: [{ label: "A", description: "Use migration A" }],
+          },
+        ],
+      },
+    });
 
     const { answerModule } = await loadAnswerModule();
     await answerModule.answerCommandHandler(runId, "yes", {});
 
     const run = await store.getRun(runId);
-    expect(run?.overallStatus).toBe("running");
+    expect(run?.overallStatus).toBe("waiting_for_answer");
 
     const answerPath = path.join(runsDir, runId, "answer.txt");
     const payload = await readFile(answerPath, "utf8");
-    expect(payload).toBe("yes\n");
+    expect(payload).toContain('"migration"');
+    expect(payload).toContain('"yes"');
     expect(logs.join("\n")).toContain(`Answer submitted. Run ${runId} will resume shortly.`);
   });
 
@@ -120,24 +148,60 @@ describe("answer command", () => {
     const runId = "answer-no-input-1000-abcd";
     const store = new RunStore(runsDir);
     await store.createRun(runId, "/tmp/spec.md");
-    await store.updateRun(runId, { overallStatus: "waiting_for_answer" });
+    await store.updateRun(runId, {
+      overallStatus: "waiting_for_answer",
+      pendingQuestion: {
+        requestId: "req-1",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "item-1",
+        receivedAt: new Date().toISOString(),
+        questions: [
+          {
+            header: "Migration",
+            id: "migration",
+            question: "Which migration should I use?",
+            isOther: true,
+            isSecret: false,
+            options: null,
+          },
+        ],
+      },
+    });
 
     const { answerModule } = await loadAnswerModule();
 
-    await expect(answerModule.answerCommandHandler(runId, undefined, {})).rejects.toThrow(
-      "no answer provided"
-    );
+    await expect(answerModule.answerCommandHandler(runId, undefined, {})).rejects.toThrow("no answer provided");
   });
 
   test("prompts for answer when tty and no positional answer was provided", async () => {
     const runId = "answer-prompt-1000-abcd";
     const store = new RunStore(runsDir);
     await store.createRun(runId, "/tmp/spec.md");
-    await store.updateRun(runId, { overallStatus: "waiting_for_answer" });
+    await store.updateRun(runId, {
+      overallStatus: "waiting_for_answer",
+      pendingQuestion: {
+        requestId: "req-1",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "item-1",
+        receivedAt: new Date().toISOString(),
+        questions: [
+          {
+            header: "Migration",
+            id: "migration",
+            question: "Which migration should I use?",
+            isOther: true,
+            isSecret: false,
+            options: [{ label: "A", description: "Use migration A" }],
+          },
+        ],
+      },
+    });
     setStdoutTty(true);
 
     const { answerModule, inputMock } = await loadAnswerModule({
-      input: async () => "from prompt"
+      input: async () => "from prompt",
     });
 
     await answerModule.answerCommandHandler(runId, undefined, {});
@@ -145,18 +209,38 @@ describe("answer command", () => {
     expect(inputMock).toHaveBeenCalled();
     const answerPath = path.join(runsDir, runId, "answer.txt");
     const payload = await readFile(answerPath, "utf8");
-    expect(payload).toBe("from prompt\n");
+    expect(payload).toContain('"migration"');
+    expect(payload).toContain('"from prompt"');
   });
 
   test("uses interactive run selection when no run id is provided in tty mode", async () => {
     const runId = "selected-run-1000-abcd";
     const store = new RunStore(runsDir);
     await store.createRun(runId, "/tmp/spec.md");
-    await store.updateRun(runId, { overallStatus: "waiting_for_answer" });
+    await store.updateRun(runId, {
+      overallStatus: "waiting_for_answer",
+      pendingQuestion: {
+        requestId: "req-1",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "item-1",
+        receivedAt: new Date().toISOString(),
+        questions: [
+          {
+            header: "Migration",
+            id: "migration",
+            question: "Which migration should I use?",
+            isOther: true,
+            isSecret: false,
+            options: null,
+          },
+        ],
+      },
+    });
     setStdoutTty(true);
 
     const { answerModule, selectMock } = await loadAnswerModule({
-      select: async () => runId
+      select: async () => runId,
     });
 
     await answerModule.answerCommandHandler(undefined, "selected answer", {});
@@ -164,14 +248,106 @@ describe("answer command", () => {
     expect(selectMock).toHaveBeenCalled();
     const answerPath = path.join(runsDir, runId, "answer.txt");
     const payload = await readFile(answerPath, "utf8");
-    expect(payload).toBe("selected answer\n");
+    expect(payload).toContain('"selected answer"');
+  });
+
+  test("requires JSON mapping when multiple pending questions are answered non-interactively", async () => {
+    const runId = "answer-multi-1000-abcd";
+    const store = new RunStore(runsDir);
+    await store.createRun(runId, "/tmp/spec.md");
+    await store.updateRun(runId, {
+      overallStatus: "waiting_for_answer",
+      pendingQuestion: {
+        requestId: "req-1",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "item-1",
+        receivedAt: new Date().toISOString(),
+        questions: [
+          {
+            header: "Backend",
+            id: "backend",
+            question: "Which backend?",
+            isOther: true,
+            isSecret: false,
+            options: null,
+          },
+          {
+            header: "Frontend",
+            id: "frontend",
+            question: "Which frontend?",
+            isOther: true,
+            isSecret: false,
+            options: null,
+          },
+        ],
+      },
+    });
+
+    const { answerModule } = await loadAnswerModule();
+    await expect(answerModule.answerCommandHandler(runId, "just one answer", {})).rejects.toThrow(
+      "multiple pending questions require a JSON object mapping question ids to answers",
+    );
+  });
+
+  test("uses password prompt and direct answer channel for secret questions", async () => {
+    const runId = "answer-secret-1000-abcd";
+    const submissions: string[] = [];
+    const { writeSecretAnswerChannel } = await import("../../core/secret-answer-channel.js");
+
+    const store = new RunStore(runsDir);
+    await store.createRun(runId, "/tmp/spec.md");
+    await store.updateRun(runId, {
+      overallStatus: "waiting_for_answer",
+      pendingQuestion: {
+        requestId: "req-1",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "item-1",
+        receivedAt: new Date().toISOString(),
+        questions: [
+          {
+            header: "API Key",
+            id: "api_key",
+            question: "What API key should I use?",
+            isOther: true,
+            isSecret: true,
+            options: null,
+          },
+        ],
+      },
+    });
+    await writeSecretAnswerChannel(runId as `${string}-${number}-${string}`, {
+      transport: "ipc",
+      path: path.join(tempDir, "secret-answer.sock"),
+      token: "secret-token",
+    });
+    setStdoutTty(true);
+
+    const { answerModule, passwordMock, inputMock } = await loadAnswerModule({
+      password: async () => "super-secret",
+    });
+    answerModule.setAnswerChannelSubmitterForTests(async (channel, payload) => {
+      submissions.push(JSON.stringify({ channel, payload }));
+    });
+
+    await answerModule.answerCommandHandler(runId, undefined, {});
+
+    expect(passwordMock).toHaveBeenCalled();
+    expect(inputMock).not.toHaveBeenCalled();
+    expect(submissions).toHaveLength(1);
+    expect(submissions[0]).toContain('"token":"secret-token"');
+    expect(submissions[0]).toContain('\\"super-secret\\"');
+
+    const answerPath = path.join(runsDir, runId, "answer.txt");
+    await expect(readFile(answerPath, "utf8")).rejects.toThrow();
   });
 
   test("fails when positional run-id and --run are both provided", async () => {
     const { answerModule } = await loadAnswerModule();
 
     await expect(
-      answerModule.answerCommandHandler("run-a-1000-abcd", "yes", { run: "run-b-1001-abcd" })
+      answerModule.answerCommandHandler("run-a-1000-abcd", "yes", { run: "run-b-1001-abcd" }),
     ).rejects.toThrow("positional run-id and --run are mutually exclusive");
   });
 });

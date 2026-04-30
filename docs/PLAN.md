@@ -3,6 +3,7 @@
 ## 1. Purpose and Scope
 
 Orca is a TypeScript CLI harness for coordinated agent work:
+
 - Input: a spec markdown file.
 - Output: an executable, tracked, hookable task run.
 - Positioning: infrastructure layer, not a TUI and not tied to one agent vendor.
@@ -12,6 +13,7 @@ Core principle: standardize the agent loop (plan, decompose, execute, track, not
 ## 2. Goals and Non-Goals
 
 ### Goals
+
 - Provide a stable CLI for planning and execution.
 - Use Claude as orchestrator for decomposition and coordination.
 - Use Codex as a consultation oracle (read-only guidance), not primary implementer.
@@ -20,6 +22,7 @@ Core principle: standardize the agent loop (plan, decompose, execute, track, not
 - Keep runtime cross-platform via Node.js and strict TypeScript.
 
 ### Non-Goals
+
 - Building a visual terminal UI.
 - Hard-coding OpenClaw behavior as a required dependency.
 - Fully autonomous PR creation/push without human/agent confirmation.
@@ -88,36 +91,44 @@ Core principle: standardize the agent loop (plan, decompose, execute, track, not
 ## 4. Key Design Decisions and Rationale
 
 1. Node.js runtime.
+
 - Rationale: broad cross-platform compatibility and mature ecosystem.
 - Consequence: default assumptions remain Node-compatible unless explicitly overridden.
 
 1b. Bun as runtime and test runner. Rationale: native TypeScript execution without transpile, built-in fast test runner (bun test), simpler toolchain. tsc --noEmit is used for type checking only. Cross-platform caveat accepted for speed of development.
 
 2. Strict TypeScript everywhere.
+
 - Rationale: orchestration systems become state-heavy quickly; strict types reduce runtime drift.
 - Consequence: explicit discriminated unions for state transitions and hook events.
 
 3. `oxlint` for lint + `tsgolint` for type checking.
+
 - Rationale: fast feedback loop with modern Oxc stack.
 - Consequence: CI and local commands should enforce both checks before release.
 
 4. Claude as orchestrator (SDK v2 preview).
+
 - Rationale: leverage `unstable_v2_createSession`, `send`, and `stream` for iterative planning/execution loops.
 - Consequence: isolate SDK usage behind an adapter so future API changes are contained.
 
 5. Codex consultation as an explicit tool call pattern.
+
 - Rationale: keeps primary orchestration centered in Claude while enabling targeted coding guidance.
 - Consequence: bounded interface for questions/answers; read-only and auditable prompts.
 
 6. Hook-first extensibility.
+
 - Rationale: notifications and side effects vary by environment/team.
 - Consequence: hook execution must be fault-tolerant, observable, and non-blocking by default.
 
 7. File-backed status (`status.json`) as source of truth.
+
 - Rationale: transparent, inspectable state with minimal operational burden.
 - Consequence: define atomic writes and versioned schema to prevent corruption.
 
 8. Manual confirmation for PR finalize.
+
 - Rationale: safety and trust; avoid accidental pushes/PRs.
 - Consequence: `orca pr finalize` is explicit and confirmation-gated.
 
@@ -187,6 +198,7 @@ orca/
 ```
 
 Global run store (outside project tree, configurable):
+
 ```text
 ~/.orca/runs/                   # default, override via ORCA_RUNS_DIR or orca.config.ts
   <spec-slug>-<timestamp-ms>-<4char-hex>/
@@ -209,12 +221,7 @@ export interface Spec {
   createdAt: string; // ISO timestamp
 }
 
-export type TaskStatus =
-  | "pending"
-  | "in_progress"
-  | "done"
-  | "failed"
-  | "cancelled";
+export type TaskStatus = "pending" | "in_progress" | "done" | "failed" | "cancelled";
 
 export interface Task {
   id: string;
@@ -250,12 +257,7 @@ export interface RunStatus {
   };
 }
 
-export type HookName =
-  | "onMilestone"
-  | "onTaskComplete"
-  | "onTaskFail"
-  | "onComplete"
-  | "onError";
+export type HookName = "onMilestone" | "onTaskComplete" | "onTaskFail" | "onComplete" | "onError";
 
 export interface HookEvent {
   runId: RunId;
@@ -295,6 +297,7 @@ export interface OrcaConfig {
 ## 7. Hook System (Detailed)
 
 ### Trigger Points
+
 - `onMilestone`: planning completed, execution started, retry threshold reached, PR draft ready.
 - `onTaskComplete`: each task transitions to `done`.
 - `onTaskFail`: each task transitions to `failed` (including retry exhaustion).
@@ -302,23 +305,30 @@ export interface OrcaConfig {
 - `onError`: unrecoverable run-level errors (parse failure, Claude session error, state corruption).
 
 ### Configuration Inputs
+
 - `orca.config.ts` programmatic handlers (`async (event) => { ... }`).
 - CLI command hooks: e.g. `--on-milestone 'node -e '\''let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const p=JSON.parse(s);console.log(p.message);})'\'''`.
 - Both can coexist; execution order should be deterministic (programmatic first, CLI second).
 
 ### Default Routing Behavior
+
 1. If OpenClaw env is detected, default hook action:
+
 - `openclaw system event --text "$(node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const p=JSON.parse(s); process.stdout.write(p.message);})')" --mode now`
+
 2. Otherwise:
+
 - log structured event to stdout.
 
 OpenClaw detection contract:
+
 - Check binary presence in PATH (`which openclaw` on Unix, `where openclaw` on Windows).
 - Check auth/config presence: `OPENCLAW_GATEWAY_TOKEN` is set OR `~/.openclaw/openclaw.json` exists.
 - Both checks must pass to enable OpenClaw adapter.
 - If only one check passes, emit a warning and fall back to stdout.
 
 ### Reliability Rules
+
 - Hook failures never mutate task outcomes.
 - Each hook invocation is wrapped in timeout + error capture.
 - Hook errors emit `onError` (guarded to avoid recursion loops).
@@ -327,15 +337,18 @@ OpenClaw detection contract:
 ## 8. Codex Consultation Pattern
 
 ### Role Definition
+
 - Codex is a specialized read-only advisor used by Claude subagents for implementation questions.
 - It is never the run orchestrator and never executes repo writes as part of consultation.
 
 ### Invocation Contract
+
 - Claude subagent decides a question needs external implementation guidance.
 - Orca executes configured command (default `codex exec -s read-only`) with a bounded prompt.
 - Returned answer is attached to task context as advisory material.
 
 ### Guardrails
+
 - Prompt includes current task, acceptance criteria, and relevant files list.
 - Response size limits and timeout are enforced.
 - Consultation transcript is logged in run artifacts for audit.
@@ -348,10 +361,12 @@ OpenClaw detection contract:
 1. Load and parse spec markdown.
 2. Claude creates initial structured task JSON.
 3. Codex pre-planning review validates:
+
 - missing dependencies
 - ambiguous acceptance criteria
 - over-broad tasks
 - ordering/risk issues
+
 4. Orca merges feedback into a revised plan prompt for Claude.
 5. Claude emits final task graph.
 6. Validate graph integrity (unique IDs, no missing deps, no cycles).
@@ -362,16 +377,19 @@ Execution starts only after step 7 succeeds.
 ## 10. Task Runner and Status Tracking
 
 ### Queue Model
+
 - Build DAG from `dependencies[]`.
 - Select runnable tasks where all deps are `done`.
 - Process tasks sequentially first (phase 1), with optional future controlled parallelism.
 
 ### Retry Semantics
+
 - Per-task retry counter, default from config (`maxRetries`).
 - Retry on transient orchestrator/tool errors.
 - Fail fast on schema/validation errors.
 
 ### Status Persistence
+
 - Update `status.json` at every transition:
 - `pending -> in_progress -> done|failed|cancelled`
 - include timestamps, retries, and last error.
@@ -381,53 +399,67 @@ Use atomic write strategy (`write temp + rename`) to protect against partial wri
 ## 11. CLI Interface
 
 ### `orca run`
+
 ```bash
 orca run --spec ./specs/myfeature.md [--config ./orca.config.ts]
 ```
+
 - Runs pre-planning then execution.
 - Creates run directory and live status file.
 - First output line is always `Run ID: <run-id>` for concurrent run management.
 - Run ID format is deterministic + collision-resistant: `<spec-slug>-<timestamp-ms>-<4char-hex>` (e.g. `onboarding-1708300800000-a3f2`).
 
 ### `orca plan`
+
 ```bash
 orca plan --spec ./specs/myfeature.md [--config ./orca.config.ts]
 ```
+
 - Runs pre-planning only.
 - Outputs validated task graph without execution.
 
 ### `orca status`
+
 ```bash
 orca status [--run <run-id>]
 ```
+
 - With no args, lists all runs in run store (same summary view as `orca list`).
 - With `--run <run-id>`, prints detailed status + task table for that specific run.
 
 ### `orca list`
+
 ```bash
 orca list
 ```
+
 - Lists all runs in run store with run ID, spec, status, and started time.
 - Primary run discovery command before `status --run`, `resume`, `cancel`, and `pr finalize`.
 
 ### `orca resume`
+
 ```bash
 orca resume --run <run-id>
 ```
+
 - Resumes a stopped/incomplete run by re-reading `tasks.json`.
 - Skips completed tasks and continues from the first incomplete task.
 
 ### `orca cancel`
+
 ```bash
 orca cancel --run <run-id>
 ```
+
 - Terminates a currently running process cleanly.
 - Marks run/task state as `cancelled` and persists status.
 
 ### `orca pr finalize`
+
 ```bash
 orca pr finalize --run <run-id>
 ```
+
 - Reads drafted PR title/body from run artifacts.
 - Shows draft and asks for confirmation.
 - Refuses unless run `overallStatus` is `completed`.
@@ -435,10 +467,12 @@ orca pr finalize --run <run-id>
 - Never pushes changes automatically.
 
 Run-targeting requirement for concurrent safety:
+
 - All commands that operate on a specific run require `--run <run-id>` (no implicit "latest" selection).
 - If omitted, command must fail with a clear error and list active runs.
 
 ### Hook Flags (examples)
+
 ```bash
 orca run --spec ./specs/myfeature.md \
   --on-milestone 'node -e '\''let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const p=JSON.parse(s);console.log(p.message);})'\'''
@@ -447,13 +481,16 @@ orca run --spec ./specs/myfeature.md \
 ## 12. PR Flow (Optional, Hook-Based)
 
 1. At run completion, if PR flow enabled:
+
 - Claude drafts title + description from run context.
+
 2. Orca emits milestone: `PR draft ready`.
 3. User/agent reviews draft text.
 4. `orca pr finalize --run <run-id>` confirmation gate (only when run `overallStatus` is `completed`).
 5. On confirm, Orca calls `gh` and stores PR URL in `status.json`.
 
 Safety constraints:
+
 - No auto push.
 - No auto merge.
 - Explicit confirmation per finalize action.
@@ -488,11 +525,13 @@ Safety constraints:
 ## 16. Implementation Phases
 
 ### Phase 0: Project Bootstrap
+
 - Initialize TS project with strict `tsconfig`.
 - Add `oxlint` + `tsgolint` commands and CI checks.
 - Add base CLI entrypoint and command scaffolding.
 
 ### Phase 1: Planning Backbone (MVP)
+
 - Implement spec loader and planner pipeline.
 - Integrate Claude SDK adapter (v2 preview methods).
 - Generate and validate task JSON graph.
@@ -501,6 +540,7 @@ Safety constraints:
 - Implement `orca plan` command.
 
 ### Phase 2: Execution Engine
+
 - Build dependency-aware task runner.
 - Add retry policy and state transitions.
 - Implement `orca run`, `orca list`, and `orca status`.
@@ -510,23 +550,27 @@ Safety constraints:
 - Add robust atomic status writes.
 
 ### Phase 3: Hook Framework
+
 - Implement dispatcher + event types.
 - Add stdout + OpenClaw default adapters.
 - Add CLI hook command templating and config handlers.
 - Add timeout/isolation and error telemetry around hooks.
 
 ### Phase 4: Codex Consultation Integration
+
 - Add consultation adapter (`codex exec -s read-only`).
 - Integrate into Claude subagent decision flow.
 - Add transcript artifact logging and fallback behavior.
 
 ### Phase 5: PR Draft and Finalize
+
 - Add on-complete draft generation.
 - Implement confirmation UX and `gh` integration.
 - Wire `orca pr finalize --run <run-id>` and status persistence.
 - Refuse finalize unless run `overallStatus` is `completed`.
 
 ### Phase 6: Hardening and Extensibility
+
 - Schema versioning + migrations.
 - More integration tests (failure injection, retry behavior, hook failures).
 - Add global run store resolution (`ORCA_RUNS_DIR` env override, `orca.config.ts` fallback, default `~/.orca/runs`).
@@ -535,9 +579,11 @@ Safety constraints:
 ## 17. Build Order Recommendation
 
 Start with `plan` before `run`:
+
 1. Reliable decomposition + validation gives immediate product value.
 2. It de-risks execution by enforcing high-quality task graphs first.
 3. Hooks and PR flow can be layered without destabilizing core orchestration.
 
 Immediate first milestone:
+
 - `orca plan --spec ...` producing validated `tasks.json` + `status.json` with hook emission.

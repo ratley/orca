@@ -5,3 +5,4 @@ dist
 .npmrc
 tmp/
 session-logs/
+TODO.md

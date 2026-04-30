@@ -46,13 +46,16 @@ describe("RunStore", () => {
     await store.createRun(runId, "/tmp/spec.md");
     const updated = await store.updateRun(runId, {
       overallStatus: "running",
-      milestones: ["started"]
+      milestones: ["started"],
     });
 
     const statusPath = path.join(store.getRunDir(runId), "status.json");
     const tmpPath = `${statusPath}.tmp`;
 
-    const tmpExists = await fs.access(tmpPath).then(() => true).catch(() => false);
+    const tmpExists = await fs
+      .access(tmpPath)
+      .then(() => true)
+      .catch(() => false);
 
     expect(updated.overallStatus).toBe("running");
     expect(updated.milestones).toEqual(["started"]);

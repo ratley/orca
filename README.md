@@ -52,11 +52,17 @@ Run states: `planning` → `running` → `completed` | `failed` | `cancelled` | 
 
 ### Answering questions
 
-If a run hits `waiting_for_answer`, it's blocked until you respond:
+If a run hits `waiting_for_answer`, execution pauses until a response is submitted to the live run:
 
 ```bash
 orca status --last                          # read the question
-orca answer <run-id> "yes, use migration A"  # unblock it
+orca answer <run-id> "yes, use migration A"  # answer and resume the same run
+```
+
+For multi-question prompts, pass JSON mapping question IDs to answers:
+
+```bash
+orca answer <run-id> '{"answers":{"q1":{"answers":["yes"]},"q2":{"answers":["option-a"]}}}'
 ```
 
 ### Spec / plan files
@@ -76,6 +82,7 @@ orca cancel --last   # abort
 ```
 
 Common failures:
+
 - `auth error` → re-auth Codex (`codex auth`) or set `OPENAI_API_KEY` / `ORCA_OPENAI_API_KEY`
 - `no git repo` → `cd` into a git repo
 - `plan invalid` → goal too vague; cancel and restate
@@ -104,38 +111,59 @@ Orca loads config in this order (later overrides earlier):
 
 `.ts` is preferred over `.js` when both exist.
 
+Orca is Codex-only. Stale executor values from older configs are coerced to `codex`.
+Planning can be routed separately: by default Orca asks a lightweight Codex router whether Claude or Codex should generate the task graph, then Codex executes the resulting tasks.
+
 ```ts
 // orca.config.ts
 import { defineOrcaConfig } from "orcastrator";
 
 export default defineOrcaConfig({
-  executor: "codex",              // only supported value
-  runsDir: "./.orca/runs",        // default: ~/.orca/runs
+  executor: "codex", // only supported value
+  runsDir: "./.orca/runs", // default: ~/.orca/runs
   sessionLogs: "./session-logs",
   skills: ["./.orca/skills"],
   maxRetries: 1,
 
-  codex: {
-    model: "gpt-5.3-codex",
-    effort: "medium",             // "low" | "medium" | "high" — applies to all Codex turns
+  planner: {
+    agent: "auto", // "auto" | "claude" | "codex"
+    router: {
+      model: "gpt-5.3-codex-spark",
+    },
+  },
+
+  claude: {
+    command: "claude", // uses `claude -p` for planning
+    model: "claude-opus-4-7",
+    effort: "high",
     timeoutMs: 300000,
-    multiAgent: false,      // see Multi-agent section
-    perCwdExtraUserRoots: [
-      { cwd: process.cwd(), extraUserRoots: ["/tmp/shared-skills"] }
-    ],
+  },
+
+  codex: {
+    model: "gpt-5.5",
+    effort: "high", // fallback for all Codex turns unless overridden below
+    thinkingLevel: {
+      decision: "low", // planning gate / quick routing decisions
+      planning: "xhigh", // task graph generation
+      review: "high", // task graph consultation + post-execution review prompts
+      execution: "medium", // task execution turns
+    },
+    timeoutMs: 300000,
+    multiAgent: false, // see Multi-agent section
+    perCwdExtraUserRoots: [{ cwd: process.cwd(), extraUserRoots: ["/tmp/shared-skills"] }],
   },
 
   review: {
     plan: {
       enabled: true,
-      onInvalid: "fail",    // "fail" | "warn_skip"
+      onInvalid: "fail", // "fail" | "warn_skip"
     },
     execution: {
       enabled: true,
       maxCycles: 2,
-      onFindings: "auto_fix",  // "auto_fix" | "report_only" | "fail"
+      onFindings: "auto_fix", // "auto_fix" | "report_only" | "fail"
       validator: {
-        auto: true,            // auto-detect validators from package.json
+        auto: true, // auto-detect validators from package.json
         // commands: ["npm run validate"]  // explicit override
       },
       // prompt: "Prefer minimal safe fixes"
@@ -151,7 +179,9 @@ export default defineOrcaConfig({
     onTaskComplete: async (event, context) => {
       console.log(`task done: ${event.taskId} from pid ${context.pid}`);
     },
-    onError: async (event) => { console.error(event.error); },
+    onError: async (event) => {
+      console.error(event.error);
+    },
   },
 
   hookCommands: {
@@ -168,9 +198,67 @@ After planning, Orca runs a pre-execution review that can edit the task graph (a
 
 After execution, Orca runs validation commands and asks Codex to review findings. With `onFindings: "auto_fix"`, it applies fixes and retries up to `maxCycles` times, then reports. Set `ORCA_SKIP_VALIDATORS=1` to skip validator auto-detection at runtime.
 
+Use `codex.thinkingLevel` when you want per-step reasoning levels instead of a single global `codex.effort`. Supported steps: `decision`, `planning`, `review`, `execution`.
+
+### Planner routing
+
+Set `planner.agent: "claude"` to always use the local Claude Code CLI for task graph generation, or `planner.agent: "codex"` to keep planning in Codex. The default `planner.agent: "auto"` asks Codex using `planner.router.model` and routes broad, creative, ambiguous work to Claude while keeping narrow implementation-heavy planning in Codex.
+
+`planner.router` is only valid with `planner.agent: "auto"`:
+
+```ts
+// Automatic routing
+planner: {
+  agent: "auto",
+  router: { model: "gpt-5.3-codex-spark" },
+}
+
+// Forced planning agent; no router is used
+planner: {
+  agent: "claude",
+}
+```
+
+The same rule is easiest to read as JSON shapes:
+
+```json
+[
+  { "planner": { "agent": "auto", "router": { "model": "gpt-5.3-codex-spark" } } },
+  { "planner": { "agent": "claude" } },
+  { "planner": { "agent": "codex" } }
+]
+```
+
+Do not include `router` with forced `claude` or forced `codex` planning; Orca rejects that config because the router is bypassed.
+
+Claude planning shells out to the configured command with `-p` and passes the prompt on stdin. It does not replace Codex execution, task-graph review, or post-execution review.
+
+Model IDs are typed for the documented OpenAI and Claude models Orca supports. Check the provider docs when updating those lists: [OpenAI models](https://platform.openai.com/docs/models), [Anthropic Claude models](https://docs.anthropic.com/en/docs/about-claude/models), and [Claude Code model config](https://docs.anthropic.com/en/docs/claude-code/model-config). If you need an unreleased, private, or provider-specific model, wrap it explicitly:
+
+```ts
+import { customModel, defineOrcaConfig } from "orcastrator";
+
+export default defineOrcaConfig({
+  codex: {
+    model: customModel("private-openai-model"),
+  },
+  claude: {
+    model: customModel("private-claude-model"),
+  },
+});
+```
+
 ### Multi-agent mode
 
-Set `codex.multiAgent: true` to spawn parallel Codex agents per task. Faster for large refactors with independent subtasks; higher token cost. **Note:** this writes `multi_agent = true` to your global `~/.codex/config.toml`.
+Set `codex.multiAgent: true` to enable multi-agent-aware prompt guidance. Orca's task runner stays sequential, but Codex can use subagents inside a task turn when work is independent. **Note:** this writes `multi_agent = true` to your global `~/.codex/config.toml`.
+
+If `~/.codex/config.toml` already enables `[features].multi_agent = true`, Orca also treats the run as multi-agent-aware for planning, review, consultation, and execution prompts even when `codex.multiAgent` is not set in Orca config.
+
+### Codex binary and MCP diagnostics
+
+When `ORCA_CODEX_PATH` is unset, Orca auto-selects the newest installed Codex CLI/app-server it can find instead of blindly trusting the first `codex` binary on `PATH`. This avoids talking to an older global install when a newer desktop build is present.
+
+If configured Codex MCP servers are enabled but not logged in, Orca now summarizes that once and continues without them instead of streaming raw app-server auth noise throughout the run.
 
 ### Skills
 
@@ -210,14 +298,15 @@ orca setup                               Interactive setup wizard
 
 **Key flags for `orca` (run):**
 
-- `--codex-only` — force Codex executor
-- `--codex-effort <low|medium|high>` — override effort for this run
+- `--codex-only` — compatibility flag; executor is already Codex-only
+- `--codex-effort <low|medium|high|xhigh>` — override effort for this run
 - `--config <path>` — explicit config file
+- `--on-question <cmd>` — command hook when Codex requests user input
 - `--on-complete <cmd>`, `--on-error <cmd>`, `--on-task-complete <cmd>`, `--on-findings <cmd>`, etc.
 
 **Key flags for `orca resume`:**
 
-- `--codex-only`, `--codex-effort <low|medium|high>`, `--config <path>`, `--run <id>`, `--last`
+- `--codex-only`, `--codex-effort <low|medium|high|xhigh>`, `--config <path>`, `--run <id>`, `--last`
 
 **`orca setup` flags:**
 
@@ -229,10 +318,11 @@ orca setup                               Interactive setup wizard
 
 ### Hooks
 
-Available hook names: `onMilestone`, `onTaskComplete`, `onTaskFail`, `onInvalidPlan`, `onFindings`, `onComplete`, `onError`.
+Available hook names: `onMilestone`, `onQuestion`, `onTaskComplete`, `onTaskFail`, `onInvalidPlan`, `onFindings`, `onComplete`, `onError`.
 
 - Function hooks (`config.hooks`): receive `(event, context)` where `context = { cwd, pid, invokedAt }`
 - Command hooks (`config.hookCommands` / `--on-*` flags): receive full event JSON over stdin
+- `onQuestion` includes request metadata (`requestId`, `threadId`, `turnId`, `itemId`) and `questions[]`
 - Unknown hook keys in config are rejected at load time
 
 ### Run ID format
@@ -260,7 +350,7 @@ bun test src
 npm run test:postexec-json
 ```
 
-Full validation gate (runs lint → type-check → tests → build):
+Full validation gate (runs Oxfmt check, Oxlint, type-check, tests, and build):
 
 ```bash
 npm run validate

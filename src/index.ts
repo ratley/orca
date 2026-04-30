@@ -1,14 +1,32 @@
-export { defineOrcaConfig } from "./types/index.js";
+export {
+  ClaudeConfigSchema,
+  CodexConfigSchema,
+  OrcaConfigSchema,
+  PlannerConfigSchema,
+  PlannerRouterConfigSchema,
+  ReviewConfigSchema,
+  customModel,
+  defineOrcaConfig,
+} from "./types/index.js";
 
 export type {
   BaseHookEvent,
+  ClaudeEffort,
+  ClaudeModelId,
+  CustomModelId,
   HookEvent,
   HookEventMap,
   HookHandler,
   HookHandlerContext,
   HookName,
+  OpenAIModelId,
   OrcaConfig,
   PlanResult,
+  PlannerAgent,
+  PlannerAgentSelection,
+  PlannerConfig,
+  PlannerRouterConfig,
+  PlannerRoutingDecision,
   RunId,
   RunStatus,
   Spec,
@@ -16,5 +34,5 @@ export type {
   TaskExecutionResult,
   TaskGraphReviewOperation,
   TaskGraphReviewResult,
-  TaskStatus
+  TaskStatus,
 } from "./types/index.js";

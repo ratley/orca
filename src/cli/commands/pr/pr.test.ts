@@ -68,20 +68,20 @@ async function loadPrModules(options: {
       (async () => ({
         stdout: "",
         stderr: "",
-        exitCode: 0
-      }))
+        exitCode: 0,
+      })),
   );
 
   mock.module("../../../utils/gh.js", () => ({
     checkGhCli,
-    runGh
+    runGh,
   }));
 
   const nonce = Math.random();
   const [draftModule, publishModule, statusModule] = await Promise.all([
     import(`./draft.js?test=${nonce}`),
     import(`./publish.js?test=${nonce}`),
-    import(`./status.js?test=${nonce}`)
+    import(`./status.js?test=${nonce}`),
   ]);
 
   return { draftModule, publishModule, statusModule, checkGhCli, runGh };
@@ -93,7 +93,7 @@ describe("PR command handlers", () => {
     await store.createRun(runId, "/tmp/spec.md");
 
     const { draftModule, runGh } = await loadPrModules({
-      checkGhCli: async () => false
+      checkGhCli: async () => false,
     });
 
     await draftModule.prDraftCommandHandler({ run: runId });
@@ -121,13 +121,21 @@ describe("PR command handlers", () => {
       runGh: async () => ({
         stdout: `creating PR\n${prUrl}\n`,
         stderr: "",
-        exitCode: 0
-      })
+        exitCode: 0,
+      }),
     });
 
     await draftModule.prDraftCommandHandler({ run: runId });
 
-    expect(runGh).toHaveBeenCalledWith(["pr", "create", "--draft", "--title", "Orca run: spec.md", "--body", expect.any(String)]);
+    expect(runGh).toHaveBeenCalledWith([
+      "pr",
+      "create",
+      "--draft",
+      "--title",
+      "Orca run: spec.md",
+      "--body",
+      expect.any(String),
+    ]);
 
     const updated = await store.getRun(runId);
     expect(updated?.pr?.url).toBe(prUrl);
@@ -165,8 +173,8 @@ describe("PR command handlers", () => {
     await store.updateRun(runId, {
       pr: {
         readyForFinalize: false,
-        url: prUrl
-      }
+        url: prUrl,
+      },
     });
 
     const { statusModule } = await loadPrModules({
@@ -177,12 +185,12 @@ describe("PR command handlers", () => {
           url: prUrl,
           statusCheckRollup: [
             { name: "ci/test", status: "COMPLETED", conclusion: "SUCCESS" },
-            { context: "lint", state: "PENDING" }
-          ]
+            { context: "lint", state: "PENDING" },
+          ],
         }),
         stderr: "",
-        exitCode: 0
-      })
+        exitCode: 0,
+      }),
     });
 
     await statusModule.prStatusCommandHandler({ run: runId });

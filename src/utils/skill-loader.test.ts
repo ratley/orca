@@ -34,14 +34,14 @@ describe("skill-loader", () => {
         "description: Helps with builds",
         "---",
         "# Skill Body",
-        "Run the build command."
-      ].join("\n")
+        "Run the build command.",
+      ].join("\n"),
     );
 
     expect(parsed).toEqual({
       name: "Build Skill",
       description: "Helps with builds",
-      body: "# Skill Body\nRun the build command."
+      body: "# Skill Body\nRun the build command.",
     });
   });
 
@@ -52,7 +52,7 @@ describe("skill-loader", () => {
     expect(parsed).toEqual({
       name: "",
       description: "",
-      body: content
+      body: content,
     });
   });
 
@@ -69,10 +69,8 @@ describe("skill-loader", () => {
     await fs.mkdir(skillDir, { recursive: true });
     await fs.writeFile(
       path.join(skillDir, "SKILL.md"),
-      ["---", "name: Deploy", "description: Deploy helper", "---", "Use this for deploy steps."].join(
-        "\n"
-      ),
-      "utf8"
+      ["---", "name: Deploy", "description: Deploy helper", "---", "Use this for deploy steps."].join("\n"),
+      "utf8",
     );
 
     const loaded = await loadSkill(skillDir);
@@ -81,7 +79,7 @@ describe("skill-loader", () => {
       description: "Deploy helper",
       body: "Use this for deploy steps.",
       dirPath: skillDir,
-      filePath: path.join(skillDir, "SKILL.md")
+      filePath: path.join(skillDir, "SKILL.md"),
     });
   });
 
@@ -122,7 +120,7 @@ describe("skill-loader", () => {
     await fs.writeFile(
       path.join(externalSkillDir, "SKILL.md"),
       "---\nname: Linked\ndescription: L\n---\nlinked body",
-      "utf8"
+      "utf8",
     );
     await fs.symlink(externalSkillDir, symlinkPath, "dir");
 
@@ -156,7 +154,7 @@ describe("skill-loader", () => {
       expect(loaded).toBeNull();
       expect(warnMock).toHaveBeenCalledTimes(1);
       expect(String((warnMock.mock.calls as unknown[][])[0]?.[0] ?? "")).toContain(
-        `Skipping skill at ${skillDir}: unable to read SKILL.md`
+        `Skipping skill at ${skillDir}: unable to read SKILL.md`,
       );
     } finally {
       console.warn = originalWarn;
@@ -181,22 +179,22 @@ describe("skill-loader", () => {
     await fs.writeFile(
       path.join(configSkillDir, "SKILL.md"),
       "---\nname: Duplicate\ndescription: from config\n---\nconfig body",
-      "utf8"
+      "utf8",
     );
     await fs.writeFile(
       path.join(projectDir, ".orca", "skills", "project-dup", "SKILL.md"),
       "---\nname: Duplicate\ndescription: from project\n---\nproject body",
-      "utf8"
+      "utf8",
     );
     await fs.writeFile(
       path.join(homeDir, ".orca", "skills", "global-dup", "SKILL.md"),
       "---\nname: Duplicate\ndescription: from global\n---\nglobal body",
-      "utf8"
+      "utf8",
     );
     await fs.writeFile(
       path.join(projectDir, ".orca", "skills", "project-unique", "SKILL.md"),
       "---\nname: Unique\ndescription: unique\n---\nunique body",
-      "utf8"
+      "utf8",
     );
 
     const loaded = await loadSkills({ skills: [configSkillDir] });
@@ -218,7 +216,7 @@ describe("skill-loader", () => {
     await fs.writeFile(
       path.join(overrideDir, "SKILL.md"),
       "---\nname: code-simplifier\ndescription: project override\n---\nproject override body",
-      "utf8"
+      "utf8",
     );
 
     const loaded = await loadSkills();

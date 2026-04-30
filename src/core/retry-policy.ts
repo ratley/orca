@@ -19,15 +19,7 @@ function isPermanentError(error: unknown): boolean {
     return true;
   }
 
-  const permanentPatterns = [
-    "schema",
-    "validation",
-    "invalid json",
-    "parse",
-    "cancelled",
-    "canceled",
-    "abort"
-  ];
+  const permanentPatterns = ["schema", "validation", "invalid json", "parse", "cancelled", "canceled", "abort"];
 
   return permanentPatterns.some((pattern) => message.includes(pattern));
 }
@@ -48,7 +40,7 @@ function isTransientError(error: unknown): boolean {
     "429",
     "503",
     "temporarily unavailable",
-    "socket hang up"
+    "socket hang up",
   ];
 
   return transientPatterns.some((pattern) => message.includes(pattern));

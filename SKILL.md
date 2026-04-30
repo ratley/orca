@@ -3,9 +3,9 @@ name: orca
 description: "Orchestrate multi-step AI coding tasks via the Orca CLI. Use when: running multi-file code changes, spawning background agents, planning and executing complex coding tasks end-to-end. NOT for: simple single-file edits, reading code, or any work in ~/clawd workspace."
 ---
 
-# Orca — Operator Guide
+# Orca - Operator Guide
 
-Orca (`orcastrator`) breaks a goal into a task graph and executes it end-to-end via Codex. Codex plans and executes; a reviewer catches regressions and can auto-fix.
+Orca (`orcastrator`) breaks a goal into a task graph and executes it end-to-end via Codex. Planning can be skipped, routed to Codex, or routed to the local Claude Code CLI through `claude -p`; execution and review still run through Codex.
 
 ---
 
@@ -13,14 +13,44 @@ Orca (`orcastrator`) breaks a goal into a task graph and executes it end-to-end 
 
 - Must be run inside a git repo (or pass `--skip-git-repo-check`)
 - Codex executor (default): requires `~/.codex/auth.json` (Codex OAuth)
+- Claude planning (optional): requires `claude` on PATH, or set `claude.command`
 - Install: `npm install -g orcastrator`
+
+---
+
+## Planner Routing
+
+| Planner config                    | When to use                                                               |
+| --------------------------------- | ------------------------------------------------------------------------- |
+| `planner.agent: "auto"` (default) | Let a Codex router choose Claude or Codex for task graph generation       |
+| `planner.agent: "claude"`         | Force broad or ambiguous planning through local Claude Code (`claude -p`) |
+| `planner.agent: "codex"`          | Force task graph generation to stay in Codex                              |
+
+`planner.router` only applies to `planner.agent: "auto"`. Forced planner configs should be this simple:
+
+```json
+[{ "planner": { "agent": "claude" } }, { "planner": { "agent": "codex" } }]
+```
+
+Automatic routing is the only shape that uses a router model:
+
+```json
+{
+  "planner": {
+    "agent": "auto",
+    "router": { "model": "gpt-5.3-codex-spark" }
+  }
+}
+```
+
+Claude planning shells out to `claude -p` with the prompt on stdin. It does not replace Codex execution, task graph review, or post-execution review.
 
 ---
 
 ## Executor Selection
 
-| Executor | When to use |
-|---|---|
+| Executor          | When to use                                                                   |
+| ----------------- | ----------------------------------------------------------------------------- |
 | `codex` (default) | Most tasks. Persistent Codex session, fast, integrates with app-server skills |
 
 Override in config: `executor: "codex"` (default and only supported executor).
@@ -57,6 +87,7 @@ Be specific. Orca passes your goal to a planner that generates a task graph — 
 **Good:** `"Fix the TypeError thrown when user logs out with an expired token in src/auth/session.ts. Ensure existing tests pass and add a regression test."`
 
 Include:
+
 - What to change and where
 - Acceptance criteria or test expectations
 - What NOT to touch (if relevant)
@@ -71,6 +102,7 @@ orca status --run <id>    # status of a specific run
 ```
 
 **Run states:**
+
 - `planning` — generating task graph
 - `running` — executing tasks
 - `waiting_for_answer` — agent raised a question, needs `orca answer`
@@ -106,6 +138,7 @@ orca cancel --last        # abort if unrecoverable
 ```
 
 **Common failures:**
+
 - `auth error` → re-auth Codex (`codex auth`) or check `ANTHROPIC_API_KEY`
 - `no git repo` → `cd` into a git repo or use `--skip-git-repo-check`
 - `plan invalid` → goal was too vague; cancel and restate with more specificity
@@ -168,17 +201,37 @@ Config locations (later entries override earlier): `~/.orca/config.ts` (preferre
 
 ```ts
 export default {
-  executor: "codex",              // "codex"
-  sessionLogs: "./session-logs",  // where to write session logs
+  executor: "codex", // "codex"
+  sessionLogs: "./session-logs", // where to write session logs
+
+  planner: {
+    agent: "auto", // "auto" | "claude" | "codex"
+    router: {
+      model: "gpt-5.3-codex-spark", // only valid with agent: "auto"
+    },
+  },
+
+  claude: {
+    command: "claude",
+    model: "claude-opus-4-7",
+    effort: "high",
+    timeoutMs: 300000,
+  },
 
   hooks: {
-    onFindings: async (event, context) => { /* fires after reviewer */ },
-    onComplete: async (event, context) => { /* fires on success */ },
-    onError: async (event, context) => { /* fires on failure */ },
+    onFindings: async (event, context) => {
+      /* fires after reviewer */
+    },
+    onComplete: async (event, context) => {
+      /* fires on success */
+    },
+    onError: async (event, context) => {
+      /* fires on failure */
+    },
   },
 
   hookCommands: {
-    onComplete: "your-notify-command",  // reads event JSON from stdin
+    onComplete: "your-notify-command", // reads event JSON from stdin
     onError: "your-error-command",
   },
 
@@ -188,15 +241,15 @@ export default {
       enabled: true,
       maxCycles: 2,
       onFindings: "auto_fix",
-      validator: { auto: true }
-    }
+      validator: { auto: true },
+    },
   },
 
   codex: {
+    model: "gpt-5.5",
+    effort: "high",
     multiAgent: false,
-    perCwdExtraUserRoots: [
-      { cwd: process.cwd(), extraUserRoots: ["/tmp/shared-skills"] }
-    ]
+    perCwdExtraUserRoots: [{ cwd: process.cwd(), extraUserRoots: ["/tmp/shared-skills"] }],
   },
 };
 ```
@@ -208,6 +261,7 @@ export default {
 Set `codex.multiAgent: true` to spawn parallel Codex agents per task. Faster for independent tasks; higher token cost. Use for large refactors with clearly separable subtasks.
 
 When parallelizing, enforce lane ownership:
+
 - one sub-agent lane per independent subsystem/file set
 - avoid overlapping write scopes
 - keep integration/merge steps sequential
@@ -219,6 +273,7 @@ When parallelizing, enforce lane ownership:
 Orca ships a bundled `code-simplifier` skill that's applied in planner, reviewer, and executor prompts automatically. Extra skills can be injected via `codex.perCwdExtraUserRoots` (scoped per cwd).
 
 Execution guardrails (especially for Codex):
+
 - bias to the simplest implementation that works
 - no compatibility fallbacks or dead code unless explicitly required
 - run a simplification pass before final handoff
@@ -228,6 +283,7 @@ Execution guardrails (especially for Codex):
 ## Done Criteria
 
 A run is complete when:
+
 1. `orca status --last` shows `complete`
 2. A branch exists with the committed changes
 3. `orca pr status --last` shows CI passing (if applicable)

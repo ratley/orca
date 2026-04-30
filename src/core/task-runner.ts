@@ -14,7 +14,7 @@ export type ExecuteTaskFn = (
   task: Task,
   runId: string,
   config?: OrcaConfig,
-  systemContext?: string
+  systemContext?: string,
 ) => Promise<{ outcome: "done" | "failed"; rawResponse: string; error?: string }>;
 
 // Non-null only when set by tests — null means "use real executor logic"
@@ -48,7 +48,7 @@ function applyTaskUpdate(tasks: Task[], taskId: string, patch: Partial<Task>): T
 
     return {
       ...task,
-      ...patch
+      ...patch,
     };
   });
 }
@@ -68,23 +68,18 @@ function hasPendingTasks(tasks: Task[]): boolean {
 }
 
 export interface TaskRunnerOptions {
-  runId: string;
+  runId: RunId;
   store: RunStore;
   config?: OrcaConfig;
   emitHook?: EmitHook;
+  deferCompletion?: boolean;
   /** Override executor — used by tests only. In production, use config.executor. */
   executeTask?: ExecuteTaskFn;
 }
 
 function formatSkillsSection(skills: LoadedSkill[]): string {
   const formattedSkills = skills.map((skill) =>
-    [
-      `### ${skill.name}`,
-      "",
-      `Description: ${skill.description}`,
-      "",
-      skill.body
-    ].join("\n")
+    [`### ${skill.name}`, "", `Description: ${skill.description}`, "", skill.body].join("\n"),
   );
 
   return ["## Available Skills", "", ...formattedSkills].join("\n");
@@ -114,11 +109,11 @@ function buildSessionSummary(run: RunStatus): string {
     "| ID | Name | Status | Started At | Finished At |",
     "| --- | --- | --- | --- | --- |",
     taskRows,
-    ""
+    "",
   ].join("\n");
 }
 
-async function writeSessionSummary(store: RunStore, runId: string, sessionLogsDir?: string): Promise<void> {
+export async function writeSessionSummary(store: RunStore, runId: string, sessionLogsDir?: string): Promise<void> {
   if (!sessionLogsDir) {
     return;
   }
@@ -138,7 +133,7 @@ async function writeSessionSummary(store: RunStore, runId: string, sessionLogsDi
 
 export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
   const emitHook = options.emitHook ?? defaultEmitHook;
-  const { runId, store, config } = options;
+  const { runId, store, config, deferCompletion = false } = options;
   const skills = await loadSkills(config);
   const taskSystemContext = skills.length === 0 ? undefined : formatSkillsSection(skills);
 
@@ -153,9 +148,13 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
   if (mockFn) {
     executeTaskFn = mockFn;
   } else {
-    codexSession = await createCodexSession(process.cwd(), config);
-    executeTaskFn = (task, taskRunId, _cfg, systemContext) =>
-      codexSession!.executeTask(task, taskRunId, systemContext);
+    codexSession = await createCodexSession(process.cwd(), config, {
+      runId,
+      store,
+      resumeOverallStatus: "running",
+      emitHook,
+    });
+    executeTaskFn = (task, taskRunId, _cfg, systemContext) => codexSession!.executeTask(task, taskRunId, systemContext);
   }
 
   try {
@@ -171,7 +170,7 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
       hook: "onMilestone",
       message: "execution-started",
       timestamp: new Date().toISOString(),
-      metadata: { overallStatus: "running" }
+      metadata: { overallStatus: "running" },
     });
 
     while (true) {
@@ -186,7 +185,7 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
           hook: "onMilestone",
           message: "execution-cancelled",
           timestamp: new Date().toISOString(),
-          metadata: { overallStatus: "cancelled" }
+          metadata: { overallStatus: "cancelled" },
         });
         await writeSessionSummary(store, runId, config?.sessionLogs);
         return;
@@ -200,22 +199,25 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
         const allDone = run.tasks.every((task) => task.status === "done");
 
         if (allDone) {
-          await store.updateRun(runId, { overallStatus: "completed" });
+          const nextOverallStatus = deferCompletion ? "reviewing" : "completed";
+          await store.updateRun(runId, { overallStatus: nextOverallStatus });
           const completedAt = new Date().toISOString();
           await emitHook({
             runId: run.runId,
             hook: "onMilestone",
             message: "execution-completed",
             timestamp: completedAt,
-            metadata: { overallStatus: "completed" }
+            metadata: { overallStatus: nextOverallStatus },
           });
-          await emitHook({
-            runId: run.runId,
-            hook: "onComplete",
-            message: "run-completed",
-            timestamp: completedAt,
-            metadata: { overallStatus: "completed" }
-          });
+          if (!deferCompletion) {
+            await emitHook({
+              runId: run.runId,
+              hook: "onComplete",
+              message: "run-completed",
+              timestamp: completedAt,
+              metadata: { overallStatus: "completed" },
+            });
+          }
           await writeSessionSummary(store, runId, config?.sessionLogs);
           return;
         }
@@ -229,7 +231,7 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
             hook: "onMilestone",
             message: "execution-failed",
             timestamp: failedAt,
-            metadata: { overallStatus: "failed" }
+            metadata: { overallStatus: "failed" },
           });
           await emitHook({
             runId: run.runId,
@@ -237,7 +239,7 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
             message: `run-failed: ${failureMessage}`,
             timestamp: failedAt,
             error: failureMessage,
-            metadata: { overallStatus: "failed" }
+            metadata: { overallStatus: "failed" },
           });
           await writeSessionSummary(store, runId, config?.sessionLogs);
           return;
@@ -250,7 +252,7 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
             hook: "onMilestone",
             message: "execution-cancelled",
             timestamp: new Date().toISOString(),
-            metadata: { overallStatus: "cancelled" }
+            metadata: { overallStatus: "cancelled" },
           });
           await writeSessionSummary(store, runId, config?.sessionLogs);
           return;
@@ -277,14 +279,14 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
         return {
           ...stripOptionalFields(candidate, ["finishedAt", "lastError"]),
           status: "in_progress" as const,
-          startedAt: candidate.startedAt ?? now
+          startedAt: candidate.startedAt ?? now,
         };
       });
 
       await store.updateRun(runId, {
         mode: "run",
         overallStatus: "running",
-        tasks: inProgressTasks
+        tasks: inProgressTasks,
       });
 
       try {
@@ -299,7 +301,7 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
             return {
               ...stripOptionalFields(candidate, ["lastError"]),
               status: "done" as const,
-              finishedAt: new Date().toISOString()
+              finishedAt: new Date().toISOString(),
             };
           });
 
@@ -311,7 +313,7 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
             message: `Task completed: ${task.name}`,
             timestamp: new Date().toISOString(),
             taskId: task.id,
-            taskName: task.name
+            taskName: task.name,
           });
 
           continue;
@@ -336,13 +338,13 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
               ...stripOptionalFields(candidate, ["finishedAt"]),
               status: "pending" as const,
               retries: currentTask.retries + 1,
-              lastError: errorMessage
+              lastError: errorMessage,
             };
           });
 
           await store.updateRun(runId, {
             tasks: retryTasks,
-            milestones: [...run.milestones, `retry:${task.id}:${currentTask.retries + 1}`]
+            milestones: [...run.milestones, `retry:${task.id}:${currentTask.retries + 1}`],
           });
 
           await emitHook({
@@ -352,7 +354,7 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
             timestamp: new Date().toISOString(),
             taskId: task.id,
             taskName: task.name,
-            metadata: { retries: currentTask.retries + 1 }
+            metadata: { retries: currentTask.retries + 1 },
           });
 
           continue;
@@ -362,7 +364,7 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
         const failedTasks = applyTaskUpdate(inProgressTasks, task.id, {
           status: "failed",
           finishedAt: failedAt,
-          lastError: errorMessage
+          lastError: errorMessage,
         });
 
         await store.updateRun(runId, {
@@ -373,9 +375,9 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
             {
               at: failedAt,
               message: errorMessage,
-              taskId: task.id
-            }
-          ]
+              taskId: task.id,
+            },
+          ],
         });
 
         await emitHook({
@@ -385,7 +387,7 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
           timestamp: failedAt,
           taskId: task.id,
           taskName: task.name,
-          error: errorMessage
+          error: errorMessage,
         });
       }
     }
@@ -403,7 +405,7 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
       message: `run-failed: ${errorMessage}`,
       timestamp: now,
       error: errorMessage,
-      metadata: { overallStatus: "failed" }
+      metadata: { overallStatus: "failed" },
     });
     await writeSessionSummary(store, runId, config?.sessionLogs);
     throw error;

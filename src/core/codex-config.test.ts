@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 
-import { ensureCodexMultiAgent } from "./codex-config.js";
+import { ensureCodexMultiAgent, isCodexMultiAgentActive } from "./codex-config.js";
 
 let tmpDir: string;
 let tmpConfigFile: string;
@@ -67,7 +67,7 @@ describe("ensureCodexMultiAgent", () => {
 
   it("appends feature block when file exists but has no multi_agent", async () => {
     const fs = await import("node:fs/promises");
-    await fs.writeFile(tmpConfigFile, "[mcp_servers.context7]\ncommand = \"npx\"\n", "utf8");
+    await fs.writeFile(tmpConfigFile, '[mcp_servers.context7]\ncommand = "npx"\n', "utf8");
 
     const result = await ensureCodexMultiAgent({ codex: { multiAgent: true } }, tmpConfigFile);
     expect(result.action).toBe("appended");
@@ -79,11 +79,49 @@ describe("ensureCodexMultiAgent", () => {
 
   it("appended block is separated from existing content with no trailing newline", async () => {
     const fs = await import("node:fs/promises");
-    await fs.writeFile(tmpConfigFile, "[section]\nkey = \"value\"", "utf8");
+    await fs.writeFile(tmpConfigFile, '[section]\nkey = "value"', "utf8");
 
     await ensureCodexMultiAgent({ codex: { multiAgent: true } }, tmpConfigFile);
     const content = await readFile(tmpConfigFile, "utf8");
     expect(content).toContain("\n\n");
     expect(content).toContain("multi_agent = true");
+  });
+});
+
+describe("isCodexMultiAgentActive", () => {
+  it("returns true when Orca config enables multiAgent", async () => {
+    await expect(isCodexMultiAgentActive({ codex: { multiAgent: true } }, tmpConfigFile)).resolves.toBe(true);
+  });
+
+  it("returns true when root config enables multi_agent", async () => {
+    const fs = await import("node:fs/promises");
+    await fs.writeFile(tmpConfigFile, "[features]\nmulti_agent = true\n", "utf8");
+
+    await expect(isCodexMultiAgentActive(undefined, tmpConfigFile)).resolves.toBe(true);
+  });
+
+  it("returns true when both Orca config and root config enable multi-agent", async () => {
+    const fs = await import("node:fs/promises");
+    await fs.writeFile(tmpConfigFile, "[features]\nmulti_agent = true\n", "utf8");
+
+    await expect(isCodexMultiAgentActive({ codex: { multiAgent: true } }, tmpConfigFile)).resolves.toBe(true);
+  });
+
+  it("returns false when Orca config is false and no root config enables multi-agent", async () => {
+    await expect(isCodexMultiAgentActive({ codex: { multiAgent: false } }, tmpConfigFile)).resolves.toBe(false);
+  });
+
+  it("returns false when Orca config explicitly disables multi-agent even if root config enables it", async () => {
+    const fs = await import("node:fs/promises");
+    await fs.writeFile(tmpConfigFile, "[features]\nmulti_agent = true\n", "utf8");
+
+    await expect(isCodexMultiAgentActive({ codex: { multiAgent: false } }, tmpConfigFile)).resolves.toBe(false);
+  });
+
+  it("returns false when root config contains multi_agent = false", async () => {
+    const fs = await import("node:fs/promises");
+    await fs.writeFile(tmpConfigFile, "[features]\nmulti_agent = false\n", "utf8");
+
+    await expect(isCodexMultiAgentActive(undefined, tmpConfigFile)).resolves.toBe(false);
   });
 });

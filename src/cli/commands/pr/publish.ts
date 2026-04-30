@@ -6,7 +6,7 @@ import {
   createStore,
   loadRunOrExit,
   printGhMissingAndExit,
-  resolveRunIdOrExit
+  resolveRunIdOrExit,
 } from "./shared.js";
 
 export async function prPublishCommandHandler(options: PrCommandOptions): Promise<void> {
@@ -43,8 +43,8 @@ export async function prPublishCommandHandler(options: PrCommandOptions): Promis
     pr: {
       ...run.pr,
       readyForFinalize: true,
-      finalizedAt: new Date().toISOString()
-    }
+      finalizedAt: new Date().toISOString(),
+    },
   });
 
   console.log(`PR marked ready for review: ${run.pr.url}`);

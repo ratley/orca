@@ -14,7 +14,7 @@ const { HookDispatcher } = await import(path.join(repoRoot, "dist", "hooks", "di
 const repoFixtures = [
   "/Users/evesenara/code/orca-smoke-projects/node-tooling",
   "/Users/evesenara/code/orca-smoke-projects/python-tooling",
-  "/Users/evesenara/code/orca-smoke-projects/docs-only"
+  "/Users/evesenara/code/orca-smoke-projects/docs-only",
 ];
 
 const allHooks = [
@@ -24,7 +24,7 @@ const allHooks = [
   "onInvalidPlan",
   "onFindings",
   "onComplete",
-  "onError"
+  "onError",
 ];
 
 function delay(ms) {
@@ -38,7 +38,9 @@ async function appendRecord(record) {
 
 async function buildDispatcher() {
   const dispatcher = new HookDispatcher({
-    commandHooks: Object.fromEntries(allHooks.map((hook) => [hook, `node ${JSON.stringify(commandHookScript)} ${JSON.stringify(logPath)}`]))
+    commandHooks: Object.fromEntries(
+      allHooks.map((hook) => [hook, `node ${JSON.stringify(commandHookScript)} ${JSON.stringify(logPath)}`]),
+    ),
   });
 
   for (const hook of allHooks) {
@@ -49,7 +51,7 @@ async function buildDispatcher() {
         runId: event.runId,
         message: event.message,
         context,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       });
     });
   }
@@ -58,31 +60,107 @@ async function buildDispatcher() {
 }
 
 async function runExecutionFlow(dispatcher, runId, repoPath, failureMode) {
-  await dispatcher.dispatch({ hook: "onMilestone", runId, message: "execution-started", timestamp: new Date().toISOString(), metadata: { repoPath } });
+  await dispatcher.dispatch({
+    hook: "onMilestone",
+    runId,
+    message: "execution-started",
+    timestamp: new Date().toISOString(),
+    metadata: { repoPath },
+  });
   await delay(15);
-  await dispatcher.dispatch({ hook: "onMilestone", runId, message: "planning-complete", timestamp: new Date().toISOString(), metadata: { repoPath } });
+  await dispatcher.dispatch({
+    hook: "onMilestone",
+    runId,
+    message: "planning-complete",
+    timestamp: new Date().toISOString(),
+    metadata: { repoPath },
+  });
   await delay(10);
 
   if (failureMode === "invalid-plan") {
-    await dispatcher.dispatch({ hook: "onInvalidPlan", runId, message: "invalid-plan:review", timestamp: new Date().toISOString(), error: "Cycle in DAG", metadata: { stage: "review", repoPath } });
-    await dispatcher.dispatch({ hook: "onError", runId, message: "run-failed:invalid-plan", timestamp: new Date().toISOString(), error: "Cycle in DAG", metadata: { repoPath } });
+    await dispatcher.dispatch({
+      hook: "onInvalidPlan",
+      runId,
+      message: "invalid-plan:review",
+      timestamp: new Date().toISOString(),
+      error: "Cycle in DAG",
+      metadata: { stage: "review", repoPath },
+    });
+    await dispatcher.dispatch({
+      hook: "onError",
+      runId,
+      message: "run-failed:invalid-plan",
+      timestamp: new Date().toISOString(),
+      error: "Cycle in DAG",
+      metadata: { repoPath },
+    });
     return;
   }
 
-  await dispatcher.dispatch({ hook: "onTaskComplete", runId, taskId: `${runId}-t1`, taskName: "bootstrap", message: "task-complete:bootstrap", timestamp: new Date().toISOString(), metadata: { repoPath } });
+  await dispatcher.dispatch({
+    hook: "onTaskComplete",
+    runId,
+    taskId: `${runId}-t1`,
+    taskName: "bootstrap",
+    message: "task-complete:bootstrap",
+    timestamp: new Date().toISOString(),
+    metadata: { repoPath },
+  });
   await delay(10);
 
   if (failureMode === "task-fail") {
-    await dispatcher.dispatch({ hook: "onTaskFail", runId, taskId: `${runId}-t2`, taskName: "tests", message: "task-fail:tests", timestamp: new Date().toISOString(), error: "unit test failed", metadata: { repoPath } });
-    await dispatcher.dispatch({ hook: "onError", runId, message: "run-failed:task", timestamp: new Date().toISOString(), error: "unit test failed", metadata: { repoPath } });
+    await dispatcher.dispatch({
+      hook: "onTaskFail",
+      runId,
+      taskId: `${runId}-t2`,
+      taskName: "tests",
+      message: "task-fail:tests",
+      timestamp: new Date().toISOString(),
+      error: "unit test failed",
+      metadata: { repoPath },
+    });
+    await dispatcher.dispatch({
+      hook: "onError",
+      runId,
+      message: "run-failed:task",
+      timestamp: new Date().toISOString(),
+      error: "unit test failed",
+      metadata: { repoPath },
+    });
     return;
   }
 
-  await dispatcher.dispatch({ hook: "onFindings", runId, message: "post-review found 1 issue", timestamp: new Date().toISOString(), metadata: { findingsCount: 1, repoPath } });
+  await dispatcher.dispatch({
+    hook: "onFindings",
+    runId,
+    message: "post-review found 1 issue",
+    timestamp: new Date().toISOString(),
+    metadata: { findingsCount: 1, repoPath },
+  });
   await delay(10);
-  await dispatcher.dispatch({ hook: "onTaskComplete", runId, taskId: `${runId}-t2`, taskName: "fixes", message: "task-complete:fixes", timestamp: new Date().toISOString(), metadata: { repoPath } });
-  await dispatcher.dispatch({ hook: "onMilestone", runId, message: "execution-completed", timestamp: new Date().toISOString(), metadata: { repoPath } });
-  await dispatcher.dispatch({ hook: "onComplete", runId, message: "run-completed", timestamp: new Date().toISOString(), metadata: { repoPath } });
+  await dispatcher.dispatch({
+    hook: "onTaskComplete",
+    runId,
+    taskId: `${runId}-t2`,
+    taskName: "fixes",
+    message: "task-complete:fixes",
+    timestamp: new Date().toISOString(),
+    metadata: { repoPath },
+  });
+  await dispatcher.dispatch({
+    hook: "onMilestone",
+    runId,
+    message: "execution-completed",
+    timestamp: new Date().toISOString(),
+    metadata: { repoPath },
+  });
+  await dispatcher.dispatch({
+    hook: "onComplete",
+    runId,
+    message: "run-completed",
+    timestamp: new Date().toISOString(),
+    metadata: { repoPath },
+  });
 }
 
 function summarize(records) {
@@ -110,7 +188,7 @@ async function main() {
   await Promise.all([
     runExecutionFlow(dispatcher, "con-node", repoFixtures[0], null),
     runExecutionFlow(dispatcher, "con-python", repoFixtures[1], "task-fail"),
-    runExecutionFlow(dispatcher, "con-docs", repoFixtures[2], "invalid-plan")
+    runExecutionFlow(dispatcher, "con-docs", repoFixtures[2], "invalid-plan"),
   ]);
 
   const raw = (await readFile(logPath, "utf8")).trim();
@@ -136,7 +214,9 @@ async function main() {
     }
   }
 
-  console.log(`Smoke OK: ${records.length} hook records (${functionRecords.length} function, ${commandRecords.length} command)`);
+  console.log(
+    `Smoke OK: ${records.length} hook records (${functionRecords.length} function, ${commandRecords.length} command)`,
+  );
   console.log(`Log: ${logPath}`);
 }
 

@@ -16,7 +16,7 @@ function makeTask(id: string, dependencies: string[] = []): Task {
     acceptance_criteria: ["ok"],
     status: "pending",
     retries: 0,
-    maxRetries: 3
+    maxRetries: 3,
   };
 }
 
@@ -42,7 +42,7 @@ describe("task-runner", () => {
     await store.updateRun(runId, {
       mode: "run",
       overallStatus: "running",
-      tasks
+      tasks,
     });
 
     const calls: string[] = [];
@@ -58,7 +58,7 @@ describe("task-runner", () => {
       store,
       emitHook: async (event) => {
         hookEvents.push(event);
-      }
+      },
     });
 
     const run = await store.getRun(runId);
@@ -71,9 +71,49 @@ describe("task-runner", () => {
     expect(run.tasks.map((task) => task.status)).toEqual(["done", "done"]);
     expect(hookEvents.some((event) => event.hook === "onTaskComplete" && event.taskId === "t1")).toBe(true);
     expect(hookEvents.some((event) => event.hook === "onTaskComplete" && event.taskId === "t2")).toBe(true);
-    expect(hookEvents.some((event) => event.hook === "onMilestone" && event.message === "execution-started")).toBe(true);
-    expect(hookEvents.some((event) => event.hook === "onMilestone" && event.message === "execution-completed")).toBe(true);
+    expect(hookEvents.some((event) => event.hook === "onMilestone" && event.message === "execution-started")).toBe(
+      true,
+    );
+    expect(hookEvents.some((event) => event.hook === "onMilestone" && event.message === "execution-completed")).toBe(
+      true,
+    );
     expect(hookEvents.some((event) => event.hook === "onComplete" && event.message === "run-completed")).toBe(true);
+  });
+
+  test("defers final completion when configured for post-execution review", async () => {
+    const tasks = [makeTask("t1")];
+    await store.updateRun(runId, {
+      mode: "run",
+      overallStatus: "running",
+      tasks,
+    });
+
+    const hookEvents: HookEvent[] = [];
+
+    setExecuteTaskForTests(async () => ({
+      outcome: "done",
+      rawResponse: '{"outcome":"done"}',
+    }));
+
+    await runTaskRunner({
+      runId,
+      store,
+      deferCompletion: true,
+      emitHook: async (event) => {
+        hookEvents.push(event);
+      },
+    });
+
+    const run = await store.getRun(runId);
+    if (!run) {
+      throw new Error("Run missing after deferred completion");
+    }
+
+    expect(run.overallStatus).toBe("reviewing");
+    expect(hookEvents.some((event) => event.hook === "onMilestone" && event.message === "execution-completed")).toBe(
+      true,
+    );
+    expect(hookEvents.some((event) => event.hook === "onComplete")).toBe(false);
   });
 
   test("retries transient task failure and then succeeds", async () => {
@@ -81,7 +121,7 @@ describe("task-runner", () => {
     await store.updateRun(runId, {
       mode: "run",
       overallStatus: "running",
-      tasks
+      tasks,
     });
 
     let attempts = 0;
@@ -113,7 +153,7 @@ describe("task-runner", () => {
     await store.updateRun(runId, {
       mode: "run",
       overallStatus: "running",
-      tasks
+      tasks,
     });
 
     const hookEvents: HookEvent[] = [];
@@ -127,7 +167,7 @@ describe("task-runner", () => {
       store,
       emitHook: async (event) => {
         hookEvents.push(event);
-      }
+      },
     });
 
     const run = await store.getRun(runId);
@@ -147,14 +187,14 @@ describe("task-runner", () => {
     await store.updateRun(runId, {
       mode: "run",
       overallStatus: "running",
-      tasks: [cyclicTask]
+      tasks: [cyclicTask],
     });
 
     const hookEvents: HookEvent[] = [];
 
     setExecuteTaskForTests(async () => ({
       outcome: "done",
-      rawResponse: '{"outcome":"done"}'
+      rawResponse: '{"outcome":"done"}',
     }));
 
     await expect(
@@ -163,8 +203,8 @@ describe("task-runner", () => {
         store,
         emitHook: async (event) => {
           hookEvents.push(event);
-        }
-      })
+        },
+      }),
     ).rejects.toThrow("Task graph has cycle");
 
     const run = await store.getRun(runId);
@@ -182,19 +222,19 @@ describe("task-runner", () => {
     await store.updateRun(runId, {
       mode: "run",
       overallStatus: "running",
-      tasks
+      tasks,
     });
 
     setExecuteTaskForTests(async () => ({
       outcome: "done",
-      rawResponse: '{"outcome":"done"}'
+      rawResponse: '{"outcome":"done"}',
     }));
 
     await runTaskRunner({
       runId,
       store,
       config: { sessionLogs: sessionLogsDir },
-      emitHook: async () => {}
+      emitHook: async () => {},
     });
 
     const summaryPath = path.join(sessionLogsDir, `${runId}.md`);
@@ -213,19 +253,19 @@ describe("task-runner", () => {
     await store.updateRun(runId, {
       mode: "run",
       overallStatus: "running",
-      tasks
+      tasks,
     });
 
     setExecuteTaskForTests(async () => ({
       outcome: "done",
-      rawResponse: '{"outcome":"done"}'
+      rawResponse: '{"outcome":"done"}',
     }));
 
     await runTaskRunner({
       runId,
       store,
       config: { sessionLogs: sessionLogsPath },
-      emitHook: async () => {}
+      emitHook: async () => {},
     });
 
     const run = await store.getRun(runId);

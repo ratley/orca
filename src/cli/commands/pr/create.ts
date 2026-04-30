@@ -8,7 +8,7 @@ import {
   createStore,
   loadRunOrExit,
   printGhMissingAndExit,
-  resolveRunIdOrExit
+  resolveRunIdOrExit,
 } from "./shared.js";
 
 function parsePrUrl(stdout: string): string | null {
@@ -59,8 +59,8 @@ export async function prCreateCommandHandler(options: PrCommandOptions): Promise
       url,
       draftTitle: title,
       draftBody: body,
-      readyForFinalize: true
-    }
+      readyForFinalize: true,
+    },
   });
 
   console.log(url);

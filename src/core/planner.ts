@@ -1,8 +1,22 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import { decidePlanningNeed as decidePlanningNeedWithCodex, planSpec as planSpecWithCodex, reviewTaskGraph as reviewTaskGraphWithCodex } from "../agents/codex/session.js";
-import type { OrcaConfig, Task, TaskGraphReviewResult } from "../types/index.js";
+import {
+  decidePlanningNeed as decidePlanningNeedWithCodex,
+  planSpec as planSpecWithCodex,
+  reviewTaskGraph as reviewTaskGraphWithCodex,
+  selectPlannerAgent as selectPlannerAgentWithCodex,
+  type SessionInteractionContext,
+} from "../agents/codex/session.js";
+import { planSpec as planSpecWithClaude } from "../agents/claude/session.js";
+import type {
+  HookEvent,
+  OrcaConfig,
+  PlannerAgent,
+  PlannerRoutingDecision,
+  Task,
+  TaskGraphReviewResult,
+} from "../types/index.js";
 import { logger } from "../utils/logger.js";
 import { loadSkills, type LoadedSkill } from "../utils/skill-loader.js";
 import { RunStore } from "../state/store.js";
@@ -16,6 +30,7 @@ const PROJECT_INSTRUCTION_CHAR_CAP = 4_000;
 type PlanSpecFn = typeof planSpecWithCodex;
 type DecidePlanningNeedFn = typeof decidePlanningNeedWithCodex;
 type ReviewTaskGraphFn = typeof reviewTaskGraphWithCodex;
+type SelectPlannerAgentFn = typeof selectPlannerAgentWithCodex;
 
 export class InvalidPlanError extends Error {
   readonly stage: "planner" | "review";
@@ -37,6 +52,7 @@ type ProjectInstruction = {
 let testPlanSpecOverride: PlanSpecFn | null = null;
 let testDecidePlanningNeedOverride: DecidePlanningNeedFn | null = null;
 let testReviewTaskGraphOverride: ReviewTaskGraphFn | null = null;
+let testSelectPlannerAgentOverride: SelectPlannerAgentFn | null = null;
 
 export function setPlanSpecForTests(fn: PlanSpecFn | null): void {
   testPlanSpecOverride = fn;
@@ -50,8 +66,16 @@ export function setReviewTaskGraphForTests(fn: ReviewTaskGraphFn | null): void {
   testReviewTaskGraphOverride = fn;
 }
 
-function resolvePlanSpecImpl(_config?: OrcaConfig): PlanSpecFn {
-  return testPlanSpecOverride ?? planSpecWithCodex;
+export function setSelectPlannerAgentForTests(fn: SelectPlannerAgentFn | null): void {
+  testSelectPlannerAgentOverride = fn;
+}
+
+function resolvePlanSpecImpl(_config: OrcaConfig | undefined, planner: PlannerAgent): PlanSpecFn {
+  if (testPlanSpecOverride) {
+    return testPlanSpecOverride;
+  }
+
+  return planner === "claude" ? planSpecWithClaude : planSpecWithCodex;
 }
 
 function resolveDecidePlanningNeedImpl(_config?: OrcaConfig): DecidePlanningNeedFn {
@@ -62,15 +86,31 @@ function resolveReviewTaskGraphImpl(_config?: OrcaConfig): ReviewTaskGraphFn {
   return testReviewTaskGraphOverride ?? reviewTaskGraphWithCodex;
 }
 
+function resolveConfiguredPlannerAgent(config?: OrcaConfig): PlannerAgent | "auto" {
+  return config?.planner?.agent ?? "auto";
+}
+
+async function selectPlanningAgent(
+  spec: string,
+  systemContext: string,
+  config?: OrcaConfig,
+  interactionContext?: SessionInteractionContext,
+): Promise<PlannerRoutingDecision> {
+  const configured = resolveConfiguredPlannerAgent(config);
+  if (configured !== "auto") {
+    return {
+      planner: configured,
+      reason: `configured planner.agent=${configured}`,
+    };
+  }
+
+  const router = testSelectPlannerAgentOverride ?? selectPlannerAgentWithCodex;
+  return await router(spec, systemContext, config, interactionContext);
+}
+
 function formatSkillsSection(skills: LoadedSkill[]): string {
   const formattedSkills = skills.map((skill) =>
-    [
-      `### ${skill.name}`,
-      "",
-      `Description: ${skill.description}`,
-      "",
-      skill.body
-    ].join("\n")
+    [`### ${skill.name}`, "", `Description: ${skill.description}`, "", skill.body].join("\n"),
   );
 
   return ["## Available Skills", "", ...formattedSkills].join("\n");
@@ -126,7 +166,7 @@ async function loadProjectInstructions(specPath: string): Promise<ProjectInstruc
       fileName,
       filePath,
       content,
-      truncated: rawContent.length > PROJECT_INSTRUCTION_CHAR_CAP
+      truncated: rawContent.length > PROJECT_INSTRUCTION_CHAR_CAP,
     });
   }
 
@@ -166,10 +206,13 @@ function buildSystemContext(skills: LoadedSkill[], instructions: ProjectInstruct
 }
 
 function getPlanReviewConfig(config: OrcaConfig | undefined): { enabled: boolean; onInvalid: "fail" | "warn_skip" } {
-  const review = (config?.review ?? {}) as OrcaConfig["review"] & { enabled?: boolean; onInvalid?: "fail" | "warn_skip" };
+  const review = (config?.review ?? {}) as OrcaConfig["review"] & {
+    enabled?: boolean;
+    onInvalid?: "fail" | "warn_skip";
+  };
   return {
     enabled: review.plan?.enabled ?? review.enabled ?? true,
-    onInvalid: review.plan?.onInvalid ?? review.onInvalid ?? "fail"
+    onInvalid: review.plan?.onInvalid ?? review.onInvalid ?? "fail",
   };
 }
 
@@ -177,6 +220,7 @@ async function runTaskGraphReview(
   tasks: Task[],
   systemContext: string,
   config: OrcaConfig | undefined,
+  interactionContext?: SessionInteractionContext,
 ): Promise<{ finalTasks: Task[]; review: TaskGraphReviewResult | null }> {
   const planReviewConfig = getPlanReviewConfig(config);
   if (!planReviewConfig.enabled) {
@@ -188,14 +232,19 @@ async function runTaskGraphReview(
   const reviewFn = resolveReviewTaskGraphImpl(config);
   let review: TaskGraphReviewResult;
   try {
-    review = await reviewFn(tasks, systemContext, config);
+    review = await reviewFn(tasks, systemContext, config, interactionContext);
   } catch (error) {
     if (planReviewConfig.onInvalid === "warn_skip") {
-      logger.warn(`Review output invalid; skipping review changes (${error instanceof Error ? error.message : String(error)})`);
+      logger.warn(
+        `Review output invalid; skipping review changes (${error instanceof Error ? error.message : String(error)})`,
+      );
       return { finalTasks: tasks, review: null };
     }
 
-    throw new InvalidPlanError("review", `Review output invalid. ${error instanceof Error ? error.message : String(error)}`);
+    throw new InvalidPlanError(
+      "review",
+      `Review output invalid. ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 
   if (review.changes.length === 0) {
@@ -218,6 +267,7 @@ async function runTaskGraphReview(
 
 type PlannerOptions = {
   allowPlanSkip?: boolean;
+  emitHook?: (event: HookEvent) => Promise<void>;
 };
 
 function buildSingleExecutionTask(spec: string): Task[] {
@@ -236,9 +286,17 @@ function buildSingleExecutionTask(spec: string): Task[] {
   ];
 }
 
-async function runFullPlanning(spec: string, systemContext: string, config?: OrcaConfig): Promise<Task[]> {
-  const planSpecImpl = resolvePlanSpecImpl(config);
-  const result = await planSpecImpl(spec, systemContext, config);
+async function runFullPlanning(
+  spec: string,
+  systemContext: string,
+  config?: OrcaConfig,
+  interactionContext?: SessionInteractionContext,
+): Promise<Task[]> {
+  const selectedPlanner = await selectPlanningAgent(spec, systemContext, config, interactionContext);
+  logger.info(`Planning agent: ${selectedPlanner.planner} (${selectedPlanner.reason})`);
+
+  const planSpecImpl = resolvePlanSpecImpl(config, selectedPlanner.planner);
+  const result = await planSpecImpl(spec, systemContext, config, interactionContext);
 
   try {
     validateDAG(result.tasks);
@@ -249,16 +307,21 @@ async function runFullPlanning(spec: string, systemContext: string, config?: Orc
   const planReviewConfig = getPlanReviewConfig(config);
   let finalTasks = result.tasks;
   try {
-    const reviewed = await runTaskGraphReview(result.tasks, systemContext, config);
+    const reviewed = await runTaskGraphReview(result.tasks, systemContext, config, interactionContext);
     finalTasks = reviewed.finalTasks;
   } catch (error) {
     if (planReviewConfig.onInvalid === "warn_skip") {
-      logger.warn(`Review changes rejected; proceeding with planner graph (${error instanceof Error ? error.message : String(error)})`);
+      logger.warn(
+        `Review changes rejected; proceeding with planner graph (${error instanceof Error ? error.message : String(error)})`,
+      );
       finalTasks = result.tasks;
     } else if (error instanceof InvalidPlanError) {
       throw error;
     } else {
-      throw new InvalidPlanError("review", `Review stage failed. ${error instanceof Error ? error.message : String(error)}`);
+      throw new InvalidPlanError(
+        "review",
+        `Review stage failed. ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
@@ -275,28 +338,34 @@ export async function runPlanner(
   const spec = await fs.readFile(specPath, "utf8");
   const [skills, instructions] = await Promise.all([loadSkills(config), loadProjectInstructions(specPath)]);
   const systemContext = buildSystemContext(skills, instructions);
+  const interactiveContext = {
+    runId: runId as HookEvent["runId"],
+    store,
+    resumeOverallStatus: "planning" as const,
+    ...(options?.emitHook ? { emitHook: options.emitHook } : {}),
+  };
 
   let finalTasks: Task[];
 
   if (options?.allowPlanSkip === true) {
     const decidePlanningNeed = resolveDecidePlanningNeedImpl(config);
-    const decision = await decidePlanningNeed(spec, systemContext, config);
+    const decision = await decidePlanningNeed(spec, systemContext, config, interactiveContext);
     if (!decision.needsPlan) {
       logger.info(`Planning skipped: ${decision.reason}`);
       finalTasks = buildSingleExecutionTask(spec);
     } else {
       logger.info(`Planning required: ${decision.reason}`);
-      finalTasks = await runFullPlanning(spec, systemContext, config);
+      finalTasks = await runFullPlanning(spec, systemContext, config, interactiveContext);
     }
   } else {
-    finalTasks = await runFullPlanning(spec, systemContext, config);
+    finalTasks = await runFullPlanning(spec, systemContext, config, interactiveContext);
   }
 
   await store.writeTasks(runId, finalTasks);
   await store.updateRun(runId, {
     overallStatus: "planning",
     tasks: finalTasks,
-    milestones: ["plan-complete"]
+    milestones: ["plan-complete"],
   });
 
   logger.success(`Plan complete: ${finalTasks.length} tasks`);

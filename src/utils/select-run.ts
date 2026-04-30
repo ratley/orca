@@ -13,9 +13,7 @@ export async function selectRun(store: RunStore): Promise<string | null> {
     return null;
   }
 
-  const sorted = [...runs].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
+  const sorted = [...runs].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   const choices = sorted.map((run) => {
     const prStatus = run.pr?.url ? (run.pr.finalizedAt ? "published" : "draft PR") : "no PR";
