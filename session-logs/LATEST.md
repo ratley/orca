@@ -1,13 +1,10 @@
 # Session Log
 
-- Timestamp: 2026-03-16T07:40:30Z
-- Scope: Codex clarification question flow, pending-question persistence, onQuestion hooks, answer/resume handling, and live CLI smoke coverage.
+- Timestamp: 2026-04-30T19:45:00Z
+- Scope: Adopt the centralized `happycatlabs/codex-review-workflow` reusable workflow for PR reviews. The local copy of the codex-code-review workflow is replaced with a thin caller that delegates to the central repo, so prompt and review-logic updates land in one place across `happycatlabs/*`.
 - Verification:
-  - `bun test src`
-  - `npm run typecheck:tsc`
-  - `npm run build`
-  - `bun test src/__tests__/client.test.ts src/__tests__/integration.test.ts`
+  - The PR's `Codex Code Review` check uses the central workflow at `happycatlabs/codex-review-workflow/.github/workflows/codex-code-review.yml@main`.
+  - `CODEX_AUTH_JSON` is available to the run via `secrets: inherit` (set at both repo and org levels).
 - Notes:
-  - Orca now surfaces Codex `requestUserInput` prompts in `status.json`, `orca status`, and `onQuestion` hooks.
-  - `orca answer` writes structured answers and the original live run resumes without `orca resume`.
-  - The CLI smoke passed against a fake Codex app-server exercising `waiting_for_answer` end to end.
+  - The caller declares `permissions: { contents: read, pull-requests: write, issues: write }` because GitHub bounds a called workflow's job-level permissions by the caller's workflow-level permissions. Without this, a reusable workflow that needs to post sticky review comments fails with a bare `startup_failure`.
+  - This entry also covers a CI-retrigger commit on the same branch so the husky `session-logs/LATEST.md` freshness check passes.
