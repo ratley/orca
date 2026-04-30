@@ -6,11 +6,7 @@ function formatAllowed(values: readonly string[]): string {
   return values.map((value) => `'${value}'`).join(", ");
 }
 
-function parseEffort<T extends readonly string[]>(
-  raw: string,
-  allowed: T,
-  label: string,
-): T[number] {
+function parseEffort<T extends readonly string[]>(raw: string, allowed: T, label: string): T[number] {
   if ((allowed as readonly string[]).includes(raw)) {
     return raw as T[number];
   }

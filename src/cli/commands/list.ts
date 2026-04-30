@@ -30,12 +30,7 @@ function formatTable(headers: string[], rows: string[][]): string {
 }
 
 function toSummaryRow(run: RunStatus): string[] {
-  return [
-    run.runId,
-    run.specPath,
-    run.overallStatus,
-    run.createdAt
-  ];
+  return [run.runId, run.specPath, run.overallStatus, run.createdAt];
 }
 
 export function formatRunSummaryTable(runs: RunStatus[]): string {

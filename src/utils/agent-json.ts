@@ -81,10 +81,7 @@ function extractFirstJsonObjectOrArray(text: string): string | null {
 export function parseAgentJson(raw: string): unknown {
   const text = raw.trim();
 
-  const candidates = [
-    text,
-    ...extractFencedCandidates(text),
-  ];
+  const candidates = [text, ...extractFencedCandidates(text)];
 
   const extracted = extractFirstJsonObjectOrArray(text);
   if (extracted) {

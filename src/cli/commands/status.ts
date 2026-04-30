@@ -42,7 +42,7 @@ function formatTaskTable(tasks: Task[]): string {
     task.status,
     `${task.retries}/${task.maxRetries}`,
     task.startedAt ?? "-",
-    task.finishedAt ?? "-"
+    task.finishedAt ?? "-",
   ]);
 
   return formatTable(headers, rows);

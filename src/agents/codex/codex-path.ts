@@ -38,11 +38,7 @@ export function parseCodexCliVersion(output: string): ParsedCodexCliVersion | nu
     return null;
   }
 
-  const prerelease = match[4]
-    ? match[4]
-        .split(".")
-        .map((part) => (/^\d+$/.test(part) ? Number(part) : part))
-    : [];
+  const prerelease = match[4] ? match[4].split(".").map((part) => (/^\d+$/.test(part) ? Number(part) : part)) : [];
 
   return {
     major: Number(match[1]),
@@ -214,9 +210,7 @@ async function autoResolveCodexPath(): Promise<string> {
     }),
   );
 
-  const preferred = selectPreferredCodexBinary(
-    available.filter((probe): probe is CodexBinaryProbe => probe !== null),
-  );
+  const preferred = selectPreferredCodexBinary(available.filter((probe): probe is CodexBinaryProbe => probe !== null));
 
   return preferred ?? FALLBACK_CODEX_PATH;
 }

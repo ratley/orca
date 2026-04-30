@@ -48,10 +48,7 @@ function parseFrontmatter(frontmatter: string): Record<string, string> {
     }
 
     let value = line.slice(separatorIndex + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
       value = value.slice(1, -1);
     }
 
@@ -68,7 +65,7 @@ export function parseSkillFile(fileContent: string): ParsedSkillFile {
     return {
       name: "",
       description: "",
-      body: fileContent
+      body: fileContent,
     };
   }
 
@@ -78,7 +75,7 @@ export function parseSkillFile(fileContent: string): ParsedSkillFile {
   return {
     name: frontmatter.name ?? "",
     description: frontmatter.description ?? "",
-    body
+    body,
   };
 }
 
@@ -109,7 +106,7 @@ export async function loadSkill(skillDirPath: string): Promise<LoadedSkill | nul
     description: parsed.description,
     body: parsed.body,
     dirPath: expandedDirPath,
-    filePath: skillFilePath
+    filePath: skillFilePath,
   };
 }
 
@@ -138,7 +135,7 @@ export async function loadSkillsFromDir(skillsDirPath: string): Promise<LoadedSk
     .sort((a, b) => a.localeCompare(b));
 
   const loaded = await Promise.all(
-    subdirectories.map((subdirName) => loadSkill(path.join(expandedDirPath, subdirName)))
+    subdirectories.map((subdirName) => loadSkill(path.join(expandedDirPath, subdirName))),
   );
 
   return loaded.filter((skill): skill is LoadedSkill => skill !== null);
@@ -175,7 +172,7 @@ export async function loadSkills(config?: OrcaConfig): Promise<LoadedSkill[]> {
 
   const [projectSkillsRealPath, bundledSkillsRealPath] = await Promise.all([
     resolveExistingRealPath(projectSkillsDir),
-    resolveExistingRealPath(bundledSkillsDir)
+    resolveExistingRealPath(bundledSkillsDir),
   ]);
   const bundledSkills =
     projectSkillsRealPath !== null && projectSkillsRealPath === bundledSkillsRealPath
@@ -186,7 +183,7 @@ export async function loadSkills(config?: OrcaConfig): Promise<LoadedSkill[]> {
     ...fromConfig.filter((skill): skill is LoadedSkill => skill !== null),
     ...projectSkills,
     ...globalSkills,
-    ...bundledSkills
+    ...bundledSkills,
   ];
 
   const seenNames = new Set<string>();

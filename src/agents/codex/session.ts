@@ -24,18 +24,11 @@ import type {
   Task,
   TaskExecutionResult,
   TaskGraphReviewOperation,
-  TaskGraphReviewResult
+  TaskGraphReviewResult,
 } from "../../types/index.js";
 import { isCodexMultiAgentActive } from "../../core/codex-config.js";
-import {
-  buildQuestionHookMessage,
-  createPendingQuestion,
-  parseQuestionAnswerInput,
-} from "../../core/question-flow.js";
-import {
-  clearSecretAnswerChannel,
-  writeSecretAnswerChannel,
-} from "../../core/secret-answer-channel.js";
+import { buildQuestionHookMessage, createPendingQuestion, parseQuestionAnswerInput } from "../../core/question-flow.js";
+import { clearSecretAnswerChannel, writeSecretAnswerChannel } from "../../core/secret-answer-channel.js";
 import { TaskGraphReviewPayloadSchema } from "../../core/task-graph-review.js";
 import { RunStore } from "../../state/store.js";
 import type { CodexEffort } from "../../types/effort.js";
@@ -70,14 +63,18 @@ function getMultiAgentPlanningGuidance(multiAgentActive: boolean): string[] {
   ];
 }
 
-function getClarificationRequestGuidance(clarificationToolAvailable: boolean, scope: "planning" | "execution" | "review"): string[] {
+function getClarificationRequestGuidance(
+  clarificationToolAvailable: boolean,
+  scope: "planning" | "execution" | "review",
+): string[] {
   if (!clarificationToolAvailable) {
     return [];
   }
 
-  const firstLine = scope === "execution"
-    ? "If you need any user-provided value, preference, approval, or clarification to complete this task correctly, use Codex's request_user_input tool instead of guessing, failing, or baking the question into a later task."
-    : "If a blocking ambiguity prevents correct work, use Codex's request_user_input tool to ask concise clarification questions instead of guessing.";
+  const firstLine =
+    scope === "execution"
+      ? "If you need any user-provided value, preference, approval, or clarification to complete this task correctly, use Codex's request_user_input tool instead of guessing, failing, or baking the question into a later task."
+      : "If a blocking ambiguity prevents correct work, use Codex's request_user_input tool to ask concise clarification questions instead of guessing.";
 
   return [
     firstLine,
@@ -136,9 +133,8 @@ async function detectCollaborationModeSupport(
     return false;
   }
 
-  const maybeListCollaborationModes = (
-    client as CodexClient & { listCollaborationModes?: () => Promise<unknown> }
-  ).listCollaborationModes;
+  const maybeListCollaborationModes = (client as CodexClient & { listCollaborationModes?: () => Promise<unknown> })
+    .listCollaborationModes;
 
   if (typeof maybeListCollaborationModes !== "function") {
     return true;
@@ -189,9 +185,7 @@ function buildTaskExecutionPrompt(
       ? ["Resolved Clarification Context:", clarificationContext.trim()]
       : []),
     "Acceptance Criteria:",
-    ...task.acceptance_criteria.map(
-      (criterion, index) => `${index + 1}. ${criterion}`,
-    ),
+    ...task.acceptance_criteria.map((criterion, index) => `${index + 1}. ${criterion}`),
     "Execute this task. You have full shell access — run commands, read/write files, and do whatever is needed.",
     "IMPORTANT: When done, you MUST output the following JSON on its own line as the very last line of your response (no trailing text after it):",
     '{"outcome":"done"}',
@@ -201,12 +195,7 @@ function buildTaskExecutionPrompt(
   ].join("\n\n");
 }
 
-function buildTaskExecutionClarificationPrompt(
-  task: Task,
-  runId: string,
-  cwd: string,
-  systemContext?: string,
-): string {
+function buildTaskExecutionClarificationPrompt(task: Task, runId: string, cwd: string, systemContext?: string): string {
   return [
     ...(systemContext ? [systemContext] : []),
     "You are Orca's execution clarification gate.",
@@ -218,9 +207,7 @@ function buildTaskExecutionClarificationPrompt(
     "Task Description:",
     task.description,
     "Acceptance Criteria:",
-    ...task.acceptance_criteria.map(
-      (criterion, index) => `${index + 1}. ${criterion}`,
-    ),
+    ...task.acceptance_criteria.map((criterion, index) => `${index + 1}. ${criterion}`),
     "Inspect the repository and task to decide whether execution needs any user-provided value or preference.",
     "Do not edit files, do not run mutating commands, and do not claim the task is complete in this turn.",
     "If user input is needed, ask via request_user_input, wait for the answer, then continue and summarize the resolved constraint.",
@@ -230,11 +217,7 @@ function buildTaskExecutionClarificationPrompt(
   ].join("\n\n");
 }
 
-function buildPlanDecisionPrompt(
-  spec: string,
-  systemContext: string,
-  clarificationToolAvailable: boolean,
-): string {
+function buildPlanDecisionPrompt(spec: string, systemContext: string, clarificationToolAvailable: boolean): string {
   return [
     systemContext,
     "You are Orca's planning gate.",
@@ -244,17 +227,13 @@ function buildPlanDecisionPrompt(
     "Set needsPlan=true when the request spans multiple files, modules, docs, tests, CLI behavior, storage behavior, workflows, or user-facing design choices.",
     "Set needsPlan=true when task boundaries, sequencing, ownership lanes, or acceptance criteria would materially improve execution.",
     "Set needsPlan=false only when the request is a single focused edit with obvious files and obvious verification.",
-    "Return JSON only with shape: {\"needsPlan\":boolean,\"reason\":string}",
+    'Return JSON only with shape: {"needsPlan":boolean,"reason":string}',
     "Spec:",
     spec,
   ].join("\n\n");
 }
 
-function buildPlannerRoutingPrompt(
-  spec: string,
-  systemContext: string,
-  clarificationToolAvailable: boolean,
-): string {
+function buildPlannerRoutingPrompt(spec: string, systemContext: string, clarificationToolAvailable: boolean): string {
   return [
     systemContext,
     "You are Orca's planner router.",
@@ -265,7 +244,7 @@ function buildPlannerRoutingPrompt(
     "Choose claude when the work needs task boundaries, sequencing, ownership lanes, or tradeoff judgment across multiple files or subsystems.",
     "Choose codex only when the planning itself is clearly narrow, mechanical, implementation-heavy, and already constrained to obvious code/test edits.",
     "Do not choose based on execution; Codex will still execute the tasks after planning.",
-    "Return JSON only with shape: {\"planner\":\"claude\"|\"codex\",\"reason\":\"...\"}",
+    'Return JSON only with shape: {"planner":"claude"|"codex","reason":"..."}',
     "Spec:",
     spec,
   ].join("\n\n");
@@ -291,13 +270,13 @@ function buildTaskGraphReviewPrompt(
           "Add coordination tasks when parallel work needs a final integration step.",
         ]
       : []),
-    "Return JSON matching this shape exactly: {\"changes\":[...operations...]}",
+    'Return JSON matching this shape exactly: {"changes":[...operations...]}',
     "Allowed operation shapes:",
-    "- {\"op\":\"update_task\",\"taskId\":\"...\",\"fields\":{\"name\"?:string,\"description\"?:string,\"acceptance_criteria\"?:string[]}}",
-    "- {\"op\":\"add_task\",\"task\":<full task object>}",
-    "- {\"op\":\"remove_task\",\"taskId\":\"...\"}",
-    "- {\"op\":\"add_dependency\",\"taskId\":\"...\",\"dependsOn\":\"...\"}",
-    "- {\"op\":\"remove_dependency\",\"taskId\":\"...\",\"dependsOn\":\"...\"}",
+    '- {"op":"update_task","taskId":"...","fields":{"name"?:string,"description"?:string,"acceptance_criteria"?:string[]}}',
+    '- {"op":"add_task","task":<full task object>}',
+    '- {"op":"remove_task","taskId":"..."}',
+    '- {"op":"add_dependency","taskId":"...","dependsOn":"..."}',
+    '- {"op":"remove_dependency","taskId":"...","dependsOn":"..."}',
     "Return ONLY JSON. No markdown.",
     "Current task graph:",
     JSON.stringify(tasks, null, 2),
@@ -336,7 +315,7 @@ function buildTaskGraphConsultationPrompt(
     "For minor issues (ambiguous wording, style preferences, nice-to-haves): list them in issues but set ok: true.",
     "If the graph looks generally reasonable and executable, set ok: true even if you have minor suggestions.",
     "",
-    "Be brief. Output JSON on the last line: { \"issues\": [...], \"ok\": boolean }",
+    'Be brief. Output JSON on the last line: { "issues": [...], "ok": boolean }',
     "",
     "Task graph:",
     taskGraphJson,
@@ -519,13 +498,7 @@ const POSITIVE_COMPLETION_PATTERNS = [
   /\bno\s+(?:errors?|issues?|failures?)\b/i,
 ];
 
-const FAILURE_PATTERNS = [
-  /\berror\b/i,
-  /\bfailed?\b/i,
-  /\bcannot\b/i,
-  /\bunable\b/i,
-  /\bpermission denied\b/i,
-];
+const FAILURE_PATTERNS = [/\berror\b/i, /\bfailed?\b/i, /\bcannot\b/i, /\bunable\b/i, /\bpermission denied\b/i];
 
 function inferOutcomeFromText(raw: string): TaskExecutionResult {
   const hasFailure = FAILURE_PATTERNS.some((p) => p.test(raw));
@@ -595,13 +568,7 @@ function collectCompletedTurnItems(result: CompletedTurn): ThreadItem[] {
 }
 
 function taskLikelyMutatesFiles(task: Task): boolean {
-  const normalized = [
-    task.name,
-    task.description,
-    ...task.acceptance_criteria,
-  ]
-    .join("\n")
-    .toLowerCase();
+  const normalized = [task.name, task.description, ...task.acceptance_criteria].join("\n").toLowerCase();
 
   return (
     normalized.includes(".ts") ||
@@ -663,7 +630,8 @@ function enforceFallbackExecutionEvidence(
     return {
       outcome: "failed",
       rawResponse: parsedResult.rawResponse,
-      error: "Codex did not emit a JSON completion marker, no file changes were recorded, and no successful verification command ran for a task that required file edits.",
+      error:
+        "Codex did not emit a JSON completion marker, no file changes were recorded, and no successful verification command ran for a task that required file edits.",
     };
   }
 
@@ -683,9 +651,11 @@ function getModel(config?: OrcaConfig): string {
 }
 
 function getPlannerRouterModel(config?: OrcaConfig): OpenAIModelId {
-  return config?.planner?.router?.model
-    ?? (process.env.ORCA_PLANNER_ROUTER_MODEL as OpenAIModelId | undefined)
-    ?? "gpt-5.3-codex-spark";
+  return (
+    config?.planner?.router?.model ??
+    (process.env.ORCA_PLANNER_ROUTER_MODEL as OpenAIModelId | undefined) ??
+    "gpt-5.3-codex-spark"
+  );
 }
 
 function withPlannerRouterModel(config?: OrcaConfig): OrcaConfig {
@@ -736,14 +706,11 @@ function buildTurnInput(text: string, skills: LoadedSkill[]): Array<{ type: "tex
 
   for (const skill of usableSkills) {
     const trimmedBody = skill.body.trim();
-    const body = trimmedBody.length > MAX_INLINE_SKILL_BODY_CHARS
-      ? `${trimmedBody.slice(0, MAX_INLINE_SKILL_BODY_CHARS)}\n[truncated]`
-      : trimmedBody;
-    const section = [
-      `Skill: ${skill.name}`,
-      `Source: ${skill.filePath}`,
-      body,
-    ].join("\n");
+    const body =
+      trimmedBody.length > MAX_INLINE_SKILL_BODY_CHARS
+        ? `${trimmedBody.slice(0, MAX_INLINE_SKILL_BODY_CHARS)}\n[truncated]`
+        : trimmedBody;
+    const section = [`Skill: ${skill.name}`, `Source: ${skill.filePath}`, body].join("\n");
 
     if (section.length > remainingChars) {
       omittedCount += 1;
@@ -758,14 +725,12 @@ function buildTurnInput(text: string, skills: LoadedSkill[]): Array<{ type: "tex
     sections.push(`[${omittedCount} additional skills omitted to keep this Codex turn within context budget]`);
   }
 
-  return [{
-    type: "text",
-    text: [
-      text,
-      "Referenced Orca skills:",
-      sections.join("\n\n"),
-    ].join("\n\n"),
-  }];
+  return [
+    {
+      type: "text",
+      text: [text, "Referenced Orca skills:", sections.join("\n\n")].join("\n\n"),
+    },
+  ];
 }
 
 interface RawSkill {
@@ -809,23 +774,27 @@ function normalizePerCwdExtraUserRoots(config?: OrcaConfig): Array<{ cwd: string
   }
 
   return configured
-    .filter((entry): entry is { cwd: string; extraUserRoots: string[] } =>
-      typeof entry.cwd === "string" && Array.isArray(entry.extraUserRoots)
+    .filter(
+      (entry): entry is { cwd: string; extraUserRoots: string[] } =>
+        typeof entry.cwd === "string" && Array.isArray(entry.extraUserRoots),
     )
     .map((entry) => {
       const trimmedCwd = entry.cwd.trim();
       return {
         cwd: trimmedCwd.length > 0 ? path.resolve(trimmedCwd) : "",
         extraUserRoots: entry.extraUserRoots
-        .filter((root): root is string => typeof root === "string")
-        .map((root) => root.trim())
-        .filter((root) => root.length > 0),
+          .filter((root): root is string => typeof root === "string")
+          .map((root) => root.trim())
+          .filter((root) => root.length > 0),
       };
     })
     .filter((entry) => entry.cwd.length > 0 && entry.extraUserRoots.length > 0);
 }
 
-function getPerCwdExtraUserRootsForCwd(config: OrcaConfig | undefined, cwd: string): Array<{ cwd: string; extraUserRoots: string[] }> {
+function getPerCwdExtraUserRootsForCwd(
+  config: OrcaConfig | undefined,
+  cwd: string,
+): Array<{ cwd: string; extraUserRoots: string[] }> {
   const normalizedCwd = path.resolve(cwd);
   return normalizePerCwdExtraUserRoots(config).filter((entry) => entry.cwd === normalizedCwd);
 }
@@ -916,7 +885,7 @@ async function loadCodexListedSkills(client: CodexClient, cwd: string, config?: 
         this: unknown,
         method: string,
         params?: unknown,
-        timeoutMs?: number
+        timeoutMs?: number,
       ) => Promise<unknown>;
 
       response = await request.call(client, "skills/list", {
@@ -965,7 +934,9 @@ async function loadCodexListedSkills(client: CodexClient, cwd: string, config?: 
         description:
           typeof skill.description === "string"
             ? skill.description
-            : (typeof skill.shortDescription === "string" ? skill.shortDescription : ""),
+            : typeof skill.shortDescription === "string"
+              ? skill.shortDescription
+              : "",
         body: skillBody,
         dirPath: normalizedSkillPath ? path.dirname(normalizedSkillPath) : cwd,
         filePath: normalizedSkillPath ?? `${cwd}#skills/list:${skill.name}`,
@@ -992,7 +963,11 @@ async function loadCodexListedSkills(client: CodexClient, cwd: string, config?: 
   return discovered;
 }
 
-async function resolveTurnSkills(client: CodexClient, config: OrcaConfig | undefined, cwd: string): Promise<LoadedSkill[]> {
+async function resolveTurnSkills(
+  client: CodexClient,
+  config: OrcaConfig | undefined,
+  cwd: string,
+): Promise<LoadedSkill[]> {
   const baseSkills = await skillLoader.loadSkills(config);
   const configuredExtraRootSkills = await loadConfiguredPerCwdExtraRootSkills(config, cwd);
 
@@ -1094,11 +1069,12 @@ async function warnAboutUnavailableMcpServers(client: CodexClient): Promise<void
   }
 
   const unavailableServers = response.data
-    .filter((entry): entry is { name: string; authStatus: string } =>
-      !!entry &&
-      typeof entry === "object" &&
-      typeof (entry as { name?: unknown }).name === "string" &&
-      typeof (entry as { authStatus?: unknown }).authStatus === "string",
+    .filter(
+      (entry): entry is { name: string; authStatus: string } =>
+        !!entry &&
+        typeof entry === "object" &&
+        typeof (entry as { name?: unknown }).name === "string" &&
+        typeof (entry as { authStatus?: unknown }).authStatus === "string",
     )
     .filter((entry) => entry.authStatus === "notLoggedIn")
     .map((entry) => entry.name);
@@ -1119,12 +1095,7 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
-async function appendRunError(
-  store: RunStore,
-  runId: RunId,
-  message: string,
-  taskId?: string,
-): Promise<void> {
+async function appendRunError(store: RunStore, runId: RunId, message: string, taskId?: string): Promise<void> {
   const run = await store.getRun(runId);
   if (!run) {
     return;
@@ -1157,7 +1128,9 @@ export function setSecretAnswerChannelFactoryForTests(factory: SecretAnswerChann
   testSecretAnswerChannelFactory = factory;
 }
 
-function hasSecretQuestions(params: ToolRequestUserInputParams | { questions: Array<{ isSecret?: boolean }> }): boolean {
+function hasSecretQuestions(
+  params: ToolRequestUserInputParams | { questions: Array<{ isSecret?: boolean }> },
+): boolean {
   return params.questions.some((question) => question.isSecret === true);
 }
 
@@ -1167,9 +1140,10 @@ async function createSecretAnswerChannel(requestId: RequestId): Promise<SecretAn
   }
 
   const token = randomUUID();
-  const socketPath = process.platform === "win32"
-    ? `\\\\.\\pipe\\orca-answer-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`
-    : path.join(os.tmpdir(), `orca-answer-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.sock`);
+  const socketPath =
+    process.platform === "win32"
+      ? `\\\\.\\pipe\\orca-answer-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`
+      : path.join(os.tmpdir(), `orca-answer-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.sock`);
   const queuedAnswers: string[] = [];
   const waitingResolvers: Array<(answer: string) => void> = [];
   const server = createServer((socket) => {
@@ -1341,9 +1315,7 @@ export async function createCodexSession(
     };
   };
 
-  const buildExecutionClarificationTurnParams = (
-    input: Array<{ type: "text"; text: string }>,
-  ) => {
+  const buildExecutionClarificationTurnParams = (input: Array<{ type: "text"; text: string }>) => {
     const effort = getEffort(config, "execution");
     return {
       threadId,
@@ -1388,7 +1360,7 @@ export async function createCodexSession(
 
   const clearPendingQuestion = async (
     requestId: RequestId,
-    overallStatus?: ResumeOverallStatus | "waiting_for_answer"
+    overallStatus?: ResumeOverallStatus | "waiting_for_answer",
   ): Promise<void> => {
     const secretAnswerChannel = activeSecretAnswerChannel;
     if (secretAnswerChannel?.requestId === requestId) {
@@ -1418,148 +1390,158 @@ export async function createCodexSession(
 
   const on = Reflect.get(client as object, "on");
   if (typeof on === "function") {
-    on.call(
-      client,
-      "request:userInput",
-      (request: { requestId: RequestId } & ToolRequestUserInputParams) => {
-        void (async () => {
-          if (!interactionContext) {
-            rejectUserInputRequest(
-              request.requestId,
-              "Orca cannot answer Codex requestUserInput prompts without an interactive run context.",
-            );
-            return;
-          }
+    on.call(client, "request:userInput", (request: { requestId: RequestId } & ToolRequestUserInputParams) => {
+      void (async () => {
+        if (!interactionContext) {
+          rejectUserInputRequest(
+            request.requestId,
+            "Orca cannot answer Codex requestUserInput prompts without an interactive run context.",
+          );
+          return;
+        }
 
-          const pendingQuestion = createPendingQuestion(request.requestId, request);
+        const pendingQuestion = createPendingQuestion(request.requestId, request);
+        const currentRun = await interactionContext.store.getRun(interactionContext.runId);
+        if (!currentRun) {
+          rejectUserInputRequest(
+            request.requestId,
+            `Run not found while waiting for input: ${interactionContext.runId}`,
+          );
+          return;
+        }
+
+        if (
+          currentRun.overallStatus === "completed" ||
+          currentRun.overallStatus === "failed" ||
+          currentRun.overallStatus === "cancelled"
+        ) {
+          rejectUserInputRequest(
+            request.requestId,
+            `Run ${interactionContext.runId} is already ${currentRun.overallStatus}; ignoring late requestUserInput prompt.`,
+          );
+          return;
+        }
+
+        await clearAnswerFile(interactionContext.store, interactionContext.runId);
+        let secretAnswerChannel: SecretAnswerChannelState | undefined;
+        if (hasSecretQuestions(request)) {
+          secretAnswerChannel = await createSecretAnswerChannel(request.requestId);
+          activeSecretAnswerChannel = secretAnswerChannel;
+          await writeSecretAnswerChannel(interactionContext.runId, secretAnswerChannel.descriptor);
+        } else if (activeSecretAnswerChannel) {
+          await clearSecretAnswerChannel(interactionContext.runId).catch(() => undefined);
+          await activeSecretAnswerChannel.close().catch(() => undefined);
+          activeSecretAnswerChannel = undefined;
+        }
+
+        await interactionContext.store.updateRun(interactionContext.runId, {
+          overallStatus: "waiting_for_answer",
+          pendingQuestion,
+        });
+
+        if (interactionContext.emitHook) {
+          await interactionContext.emitHook({
+            runId: interactionContext.runId,
+            hook: "onQuestion",
+            message: buildQuestionHookMessage(pendingQuestion),
+            timestamp: pendingQuestion.receivedAt,
+            requestId: pendingQuestion.requestId,
+            threadId: pendingQuestion.threadId,
+            turnId: pendingQuestion.turnId,
+            itemId: pendingQuestion.itemId,
+            questions: pendingQuestion.questions,
+            ...(activeTaskContext ? { taskId: activeTaskContext.taskId, taskName: activeTaskContext.taskName } : {}),
+            metadata: {
+              questionCount: pendingQuestion.questions.length,
+            },
+          });
+        }
+
+        const answerPath = path.join(interactionContext.store.getRunDir(interactionContext.runId), "answer.txt");
+        let nextSecretAnswer = secretAnswerChannel?.nextSubmission();
+
+        while (true) {
           const currentRun = await interactionContext.store.getRun(interactionContext.runId);
           if (!currentRun) {
-            rejectUserInputRequest(request.requestId, `Run not found while waiting for input: ${interactionContext.runId}`);
-            return;
-          }
-
-          if (
-            currentRun.overallStatus === "completed" ||
-            currentRun.overallStatus === "failed" ||
-            currentRun.overallStatus === "cancelled"
-          ) {
             rejectUserInputRequest(
               request.requestId,
-              `Run ${interactionContext.runId} is already ${currentRun.overallStatus}; ignoring late requestUserInput prompt.`,
+              `Run not found while waiting for answer: ${interactionContext.runId}`,
             );
             return;
           }
 
-          await clearAnswerFile(interactionContext.store, interactionContext.runId);
-          let secretAnswerChannel: SecretAnswerChannelState | undefined;
-          if (hasSecretQuestions(request)) {
-            secretAnswerChannel = await createSecretAnswerChannel(request.requestId);
-            activeSecretAnswerChannel = secretAnswerChannel;
-            await writeSecretAnswerChannel(interactionContext.runId, secretAnswerChannel.descriptor);
-          } else if (activeSecretAnswerChannel) {
-            await clearSecretAnswerChannel(interactionContext.runId).catch(() => undefined);
-            await activeSecretAnswerChannel.close().catch(() => undefined);
-            activeSecretAnswerChannel = undefined;
+          if (currentRun.overallStatus === "cancelled") {
+            rejectUserInputRequest(
+              request.requestId,
+              `Run ${interactionContext.runId} was cancelled while waiting for input.`,
+            );
+            await clearPendingQuestion(request.requestId);
+            return;
           }
 
-          await interactionContext.store.updateRun(interactionContext.runId, {
-            overallStatus: "waiting_for_answer",
-            pendingQuestion,
-          });
-
-          if (interactionContext.emitHook) {
-            await interactionContext.emitHook({
-              runId: interactionContext.runId,
-              hook: "onQuestion",
-              message: buildQuestionHookMessage(pendingQuestion),
-              timestamp: pendingQuestion.receivedAt,
-              requestId: pendingQuestion.requestId,
-              threadId: pendingQuestion.threadId,
-              turnId: pendingQuestion.turnId,
-              itemId: pendingQuestion.itemId,
-              questions: pendingQuestion.questions,
-              ...(activeTaskContext
-                ? { taskId: activeTaskContext.taskId, taskName: activeTaskContext.taskName }
-                : {}),
-              metadata: {
-                questionCount: pendingQuestion.questions.length,
-              },
-            });
+          if (resolvedServerRequests.delete(request.requestId)) {
+            await clearPendingQuestion(request.requestId, resumedOverallStatus);
+            return;
           }
 
-          const answerPath = path.join(interactionContext.store.getRunDir(interactionContext.runId), "answer.txt");
-          let nextSecretAnswer = secretAnswerChannel?.nextSubmission();
-
-          while (true) {
-            const currentRun = await interactionContext.store.getRun(interactionContext.runId);
-            if (!currentRun) {
-              rejectUserInputRequest(request.requestId, `Run not found while waiting for answer: ${interactionContext.runId}`);
-              return;
+          let rawAnswer: string;
+          if (secretAnswerChannel) {
+            const submittedSecretAnswer = await Promise.race([
+              nextSecretAnswer ?? Promise.resolve(""),
+              sleep(ANSWER_FILE_POLL_MS).then(() => null),
+            ]);
+            if (submittedSecretAnswer === null) {
+              continue;
             }
 
-            if (currentRun.overallStatus === "cancelled") {
-              rejectUserInputRequest(request.requestId, `Run ${interactionContext.runId} was cancelled while waiting for input.`);
-              await clearPendingQuestion(request.requestId);
-              return;
-            }
-
-            if (resolvedServerRequests.delete(request.requestId)) {
-              await clearPendingQuestion(request.requestId, resumedOverallStatus);
-              return;
-            }
-
-            let rawAnswer: string;
-            if (secretAnswerChannel) {
-              const submittedSecretAnswer = await Promise.race([
-                nextSecretAnswer ?? Promise.resolve(""),
-                sleep(ANSWER_FILE_POLL_MS).then(() => null),
-              ]);
-              if (submittedSecretAnswer === null) {
+            rawAnswer = submittedSecretAnswer;
+            nextSecretAnswer = secretAnswerChannel.nextSubmission();
+          } else {
+            try {
+              rawAnswer = await readFile(answerPath, "utf8");
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+                await sleep(ANSWER_FILE_POLL_MS);
                 continue;
               }
 
-              rawAnswer = submittedSecretAnswer;
-              nextSecretAnswer = secretAnswerChannel.nextSubmission();
-            } else {
-              try {
-                rawAnswer = await readFile(answerPath, "utf8");
-              } catch (error) {
-                if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-                  await sleep(ANSWER_FILE_POLL_MS);
-                  continue;
-                }
-
-                throw error;
-              }
-            }
-
-            try {
-              const parsedAnswer = parseQuestionAnswerInput(rawAnswer, pendingQuestion);
-              respondToUserInputRequest(request.requestId, parsedAnswer);
-              await clearAnswerFile(interactionContext.store, interactionContext.runId);
-              await clearPendingQuestion(request.requestId, resumedOverallStatus);
-              return;
-            } catch (error) {
-              const message = error instanceof Error ? error.message : String(error);
-              logger.warn(`Invalid answer for run ${interactionContext.runId}; waiting for another response (${message})`);
-              await appendRunError(
-                interactionContext.store,
-                interactionContext.runId,
-                `invalid-answer: ${message}`,
-                activeTaskContext?.taskId,
-              );
-              await clearAnswerFile(interactionContext.store, interactionContext.runId);
+              throw error;
             }
           }
-        })().catch(async (error) => {
-          const message = error instanceof Error ? error.message : String(error);
-          logger.warn(`Failed while handling Codex requestUserInput: ${message}`);
-          if (interactionContext) {
-            await appendRunError(interactionContext.store, interactionContext.runId, `request-user-input-failed: ${message}`, activeTaskContext?.taskId);
+
+          try {
+            const parsedAnswer = parseQuestionAnswerInput(rawAnswer, pendingQuestion);
+            respondToUserInputRequest(request.requestId, parsedAnswer);
+            await clearAnswerFile(interactionContext.store, interactionContext.runId);
+            await clearPendingQuestion(request.requestId, resumedOverallStatus);
+            return;
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            logger.warn(
+              `Invalid answer for run ${interactionContext.runId}; waiting for another response (${message})`,
+            );
+            await appendRunError(
+              interactionContext.store,
+              interactionContext.runId,
+              `invalid-answer: ${message}`,
+              activeTaskContext?.taskId,
+            );
+            await clearAnswerFile(interactionContext.store, interactionContext.runId);
           }
-        });
-      },
-    );
+        }
+      })().catch(async (error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.warn(`Failed while handling Codex requestUserInput: ${message}`);
+        if (interactionContext) {
+          await appendRunError(
+            interactionContext.store,
+            interactionContext.runId,
+            `request-user-input-failed: ${message}`,
+            activeTaskContext?.taskId,
+          );
+        }
+      });
+    });
 
     on.call(client, "serverRequest:resolved", (notification: { requestId: RequestId }) => {
       resolvedServerRequests.add(notification.requestId);
@@ -1613,14 +1595,14 @@ export async function createCodexSession(
       return parsePlannerRoutingDecision(rawResponse);
     },
 
-    async planSpec(
-      spec: string,
-      systemContext: string,
-    ): Promise<PlanResult> {
+    async planSpec(spec: string, systemContext: string): Promise<PlanResult> {
       const result = await client.runTurn({
         ...buildRunTurnParams(
           "planning",
-          buildTurnInput(buildPlanningPrompt(spec, systemContext, multiAgentActive, clarificationToolAvailable), skills),
+          buildTurnInput(
+            buildPlanningPrompt(spec, systemContext, multiAgentActive, clarificationToolAvailable),
+            skills,
+          ),
           clarificationToolAvailable,
         ),
       });
@@ -1649,11 +1631,7 @@ export async function createCodexSession(
       return parseTaskGraphReview(rawResponse);
     },
 
-    async executeTask(
-      task: Task,
-      runId: string,
-      systemContext?: string,
-    ): Promise<TaskExecutionResult> {
+    async executeTask(task: Task, runId: string, systemContext?: string): Promise<TaskExecutionResult> {
       activeTaskContext = { taskId: task.id, taskName: task.name };
       let clarificationContext = "";
       let result: CompletedTurn;
@@ -1661,10 +1639,7 @@ export async function createCodexSession(
         if (clarificationToolAvailable) {
           const clarificationResult = await client.runTurn(
             buildExecutionClarificationTurnParams(
-              buildTurnInput(
-                buildTaskExecutionClarificationPrompt(task, runId, cwd, systemContext),
-                skills,
-              ),
+              buildTurnInput(buildTaskExecutionClarificationPrompt(task, runId, cwd, systemContext), skills),
             ),
           );
           const clarificationRawResponse = extractAgentText(clarificationResult);
@@ -1677,14 +1652,7 @@ export async function createCodexSession(
           ...buildRunTurnParams(
             "execution",
             buildTurnInput(
-              buildTaskExecutionPrompt(
-                task,
-                runId,
-                cwd,
-                systemContext,
-                multiAgentActive,
-                clarificationContext,
-              ),
+              buildTaskExecutionPrompt(task, runId, cwd, systemContext, multiAgentActive, clarificationContext),
               skills,
             ),
             false,

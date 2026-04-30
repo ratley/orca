@@ -34,8 +34,7 @@ export function detectOpenclawAvailability(): {
   if (binary || auth) {
     return {
       available: false,
-      warning:
-        "OpenClaw detection is partial (binary/auth mismatch). Falling back to stdout hooks."
+      warning: "OpenClaw detection is partial (binary/auth mismatch). Falling back to stdout hooks.",
     };
   }
 
@@ -67,13 +66,9 @@ export function createOpenclawHookHandler(timeoutMs = 10_000): HookHandler {
       };
 
       try {
-        child = spawn(
-          "openclaw",
-          ["system", "event", "--text", event.message, "--mode", "now"],
-          {
-            stdio: "ignore"
-          }
-        );
+        child = spawn("openclaw", ["system", "event", "--text", event.message, "--mode", "now"], {
+          stdio: "ignore",
+        });
       } catch (error) {
         settleReject(error);
         return;
@@ -81,9 +76,7 @@ export function createOpenclawHookHandler(timeoutMs = 10_000): HookHandler {
 
       const timeout = setTimeout(() => {
         child.kill("SIGKILL");
-        settleReject(
-          new Error(`openclaw timed out after ${timeoutMs}ms while handling hook ${event.hook}`)
-        );
+        settleReject(new Error(`openclaw timed out after ${timeoutMs}ms while handling hook ${event.hook}`));
       }, timeoutMs);
 
       child.on("error", (error) => {

@@ -46,9 +46,9 @@ describe("parseQuestionAnswerInput", () => {
       },
     ]);
 
-    expect(() =>
-      parseQuestionAnswerInput('{"answers":{"backedn":{"answers":["bun"]}}}', pendingQuestion)
-    ).toThrow("answer payload includes unknown question id 'backedn'");
+    expect(() => parseQuestionAnswerInput('{"answers":{"backedn":{"answers":["bun"]}}}', pendingQuestion)).toThrow(
+      "answer payload includes unknown question id 'backedn'",
+    );
   });
 
   test("requires every pending question id in explicit answers payloads", () => {
@@ -69,8 +69,8 @@ describe("parseQuestionAnswerInput", () => {
       },
     ]);
 
-    expect(() =>
-      parseQuestionAnswerInput('{"answers":{"runtime":{"answers":["bun"]}}}', pendingQuestion)
-    ).toThrow("answer payload is missing question id 'package_manager'");
+    expect(() => parseQuestionAnswerInput('{"answers":{"runtime":{"answers":["bun"]}}}', pendingQuestion)).toThrow(
+      "answer payload is missing question id 'package_manager'",
+    );
   });
 });

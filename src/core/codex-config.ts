@@ -72,10 +72,7 @@ function hasEnabledRootMultiAgentSetting(content: string): boolean {
   return false;
 }
 
-export async function isCodexMultiAgentActive(
-  config?: OrcaConfig,
-  _configFile?: string,
-): Promise<boolean> {
+export async function isCodexMultiAgentActive(config?: OrcaConfig, _configFile?: string): Promise<boolean> {
   const explicitMultiAgentSetting = getExplicitMultiAgentSetting(config);
   if (explicitMultiAgentSetting !== undefined) {
     return explicitMultiAgentSetting;

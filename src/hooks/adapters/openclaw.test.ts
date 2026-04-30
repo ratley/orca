@@ -15,7 +15,7 @@ function makeEvent(overrides: Partial<HookEvent> = {}): HookEvent {
     hook: "onMilestone",
     message: "hook-message",
     timestamp: new Date().toISOString(),
-    ...overrides
+    ...overrides,
   } as HookEvent;
 }
 
@@ -25,18 +25,18 @@ async function loadModuleWithMocks(options: {
   spawnImpl?: (...args: unknown[]) => MockChildProcess;
 }): Promise<OpenclawModule> {
   mock.module("node:child_process", () => ({
-    spawnSync: () => ({ status: options.binaryPresent ?? false ? 0 : 1 }),
+    spawnSync: () => ({ status: (options.binaryPresent ?? false) ? 0 : 1 }),
     spawn: (...args: unknown[]) => {
       if (!options.spawnImpl) {
         throw new Error("spawn implementation is required for this test");
       }
 
       return options.spawnImpl(...args);
-    }
+    },
   }));
 
   mock.module("node:fs", () => ({
-    existsSync: () => options.authPresent ?? false
+    existsSync: () => options.authPresent ?? false,
   }));
 
   return await import(`./openclaw.js?test=${Math.random()}`);
@@ -98,12 +98,18 @@ describe("createOpenclawHookHandler", () => {
           child.emit("exit", 0);
         });
         return child;
-      }
+      },
     });
 
     const handler = module.createOpenclawHookHandler(50);
 
-    await expect(handler(makeEvent({ message: "hello" }), { cwd: process.cwd(), pid: process.pid, invokedAt: new Date().toISOString() })).resolves.toBeUndefined();
+    await expect(
+      handler(makeEvent({ message: "hello" }), {
+        cwd: process.cwd(),
+        pid: process.pid,
+        invokedAt: new Date().toISOString(),
+      }),
+    ).resolves.toBeUndefined();
     expect(spawnArgs[0]?.[0]).toBe("openclaw");
   });
 
@@ -115,12 +121,14 @@ describe("createOpenclawHookHandler", () => {
           child.emit("exit", 1);
         });
         return child;
-      }
+      },
     });
 
     const handler = module.createOpenclawHookHandler(50);
 
-    await expect(handler(makeEvent(), { cwd: process.cwd(), pid: process.pid, invokedAt: new Date().toISOString() })).rejects.toThrow("openclaw exited with code 1");
+    await expect(
+      handler(makeEvent(), { cwd: process.cwd(), pid: process.pid, invokedAt: new Date().toISOString() }),
+    ).rejects.toThrow("openclaw exited with code 1");
   });
 
   test("rejects when spawn emits error", async () => {
@@ -131,35 +139,41 @@ describe("createOpenclawHookHandler", () => {
           child.emit("error", new Error("binary not found"));
         });
         return child;
-      }
+      },
     });
 
     const handler = module.createOpenclawHookHandler(50);
 
-    await expect(handler(makeEvent(), { cwd: process.cwd(), pid: process.pid, invokedAt: new Date().toISOString() })).rejects.toThrow("binary not found");
+    await expect(
+      handler(makeEvent(), { cwd: process.cwd(), pid: process.pid, invokedAt: new Date().toISOString() }),
+    ).rejects.toThrow("binary not found");
   });
 
   test("rejects when spawn throws", async () => {
     const module = await loadModuleWithMocks({
       spawnImpl: () => {
         throw new Error("spawn exploded");
-      }
+      },
     });
 
     const handler = module.createOpenclawHookHandler(50);
 
-    await expect(handler(makeEvent(), { cwd: process.cwd(), pid: process.pid, invokedAt: new Date().toISOString() })).rejects.toThrow("spawn exploded");
+    await expect(
+      handler(makeEvent(), { cwd: process.cwd(), pid: process.pid, invokedAt: new Date().toISOString() }),
+    ).rejects.toThrow("spawn exploded");
   });
 
   test("kills process and rejects on timeout", async () => {
     const child = new MockChildProcess();
     const module = await loadModuleWithMocks({
-      spawnImpl: () => child
+      spawnImpl: () => child,
     });
 
     const handler = module.createOpenclawHookHandler(5);
 
-    await expect(handler(makeEvent(), { cwd: process.cwd(), pid: process.pid, invokedAt: new Date().toISOString() })).rejects.toThrow("openclaw timed out after 5ms");
+    await expect(
+      handler(makeEvent(), { cwd: process.cwd(), pid: process.pid, invokedAt: new Date().toISOString() }),
+    ).rejects.toThrow("openclaw timed out after 5ms");
     expect(child.kill).toHaveBeenCalledWith("SIGKILL");
   });
 });

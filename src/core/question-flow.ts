@@ -1,7 +1,4 @@
-import type {
-  ToolRequestUserInputParams,
-  ToolRequestUserInputResponse,
-} from "@ratley/codex-client";
+import type { ToolRequestUserInputParams, ToolRequestUserInputResponse } from "@ratley/codex-client";
 
 import type { PendingQuestion, PendingQuestionPrompt } from "../types/index.js";
 
@@ -43,9 +40,10 @@ function normalizeAnswerList(value: unknown): string[] | null {
 }
 
 function formatQuestionBlock(question: PendingQuestionPrompt): string {
-  const optionText = question.options && question.options.length > 0
-    ? ` Options: ${question.options.map((option) => option.label).join(", ")}.`
-    : "";
+  const optionText =
+    question.options && question.options.length > 0
+      ? ` Options: ${question.options.map((option) => option.label).join(", ")}.`
+      : "";
 
   return `${question.header} (${question.id}): ${question.question}${optionText}`;
 }
@@ -74,17 +72,17 @@ export function buildQuestionHookMessage(pendingQuestion: PendingQuestion): stri
 }
 
 export function formatPendingQuestionForStatus(pendingQuestion: PendingQuestion): string[] {
-  return [
-    "Pending Question:",
-    ...pendingQuestion.questions.map((question) => `- ${formatQuestionBlock(question)}`),
-  ];
+  return ["Pending Question:", ...pendingQuestion.questions.map((question) => `- ${formatQuestionBlock(question)}`)];
 }
 
 export function serializeQuestionAnswerResponse(response: ToolRequestUserInputResponse): string {
   return `${JSON.stringify(response, null, 2)}\n`;
 }
 
-function buildSingleQuestionTextResponse(question: PendingQuestionPrompt, answer: string): ToolRequestUserInputResponse {
+function buildSingleQuestionTextResponse(
+  question: PendingQuestionPrompt,
+  answer: string,
+): ToolRequestUserInputResponse {
   return {
     answers: {
       [question.id]: {

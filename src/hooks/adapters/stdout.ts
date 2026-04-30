@@ -12,7 +12,7 @@ export function createStdoutHookHandler(prefix = "[hook]", write: StdoutWrite = 
       timestamp: event.timestamp,
       message: event.message,
       error: event.error,
-      metadata: event.metadata
+      metadata: event.metadata,
     };
 
     write(JSON.stringify(line));

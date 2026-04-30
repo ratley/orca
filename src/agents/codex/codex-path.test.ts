@@ -86,10 +86,7 @@ describe("codex-path", () => {
     chmodSync(secondCodex, 0o755);
 
     try {
-      expect(resolveCodexPathsOnPath([firstDir, secondDir].join(path.delimiter))).toEqual([
-        firstCodex,
-        secondCodex,
-      ]);
+      expect(resolveCodexPathsOnPath([firstDir, secondDir].join(path.delimiter))).toEqual([firstCodex, secondCodex]);
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
     }

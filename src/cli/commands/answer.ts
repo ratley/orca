@@ -37,9 +37,10 @@ function resolveRunId(positionalRunId: string | undefined, optionRunId: string |
 }
 
 function formatQuestionPrompt(question: PendingQuestion["questions"][number]): string {
-  const options = question.options && question.options.length > 0
-    ? ` Options: ${question.options.map((option) => option.label).join(", ")}.`
-    : "";
+  const options =
+    question.options && question.options.length > 0
+      ? ` Options: ${question.options.map((option) => option.label).join(", ")}.`
+      : "";
   return `${question.header}: ${question.question}${options}`;
 }
 
@@ -111,7 +112,9 @@ async function submitAnswerViaChannel(channel: PendingAnswerChannel, payload: st
       try {
         const parsed = JSON.parse(responseBuffer.trim()) as { ok?: boolean; error?: unknown };
         if (parsed.ok !== true) {
-          throw new Error(typeof parsed.error === "string" ? parsed.error : "secret answer channel rejected the payload");
+          throw new Error(
+            typeof parsed.error === "string" ? parsed.error : "secret answer channel rejected the payload",
+          );
         }
         resolve();
       } catch (error) {
@@ -124,7 +127,7 @@ async function submitAnswerViaChannel(channel: PendingAnswerChannel, payload: st
 export async function answerCommandHandler(
   positionalRunId: string | undefined,
   answerArg: string | undefined,
-  options: AnswerCommandOptions
+  options: AnswerCommandOptions,
 ): Promise<void> {
   const store = createStore();
   let runId = resolveRunId(positionalRunId, options.run);
@@ -134,7 +137,7 @@ export async function answerCommandHandler(
       throw new Error("no run id provided");
     }
 
-    runId = await selectRun(store) ?? undefined;
+    runId = (await selectRun(store)) ?? undefined;
     if (!runId) {
       console.error("No runs found.");
       process.exitCode = 1;

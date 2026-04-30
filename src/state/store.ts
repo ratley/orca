@@ -25,7 +25,7 @@ export class RunStore {
       overallStatus: "planning",
       tasks: [],
       milestones: [],
-      errors: []
+      errors: [],
     };
 
     await fs.mkdir(runDir, { recursive: true });
@@ -58,7 +58,7 @@ export class RunStore {
     const next = RunStatusSchema.parse({
       ...existing,
       ...patch,
-      updatedAt: new Date().toISOString()
+      updatedAt: new Date().toISOString(),
     }) as RunStatus;
 
     await this.writeJsonAtomic(this.getStatusPath(runId), next);

@@ -20,7 +20,7 @@ const originalStdoutIsTTY = Object.getOwnPropertyDescriptor(process.stdout, "isT
 function setStdoutTty(value: boolean): void {
   Object.defineProperty(process.stdout, "isTTY", {
     configurable: true,
-    value
+    value,
   });
 }
 
@@ -41,7 +41,7 @@ async function loadAnswerModule(options?: {
   mock.module("@inquirer/prompts", () => ({
     input: inputMock,
     password: passwordMock,
-    select: selectMock
+    select: selectMock,
   }));
 
   const answerModule = await import(`./answer.js?test=${Math.random()}`);
@@ -171,9 +171,7 @@ describe("answer command", () => {
 
     const { answerModule } = await loadAnswerModule();
 
-    await expect(answerModule.answerCommandHandler(runId, undefined, {})).rejects.toThrow(
-      "no answer provided"
-    );
+    await expect(answerModule.answerCommandHandler(runId, undefined, {})).rejects.toThrow("no answer provided");
   });
 
   test("prompts for answer when tty and no positional answer was provided", async () => {
@@ -203,7 +201,7 @@ describe("answer command", () => {
     setStdoutTty(true);
 
     const { answerModule, inputMock } = await loadAnswerModule({
-      input: async () => "from prompt"
+      input: async () => "from prompt",
     });
 
     await answerModule.answerCommandHandler(runId, undefined, {});
@@ -242,7 +240,7 @@ describe("answer command", () => {
     setStdoutTty(true);
 
     const { answerModule, selectMock } = await loadAnswerModule({
-      select: async () => runId
+      select: async () => runId,
     });
 
     await answerModule.answerCommandHandler(undefined, "selected answer", {});
@@ -349,7 +347,7 @@ describe("answer command", () => {
     const { answerModule } = await loadAnswerModule();
 
     await expect(
-      answerModule.answerCommandHandler("run-a-1000-abcd", "yes", { run: "run-b-1001-abcd" })
+      answerModule.answerCommandHandler("run-a-1000-abcd", "yes", { run: "run-b-1001-abcd" }),
     ).rejects.toThrow("positional run-id and --run are mutually exclusive");
   });
 });

@@ -12,10 +12,7 @@ function getSecretAnswerChannelFilePath(runId: RunId): string {
   return path.join(getSecretAnswerChannelsDir(), `${runId}.json`);
 }
 
-export async function writeSecretAnswerChannel(
-  runId: RunId,
-  channel: PendingAnswerChannel,
-): Promise<void> {
+export async function writeSecretAnswerChannel(runId: RunId, channel: PendingAnswerChannel): Promise<void> {
   const channelsDir = getSecretAnswerChannelsDir();
   const channelFile = getSecretAnswerChannelFilePath(runId);
   const tempFile = `${channelFile}.${process.pid}.${Date.now()}.tmp`;

@@ -67,7 +67,7 @@ describe("ensureCodexMultiAgent", () => {
 
   it("appends feature block when file exists but has no multi_agent", async () => {
     const fs = await import("node:fs/promises");
-    await fs.writeFile(tmpConfigFile, "[mcp_servers.context7]\ncommand = \"npx\"\n", "utf8");
+    await fs.writeFile(tmpConfigFile, '[mcp_servers.context7]\ncommand = "npx"\n', "utf8");
 
     const result = await ensureCodexMultiAgent({ codex: { multiAgent: true } }, tmpConfigFile);
     expect(result.action).toBe("appended");
@@ -79,7 +79,7 @@ describe("ensureCodexMultiAgent", () => {
 
   it("appended block is separated from existing content with no trailing newline", async () => {
     const fs = await import("node:fs/promises");
-    await fs.writeFile(tmpConfigFile, "[section]\nkey = \"value\"", "utf8");
+    await fs.writeFile(tmpConfigFile, '[section]\nkey = "value"', "utf8");
 
     await ensureCodexMultiAgent({ codex: { multiAgent: true } }, tmpConfigFile);
     const content = await readFile(tmpConfigFile, "utf8");

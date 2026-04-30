@@ -2,53 +2,69 @@ import { z } from "zod";
 
 import type { Task, TaskGraphReviewOperation } from "../types/index.js";
 
-const TaskSchema = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1),
-  description: z.string(),
-  dependencies: z.array(z.string()),
-  acceptance_criteria: z.array(z.string()),
-  status: z.enum(["pending", "in_progress", "done", "failed", "cancelled"]),
-  retries: z.number(),
-  maxRetries: z.number(),
-  startedAt: z.string().optional(),
-  finishedAt: z.string().optional(),
-  lastError: z.string().optional()
-}).strict();
+const TaskSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    description: z.string(),
+    dependencies: z.array(z.string()),
+    acceptance_criteria: z.array(z.string()),
+    status: z.enum(["pending", "in_progress", "done", "failed", "cancelled"]),
+    retries: z.number(),
+    maxRetries: z.number(),
+    startedAt: z.string().optional(),
+    finishedAt: z.string().optional(),
+    lastError: z.string().optional(),
+  })
+  .strict();
 
 const ReviewOperationSchema = z.discriminatedUnion("op", [
-  z.object({
-    op: z.literal("update_task"),
-    taskId: z.string().min(1),
-    fields: z.object({
-      name: z.string().min(1).optional(),
-      description: z.string().optional(),
-      acceptance_criteria: z.array(z.string()).optional()
-    }).strict()
-  }).strict(),
-  z.object({
-    op: z.literal("add_task"),
-    task: TaskSchema
-  }).strict(),
-  z.object({
-    op: z.literal("remove_task"),
-    taskId: z.string().min(1)
-  }).strict(),
-  z.object({
-    op: z.literal("add_dependency"),
-    taskId: z.string().min(1),
-    dependsOn: z.string().min(1)
-  }).strict(),
-  z.object({
-    op: z.literal("remove_dependency"),
-    taskId: z.string().min(1),
-    dependsOn: z.string().min(1)
-  }).strict()
+  z
+    .object({
+      op: z.literal("update_task"),
+      taskId: z.string().min(1),
+      fields: z
+        .object({
+          name: z.string().min(1).optional(),
+          description: z.string().optional(),
+          acceptance_criteria: z.array(z.string()).optional(),
+        })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("add_task"),
+      task: TaskSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("remove_task"),
+      taskId: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("add_dependency"),
+      taskId: z.string().min(1),
+      dependsOn: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("remove_dependency"),
+      taskId: z.string().min(1),
+      dependsOn: z.string().min(1),
+    })
+    .strict(),
 ]);
 
-export const TaskGraphReviewPayloadSchema = z.object({
-  changes: z.array(ReviewOperationSchema)
-}).strict();
+export const TaskGraphReviewPayloadSchema = z
+  .object({
+    changes: z.array(ReviewOperationSchema),
+  })
+  .strict();
 
 function findTaskIndex(tasks: Task[], taskId: string): number {
   return tasks.findIndex((task) => task.id === taskId);
@@ -76,7 +92,11 @@ export function summarizeReviewChanges(changes: TaskGraphReviewOperation[]): str
 }
 
 export function applyTaskGraphReviewChanges(tasks: Task[], changes: TaskGraphReviewOperation[]): Task[] {
-  const nextTasks = tasks.map((task) => ({ ...task, dependencies: [...task.dependencies], acceptance_criteria: [...task.acceptance_criteria] }));
+  const nextTasks = tasks.map((task) => ({
+    ...task,
+    dependencies: [...task.dependencies],
+    acceptance_criteria: [...task.acceptance_criteria],
+  }));
 
   for (const change of changes) {
     switch (change.op) {
@@ -93,7 +113,7 @@ export function applyTaskGraphReviewChanges(tasks: Task[], changes: TaskGraphRev
           ...("description" in change.fields ? { description: change.fields.description ?? current.description } : {}),
           ...("acceptance_criteria" in change.fields
             ? { acceptance_criteria: [...(change.fields.acceptance_criteria ?? current.acceptance_criteria)] }
-            : {})
+            : {}),
         };
         break;
       }
@@ -104,7 +124,7 @@ export function applyTaskGraphReviewChanges(tasks: Task[], changes: TaskGraphRev
         nextTasks.push({
           ...change.task,
           dependencies: [...change.task.dependencies],
-          acceptance_criteria: [...change.task.acceptance_criteria]
+          acceptance_criteria: [...change.task.acceptance_criteria],
         });
         break;
       }

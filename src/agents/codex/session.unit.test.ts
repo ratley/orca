@@ -545,7 +545,6 @@ describe("codex session effort wiring", () => {
       await session.disconnect();
     }
   });
-
 });
 
 describe("codex session code-simplifier guidance", () => {
@@ -559,14 +558,14 @@ describe("codex session code-simplifier guidance", () => {
         return {
           agentMessage: '{"changes":[]}',
           turn: { status: "completed" },
-          items: []
+          items: [],
         };
       }
 
       return {
         agentMessage: "[]",
         turn: { status: "completed" },
-        items: []
+        items: [],
       };
     });
 
@@ -582,7 +581,7 @@ describe("codex session code-simplifier guidance", () => {
         async runReview(): Promise<{ reviewText: string }> {
           return { reviewText: "ok" };
         }
-      }
+      },
     }));
 
     mock.module("../../utils/skill-loader.js", () => ({
@@ -604,17 +603,19 @@ describe("codex session code-simplifier guidance", () => {
           acceptance_criteria: ["Done"],
           status: "pending",
           retries: 0,
-          maxRetries: 3
+          maxRetries: 3,
         },
         "run-1",
-        "context"
+        "context",
       );
 
       expect(prompts).toHaveLength(3);
       for (const prompt of prompts) {
         expect(prompt).toContain("For every code-writing step, explicitly apply code-simplifier guidance");
         expect(prompt).toContain("For every code-review step, explicitly apply code-simplifier guidance");
-        expect(prompt).toContain("Keep changes behavior-preserving unless the task explicitly requires behavior changes.");
+        expect(prompt).toContain(
+          "Keep changes behavior-preserving unless the task explicitly requires behavior changes.",
+        );
       }
     } finally {
       await session.disconnect();
@@ -709,25 +710,47 @@ describe("codex session multi-agent prompt guidance", () => {
         "context",
       );
 
-      const planningPrompt = prompts.find((prompt) => prompt.includes("You are decomposing a spec into an ordered task graph.")) ?? "";
-      const reviewPrompt = prompts.find((prompt) => prompt.includes("You are Orca's pre-execution task-graph reviewer.")) ?? "";
-      const consultationPrompt = prompts.find((prompt) => prompt.includes("Review this Orca task graph before execution.")) ?? "";
-      const executionPrompt = prompts.find((prompt) => prompt.includes("You are Orca's task execution assistant.")) ?? "";
+      const planningPrompt =
+        prompts.find((prompt) => prompt.includes("You are decomposing a spec into an ordered task graph.")) ?? "";
+      const reviewPrompt =
+        prompts.find((prompt) => prompt.includes("You are Orca's pre-execution task-graph reviewer.")) ?? "";
+      const consultationPrompt =
+        prompts.find((prompt) => prompt.includes("Review this Orca task graph before execution.")) ?? "";
+      const executionPrompt =
+        prompts.find((prompt) => prompt.includes("You are Orca's task execution assistant.")) ?? "";
 
-      expect(planningPrompt).toContain("Codex multi-agent mode is enabled for this run. Shape the task graph so safe subagent parallelization is obvious.");
-      expect(planningPrompt).toContain("Do not bundle unrelated work into a single do-everything task when it can be safely split.");
+      expect(planningPrompt).toContain(
+        "Codex multi-agent mode is enabled for this run. Shape the task graph so safe subagent parallelization is obvious.",
+      );
+      expect(planningPrompt).toContain(
+        "Do not bundle unrelated work into a single do-everything task when it can be safely split.",
+      );
 
-      expect(reviewPrompt).toContain("Codex multi-agent mode is enabled for this run. Review the graph for safe subagent parallelization.");
-      expect(reviewPrompt).toContain("Flag ownership collisions where multiple tasks would touch the same files or subsystem without coordination.");
+      expect(reviewPrompt).toContain(
+        "Codex multi-agent mode is enabled for this run. Review the graph for safe subagent parallelization.",
+      );
+      expect(reviewPrompt).toContain(
+        "Flag ownership collisions where multiple tasks would touch the same files or subsystem without coordination.",
+      );
 
-      expect(consultationPrompt).toContain("Execution tasks are allowed to pause and ask request_user_input questions when they truly need a user-provided value.");
-      expect(consultationPrompt).toContain("Do not ask the user whether Orca may pause during execution for clarification. Assume that execution-time request_user_input is available.");
-      expect(consultationPrompt).toContain("If a task already says it should ask for a missing user value during execution, treat that as a valid execution mechanism, not a reason to ask a meta-question about whether clarification is allowed.");
+      expect(consultationPrompt).toContain(
+        "Execution tasks are allowed to pause and ask request_user_input questions when they truly need a user-provided value.",
+      );
+      expect(consultationPrompt).toContain(
+        "Do not ask the user whether Orca may pause during execution for clarification. Assume that execution-time request_user_input is available.",
+      );
+      expect(consultationPrompt).toContain(
+        "If a task already says it should ask for a missing user value during execution, treat that as a valid execution mechanism, not a reason to ask a meta-question about whether clarification is allowed.",
+      );
       expect(consultationPrompt).toContain("Codex multi-agent mode is enabled for this run.");
-      expect(consultationPrompt).toContain("Treat missed safe parallelism, fake dependencies, overlapping ownership, or missing integration tasks as review concerns.");
+      expect(consultationPrompt).toContain(
+        "Treat missed safe parallelism, fake dependencies, overlapping ownership, or missing integration tasks as review concerns.",
+      );
 
       expect(executionPrompt).toContain("Codex multi-agent mode is enabled for this run.");
-      expect(executionPrompt).toContain("If this task contains clearly independent subtasks with disjoint ownership, use subagents to parallelize them.");
+      expect(executionPrompt).toContain(
+        "If this task contains clearly independent subtasks with disjoint ownership, use subagents to parallelize them.",
+      );
       expect(executionPrompt).toContain("Integrate subagent results yourself before final completion.");
     } finally {
       await session.disconnect();
@@ -823,8 +846,12 @@ describe("codex session multi-agent prompt guidance", () => {
 
       for (const prompt of prompts) {
         if (prompt.includes("Review this Orca task graph before execution.")) {
-          expect(prompt).toContain("Execution tasks are allowed to pause and ask request_user_input questions when they truly need a user-provided value.");
-          expect(prompt).toContain("Do not ask the user whether Orca may pause during execution for clarification. Assume that execution-time request_user_input is available.");
+          expect(prompt).toContain(
+            "Execution tasks are allowed to pause and ask request_user_input questions when they truly need a user-provided value.",
+          );
+          expect(prompt).toContain(
+            "Do not ask the user whether Orca may pause during execution for clarification. Assume that execution-time request_user_input is available.",
+          );
         }
         expect(prompt).not.toContain("Codex multi-agent mode is enabled for this run.");
         expect(prompt).not.toContain("use subagents to parallelize them");
@@ -882,7 +909,8 @@ describe("codex session multi-agent prompt guidance", () => {
 
           if (prompt.includes("execution clarification gate")) {
             return {
-              agentMessage: '{"needsInput":true,"context":"Use the user-provided release codename when updating files."}',
+              agentMessage:
+                '{"needsInput":true,"context":"Use the user-provided release codename when updating files."}',
               turn: { status: "completed" },
               items: [],
             };
@@ -947,7 +975,9 @@ describe("codex session multi-agent prompt guidance", () => {
 
       const clarificationPrompt = clarificationCall?.input?.[0]?.text ?? "";
       expect(clarificationPrompt).toContain("You are Orca's execution clarification gate.");
-      expect(clarificationPrompt).toContain("use Codex's request_user_input tool instead of guessing, failing, or baking the question into a later task");
+      expect(clarificationPrompt).toContain(
+        "use Codex's request_user_input tool instead of guessing, failing, or baking the question into a later task",
+      );
 
       const executionPrompt = executionCall?.input?.[0]?.text ?? "";
       expect(executionPrompt).toContain("Resolved Clarification Context:");
@@ -1141,7 +1171,11 @@ describe("codex session multi-agent prompt guidance", () => {
           input?: TurnInputItem[];
         }): Promise<{ agentMessage: string; turn: { status: "completed" }; items: [] }> {
           runTurnCalls.push(params);
-          return { agentMessage: '{"summary":"clean","findings":[],"fixed":false}', turn: { status: "completed" }, items: [] };
+          return {
+            agentMessage: '{"summary":"clean","findings":[],"fixed":false}',
+            turn: { status: "completed" },
+            items: [],
+          };
         }
         async runReview(): Promise<{ reviewText: string }> {
           return { reviewText: "ok" };
@@ -1240,7 +1274,9 @@ describe("codex session skill discovery", () => {
         async startThread(): Promise<{ id: string }> {
           return { id: "thread-1" };
         }
-        async runTurn(params: { input?: TurnInputItem[] }): Promise<{ agentMessage: string; turn: { status: "completed" }; items: [] }> {
+        async runTurn(params: {
+          input?: TurnInputItem[];
+        }): Promise<{ agentMessage: string; turn: { status: "completed" }; items: [] }> {
           capturedInput = params.input ?? [];
           return { agentMessage: "[]", turn: { status: "completed" }, items: [] };
         }
@@ -1314,7 +1350,9 @@ describe("codex session skill discovery", () => {
           async startThread(): Promise<{ id: string }> {
             return { id: "thread-1" };
           }
-          async runTurn(params: { input?: TurnInputItem[] }): Promise<{ agentMessage: string; turn: { status: "completed" }; items: [] }> {
+          async runTurn(params: {
+            input?: TurnInputItem[];
+          }): Promise<{ agentMessage: string; turn: { status: "completed" }; items: [] }> {
             capturedInput = params.input ?? [];
             return { agentMessage: "[]", turn: { status: "completed" }, items: [] };
           }
@@ -1421,7 +1459,7 @@ describe("codex session inline skill context", () => {
         return {
           agentMessage: '{"changes":[]}',
           turn: { status: "completed" },
-          items: []
+          items: [],
         };
       }
 
@@ -1429,14 +1467,14 @@ describe("codex session inline skill context", () => {
         return {
           agentMessage: '{"issues":[],"ok":true}',
           turn: { status: "completed" },
-          items: []
+          items: [],
         };
       }
 
       return {
         agentMessage: "[]",
         turn: { status: "completed" },
-        items: []
+        items: [],
       };
     });
 
@@ -1599,11 +1637,7 @@ describe("codex session question flow", () => {
         expect(waitingRun.overallStatus).toBe("waiting_for_answer");
 
         const answerPath = path.join(store.getRunDir(runId), "answer.txt");
-        await writeFile(
-          answerPath,
-          `${JSON.stringify({ answers: { framework: { answers: ["bun"] } } })}\n`,
-          "utf8",
-        );
+        await writeFile(answerPath, `${JSON.stringify({ answers: { framework: { answers: ["bun"] } } })}\n`, "utf8");
 
         await planningPromise;
 
@@ -1765,11 +1799,7 @@ describe("codex session question flow", () => {
         });
 
         const answerPath = path.join(store.getRunDir(runId), "answer.txt");
-        await writeFile(
-          answerPath,
-          `${JSON.stringify({ answers: { game_type: { answers: ["Arcade"] } } })}\n`,
-          "utf8",
-        );
+        await writeFile(answerPath, `${JSON.stringify({ answers: { game_type: { answers: ["Arcade"] } } })}\n`, "utf8");
 
         const result = await executionPromise;
         expect(result.outcome).toBe("done");
@@ -1933,7 +1963,7 @@ describe("codex session question flow", () => {
           },
         ]);
       } finally {
-      await session.disconnect();
+        await session.disconnect();
       }
     } finally {
       await rm(tempDir, { recursive: true, force: true });

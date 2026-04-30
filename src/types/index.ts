@@ -10,12 +10,7 @@ export interface Spec {
   createdAt: string;
 }
 
-export type TaskStatus =
-  | "pending"
-  | "in_progress"
-  | "done"
-  | "failed"
-  | "cancelled";
+export type TaskStatus = "pending" | "in_progress" | "done" | "failed" | "cancelled";
 
 export interface Task {
   id: string;
@@ -38,14 +33,7 @@ export interface RunStatus {
   specPath: string;
   createdAt: string;
   updatedAt: string;
-  overallStatus:
-    | "planning"
-    | "running"
-    | "reviewing"
-    | "waiting_for_answer"
-    | "completed"
-    | "failed"
-    | "cancelled";
+  overallStatus: "planning" | "running" | "reviewing" | "waiting_for_answer" | "completed" | "failed" | "cancelled";
   tasks: Task[];
   milestones: string[];
   errors: Array<{ at: string; message: string; taskId?: string }>;
@@ -128,7 +116,7 @@ export interface HookHandlerContext {
 
 export type HookHandler<K extends HookName = HookName> = (
   event: HookEventMap[K],
-  context: HookHandlerContext
+  context: HookHandlerContext,
 ) => Promise<void> | void;
 
 // Shared agent result types (used by codex session adapters)
@@ -145,32 +133,32 @@ export interface TaskExecutionResult {
 
 export type TaskGraphReviewOperation =
   | {
-    op: "update_task";
-    taskId: string;
-    fields: {
-      name?: string;
-      description?: string;
-      acceptance_criteria?: string[];
+      op: "update_task";
+      taskId: string;
+      fields: {
+        name?: string;
+        description?: string;
+        acceptance_criteria?: string[];
+      };
+    }
+  | {
+      op: "add_task";
+      task: Task;
+    }
+  | {
+      op: "remove_task";
+      taskId: string;
+    }
+  | {
+      op: "add_dependency";
+      taskId: string;
+      dependsOn: string;
+    }
+  | {
+      op: "remove_dependency";
+      taskId: string;
+      dependsOn: string;
     };
-  }
-  | {
-    op: "add_task";
-    task: Task;
-  }
-  | {
-    op: "remove_task";
-    taskId: string;
-  }
-  | {
-    op: "add_dependency";
-    taskId: string;
-    dependsOn: string;
-  }
-  | {
-    op: "remove_dependency";
-    taskId: string;
-    dependsOn: string;
-  };
 
 export interface TaskGraphReviewResult {
   changes: TaskGraphReviewOperation[];
@@ -235,27 +223,27 @@ export interface PlannerRouterConfig {
 
 export type PlannerConfig =
   | {
-    /**
-     * Ask a Codex router to choose Claude or Codex for task graph generation.
-     * This is also the default when planner is omitted.
-     */
-    agent?: "auto";
-    router?: PlannerRouterConfig;
-  }
+      /**
+       * Ask a Codex router to choose Claude or Codex for task graph generation.
+       * This is also the default when planner is omitted.
+       */
+      agent?: "auto";
+      router?: PlannerRouterConfig;
+    }
   | {
-    /**
-     * Always use Claude for non-skipped task graph generation.
-     */
-    agent: "claude";
-    router?: never;
-  }
+      /**
+       * Always use Claude for non-skipped task graph generation.
+       */
+      agent: "claude";
+      router?: never;
+    }
   | {
-    /**
-     * Always use Codex for non-skipped task graph generation.
-     */
-    agent: "codex";
-    router?: never;
-  };
+      /**
+       * Always use Codex for non-skipped task graph generation.
+       */
+      agent: "codex";
+      router?: never;
+    };
 
 export interface OrcaConfig {
   openaiApiKey?: string;

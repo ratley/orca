@@ -23,10 +23,7 @@ function buildPlanningPrompt(spec: string, systemContext: string): string {
 }
 
 function resolveClaudeCommand(config?: OrcaConfig): string {
-  return config?.claude?.command
-    ?? process.env.ORCA_CLAUDE_COMMAND
-    ?? process.env.ORCA_CLAUDE_PATH
-    ?? "claude";
+  return config?.claude?.command ?? process.env.ORCA_CLAUDE_COMMAND ?? process.env.ORCA_CLAUDE_PATH ?? "claude";
 }
 
 function resolveClaudeArgs(config?: OrcaConfig): string[] {
@@ -137,11 +134,7 @@ function parseTaskArray(raw: string): Task[] {
   return parsed as Task[];
 }
 
-export async function planSpec(
-  spec: string,
-  systemContext: string,
-  config?: OrcaConfig,
-): Promise<PlanResult> {
+export async function planSpec(spec: string, systemContext: string, config?: OrcaConfig): Promise<PlanResult> {
   const rawResponse = await runClaudePrint(buildPlanningPrompt(spec, systemContext), config);
   return {
     tasks: parseTaskArray(rawResponse),

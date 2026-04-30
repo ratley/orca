@@ -4,7 +4,13 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
-import { runPlanner, setDecidePlanningNeedForTests, setPlanSpecForTests, setReviewTaskGraphForTests, setSelectPlannerAgentForTests } from "./planner.js";
+import {
+  runPlanner,
+  setDecidePlanningNeedForTests,
+  setPlanSpecForTests,
+  setReviewTaskGraphForTests,
+  setSelectPlannerAgentForTests,
+} from "./planner.js";
 import { RunStore } from "../state/store.js";
 
 describe("runPlanner task graph validation", () => {
@@ -14,7 +20,18 @@ describe("runPlanner task graph validation", () => {
   let store: RunStore;
   const originalCwd = process.cwd();
 
-  const baseTasks = [{ id: "t1", name: "Task 1", description: "desc", dependencies: [], acceptance_criteria: ["done"], status: "pending", retries: 0, maxRetries: 3 }] as const;
+  const baseTasks = [
+    {
+      id: "t1",
+      name: "Task 1",
+      description: "desc",
+      dependencies: [],
+      acceptance_criteria: ["done"],
+      status: "pending",
+      retries: 0,
+      maxRetries: 3,
+    },
+  ] as const;
 
   beforeEach(async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-planner-test-"));

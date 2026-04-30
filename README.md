@@ -82,6 +82,7 @@ orca cancel --last   # abort
 ```
 
 Common failures:
+
 - `auth error` → re-auth Codex (`codex auth`) or set `OPENAI_API_KEY` / `ORCA_OPENAI_API_KEY`
 - `no git repo` → `cd` into a git repo
 - `plan invalid` → goal too vague; cancel and restate
@@ -118,21 +119,21 @@ Planning can be routed separately: by default Orca asks a lightweight Codex rout
 import { defineOrcaConfig } from "orcastrator";
 
 export default defineOrcaConfig({
-  executor: "codex",              // only supported value
-  runsDir: "./.orca/runs",        // default: ~/.orca/runs
+  executor: "codex", // only supported value
+  runsDir: "./.orca/runs", // default: ~/.orca/runs
   sessionLogs: "./session-logs",
   skills: ["./.orca/skills"],
   maxRetries: 1,
 
   planner: {
-    agent: "auto",                  // "auto" | "claude" | "codex"
+    agent: "auto", // "auto" | "claude" | "codex"
     router: {
       model: "gpt-5.3-codex-spark",
     },
   },
 
   claude: {
-    command: "claude",              // uses `claude -p` for planning
+    command: "claude", // uses `claude -p` for planning
     model: "claude-opus-4-7",
     effort: "high",
     timeoutMs: 300000,
@@ -140,31 +141,29 @@ export default defineOrcaConfig({
 
   codex: {
     model: "gpt-5.5",
-    effort: "high",               // fallback for all Codex turns unless overridden below
+    effort: "high", // fallback for all Codex turns unless overridden below
     thinkingLevel: {
-      decision: "low",            // planning gate / quick routing decisions
-      planning: "xhigh",          // task graph generation
-      review: "high",             // task graph consultation + post-execution review prompts
-      execution: "medium",        // task execution turns
+      decision: "low", // planning gate / quick routing decisions
+      planning: "xhigh", // task graph generation
+      review: "high", // task graph consultation + post-execution review prompts
+      execution: "medium", // task execution turns
     },
     timeoutMs: 300000,
-    multiAgent: false,      // see Multi-agent section
-    perCwdExtraUserRoots: [
-      { cwd: process.cwd(), extraUserRoots: ["/tmp/shared-skills"] }
-    ],
+    multiAgent: false, // see Multi-agent section
+    perCwdExtraUserRoots: [{ cwd: process.cwd(), extraUserRoots: ["/tmp/shared-skills"] }],
   },
 
   review: {
     plan: {
       enabled: true,
-      onInvalid: "fail",    // "fail" | "warn_skip"
+      onInvalid: "fail", // "fail" | "warn_skip"
     },
     execution: {
       enabled: true,
       maxCycles: 2,
-      onFindings: "auto_fix",  // "auto_fix" | "report_only" | "fail"
+      onFindings: "auto_fix", // "auto_fix" | "report_only" | "fail"
       validator: {
-        auto: true,            // auto-detect validators from package.json
+        auto: true, // auto-detect validators from package.json
         // commands: ["npm run validate"]  // explicit override
       },
       // prompt: "Prefer minimal safe fixes"
@@ -180,7 +179,9 @@ export default defineOrcaConfig({
     onTaskComplete: async (event, context) => {
       console.log(`task done: ${event.taskId} from pid ${context.pid}`);
     },
-    onError: async (event) => { console.error(event.error); },
+    onError: async (event) => {
+      console.error(event.error);
+    },
   },
 
   hookCommands: {
@@ -349,7 +350,7 @@ bun test src
 npm run test:postexec-json
 ```
 
-Full validation gate (runs lint → type-check → tests → build):
+Full validation gate (runs Oxfmt check, Oxlint, type-check, tests, and build):
 
 ```bash
 npm run validate

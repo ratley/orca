@@ -40,11 +40,13 @@ interface ExecutionReviewResult {
   rawResponse: string;
 }
 
-const ExecutionReviewPayloadSchema = z.object({
-  summary: z.string().min(1),
-  findings: z.array(z.string()),
-  fixed: z.boolean()
-}).strict();
+const ExecutionReviewPayloadSchema = z
+  .object({
+    summary: z.string().min(1),
+    findings: z.array(z.string()),
+    fixed: z.boolean(),
+  })
+  .strict();
 
 type StructuredReviewResult = z.infer<typeof ExecutionReviewPayloadSchema>;
 
@@ -75,7 +77,7 @@ const ALL_HOOKS: HookName[] = [
   "onInvalidPlan",
   "onFindings",
   "onComplete",
-  "onError"
+  "onError",
 ];
 const VALID_HOOK_NAMES = new Set<HookName>([
   "onMilestone",
@@ -85,7 +87,7 @@ const VALID_HOOK_NAMES = new Set<HookName>([
   "onInvalidPlan",
   "onFindings",
   "onComplete",
-  "onError"
+  "onError",
 ]);
 
 function isHookName(value: string): value is HookName {
@@ -120,17 +122,18 @@ export async function maybeCreateFirstRunGlobalConfig(homedir: string = os.homed
   const projectJsConfigPath = path.join(process.cwd(), "orca.config.js");
   const projectTsConfigPath = path.join(process.cwd(), "orca.config.ts");
 
-  const hasAnyConfig = (await pathExists(globalJsConfigPath))
-    || (await pathExists(globalTsConfigPath))
-    || (await pathExists(projectJsConfigPath))
-    || (await pathExists(projectTsConfigPath));
+  const hasAnyConfig =
+    (await pathExists(globalJsConfigPath)) ||
+    (await pathExists(globalTsConfigPath)) ||
+    (await pathExists(projectJsConfigPath)) ||
+    (await pathExists(projectTsConfigPath));
 
   if (hasAnyConfig) {
     return;
   }
 
   await mkdir(path.dirname(globalJsConfigPath), { recursive: true });
-  await writeFile(globalJsConfigPath, "export default {\n  executor: \"codex\"\n};\n", "utf8");
+  await writeFile(globalJsConfigPath, 'export default {\n  executor: "codex"\n};\n', "utf8");
   console.log("✓ Created ~/.orca/config.js (first run defaults)");
 }
 
@@ -155,7 +158,7 @@ function buildCliCommandHooks(options: RunCommandOptions): Partial<Record<HookNa
     ...(options.onInvalidPlan ? { onInvalidPlan: options.onInvalidPlan } : {}),
     ...(options.onFindings ? { onFindings: options.onFindings } : {}),
     ...(options.onComplete ? { onComplete: options.onComplete } : {}),
-    ...(options.onError ? { onError: options.onError } : {})
+    ...(options.onError ? { onError: options.onError } : {}),
   };
 }
 
@@ -171,7 +174,7 @@ function isCodexAvailableForRun(env: NodeJS.ProcessEnv = process.env): boolean {
 
 function applyExecutorOverrideForRun(
   config: OrcaConfig | undefined,
-  options: Pick<RunCommandOptions, "codexOnly" | "codexEffort">
+  options: Pick<RunCommandOptions, "codexOnly" | "codexEffort">,
 ): OrcaConfig | undefined {
   const nextConfig: OrcaConfig = { ...config };
 
@@ -206,14 +209,18 @@ function getExecutionReviewConfig(config?: OrcaConfig): {
     maxCycles: executionConfig?.maxCycles ?? 2,
     onFindings: executionConfig?.onFindings ?? "auto_fix",
     validatorAuto: skipValidators ? false : (executionConfig?.validator?.auto ?? true),
-    ...(executionConfig?.validator?.commands !== undefined ? { validatorCommands: executionConfig.validator.commands } : {}),
-    ...(executionConfig?.prompt !== undefined ? { prompt: executionConfig.prompt } : {})
+    ...(executionConfig?.validator?.commands !== undefined
+      ? { validatorCommands: executionConfig.validator.commands }
+      : {}),
+    ...(executionConfig?.prompt !== undefined ? { prompt: executionConfig.prompt } : {}),
   };
 }
 
 async function detectValidatorCommands(): Promise<string[]> {
   try {
-    const packageJson = JSON.parse(await readFile(path.join(process.cwd(), "package.json"), "utf8")) as { scripts?: Record<string, string> };
+    const packageJson = JSON.parse(await readFile(path.join(process.cwd(), "package.json"), "utf8")) as {
+      scripts?: Record<string, string>;
+    };
     const scripts = packageJson.scripts ?? {};
     if (typeof scripts.validate === "string") {
       return ["npm run validate"];
@@ -237,7 +244,7 @@ async function runValidatorCommands(commands: string[]): Promise<ValidationResul
       results.push({
         command,
         exitCode: typeof failed.code === "number" ? failed.code : 1,
-        output: `${failed.stdout ?? ""}${failed.stderr ?? ""}`.trim()
+        output: `${failed.stdout ?? ""}${failed.stderr ?? ""}`.trim(),
       });
     }
   }
@@ -245,7 +252,11 @@ async function runValidatorCommands(commands: string[]): Promise<ValidationResul
   return results;
 }
 
-function buildPostExecutionReviewPrompt(cycleIndex: number, validationResults: ValidationResult[], extraPrompt?: string): string {
+function buildPostExecutionReviewPrompt(
+  cycleIndex: number,
+  validationResults: ValidationResult[],
+  extraPrompt?: string,
+): string {
   const failedValidations = validationResults.filter((result) => result.exitCode !== 0);
   return [
     "You are Orca's post-execution reviewer.",
@@ -263,7 +274,7 @@ function buildPostExecutionReviewPrompt(cycleIndex: number, validationResults: V
     `Cycle: ${cycleIndex}`,
     "Validation output:",
     JSON.stringify(validationResults, null, 2),
-    ...(extraPrompt ? ["Additional reviewer instructions:", extraPrompt] : [])
+    ...(extraPrompt ? ["Additional reviewer instructions:", extraPrompt] : []),
   ].join("\n\n");
 }
 
@@ -272,9 +283,9 @@ function extractJsonCandidate(raw: string): string {
   return (match?.[1] ?? raw).trim();
 }
 
-function parseStructuredExecutionReview(raw: string):
-  | { ok: true; value: StructuredReviewResult }
-  | { ok: false; error: string } {
+function parseStructuredExecutionReview(
+  raw: string,
+): { ok: true; value: StructuredReviewResult } | { ok: false; error: string } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(extractJsonCandidate(raw));
@@ -298,7 +309,7 @@ function buildExecutionReviewRepairPrompt(
   cycleIndex: number,
   previousResponse: string,
   parseError: string,
-  extraPrompt?: string
+  extraPrompt?: string,
 ): string {
   return [
     "Your previous post-execution review response was invalid.",
@@ -310,7 +321,7 @@ function buildExecutionReviewRepairPrompt(
     "Do not include any additional keys.",
     "Previous invalid response:",
     previousResponse,
-    ...(extraPrompt ? ["Additional reviewer instructions:", extraPrompt] : [])
+    ...(extraPrompt ? ["Additional reviewer instructions:", extraPrompt] : []),
   ].join("\n\n");
 }
 
@@ -318,7 +329,7 @@ async function requestStructuredExecutionReview(
   runPrompt: (prompt: string) => Promise<string>,
   cycleIndex: number,
   basePrompt: string,
-  extraPrompt?: string
+  extraPrompt?: string,
 ): Promise<ExecutionReviewResult> {
   const maxAttempts = 2;
   let prompt = basePrompt;
@@ -334,12 +345,14 @@ async function requestStructuredExecutionReview(
         findings: parsed.value.findings,
         summary: parsed.value.summary,
         fixed: parsed.value.fixed,
-        rawResponse: raw
+        rawResponse: raw,
       };
     }
 
     lastError = parsed.error;
-    console.error(`[orca] Post-execution reviewer response failed validation (attempt ${attempt}/${maxAttempts}): ${parsed.error}`);
+    console.error(
+      `[orca] Post-execution reviewer response failed validation (attempt ${attempt}/${maxAttempts}): ${parsed.error}`,
+    );
     if (attempt < maxAttempts) {
       prompt = buildExecutionReviewRepairPrompt(cycleIndex, raw, parsed.error, extraPrompt);
     }
@@ -349,7 +362,7 @@ async function requestStructuredExecutionReview(
     findings: [`review-response-parse-error: ${lastError}`],
     summary: `Post-execution reviewer returned invalid JSON after ${maxAttempts} attempts (${lastError})`,
     fixed: false,
-    rawResponse: lastRaw
+    rawResponse: lastRaw,
   };
 }
 
@@ -392,7 +405,9 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
     const effectiveConfig = applyExecutorOverrideForRun(orcaConfig, options);
 
     if (!isCodexAvailableForRun()) {
-      console.error("Codex is unavailable. Set OPENAI_API_KEY (or ORCA_OPENAI_API_KEY) or configure ~/.codex/auth.json.");
+      console.error(
+        "Codex is unavailable. Set OPENAI_API_KEY (or ORCA_OPENAI_API_KEY) or configure ~/.codex/auth.json.",
+      );
       process.exitCode = 1;
       return;
     }
@@ -407,8 +422,8 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
     const dispatcher = new HookDispatcher({
       commandHooks: {
         ...orcaConfig?.hookCommands,
-        ...cliCommandHooks
-      }
+        ...cliCommandHooks,
+      },
     });
 
     const openclawAvailability = detectOpenclawAvailability();
@@ -437,7 +452,7 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
 
         if (typeof handler !== "function") {
           console.error(
-            `Warning: ignoring invalid hook handler for ${hookNameRaw}; expected function, got ${typeof handler}`
+            `Warning: ignoring invalid hook handler for ${hookNameRaw}; expected function, got ${typeof handler}`,
           );
           continue;
         }
@@ -462,8 +477,8 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
           timestamp: new Date().toISOString(),
           error: error.message,
           metadata: {
-            stage: error.stage
-          }
+            stage: error.stage,
+          },
         });
       }
 
@@ -472,7 +487,7 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
 
     await store.updateRun(runId, {
       mode: "run",
-      overallStatus: "running"
+      overallStatus: "running",
     });
 
     {
@@ -531,9 +546,8 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
 
         if (reviewConfig.enabled && (runAfterExecution?.tasks.length ?? 0) > 0) {
           const configured = reviewConfig.validatorCommands?.filter((item) => item.trim().length > 0) ?? [];
-          const validatorCommands = configured.length > 0
-            ? configured
-            : (reviewConfig.validatorAuto ? await detectValidatorCommands() : []);
+          const validatorCommands =
+            configured.length > 0 ? configured : reviewConfig.validatorAuto ? await detectValidatorCommands() : [];
 
           for (let cycleIndex = 1; cycleIndex <= reviewConfig.maxCycles; cycleIndex += 1) {
             const validationResults = await runValidatorCommands(validatorCommands);
@@ -542,16 +556,17 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
               (prompt) => codexSession.runPrompt(prompt, "review"),
               cycleIndex,
               prompt,
-              reviewConfig.prompt
+              reviewConfig.prompt,
             );
             const failedValidations = validationResults.filter((result) => result.exitCode !== 0);
             const reviewResult =
               failedValidations.length > 0 && initialReviewResult.findings.length === 0
                 ? {
                     ...initialReviewResult,
-                    summary: initialReviewResult.summary.trim().length > 0
-                      ? `${initialReviewResult.summary} Validator failures still need attention.`
-                      : "Validator failures still need attention.",
+                    summary:
+                      initialReviewResult.summary.trim().length > 0
+                        ? `${initialReviewResult.summary} Validator failures still need attention.`
+                        : "Validator failures still need attention.",
                     findings: failedValidations.map(
                       (result) => `Validator failed: ${result.command} (exit ${result.exitCode})`,
                     ),
@@ -572,8 +587,8 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
               metadata: {
                 findingsCount: reviewResult.findings.length,
                 findingsSummary: reviewResult.summary,
-                cycleIndex
-              }
+                cycleIndex,
+              },
             });
 
             if (reviewConfig.onFindings === "report_only") {
@@ -624,7 +639,7 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
             hook: "onComplete",
             message: "run-completed",
             timestamp: completedAt,
-            metadata: { overallStatus: "completed" }
+            metadata: { overallStatus: "completed" },
           });
           await writeSessionSummary(store, runId, effectiveConfig?.sessionLogs);
         }
@@ -636,10 +651,7 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
           overallStatus: "failed",
           ...(currentRun
             ? {
-                errors: [
-                  ...currentRun.errors,
-                  { at: failedAt, message },
-                ],
+                errors: [...currentRun.errors, { at: failedAt, message }],
               }
             : {}),
         });
@@ -657,11 +669,11 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
 
     const finalStatus = computeFinalStatus(
       run.overallStatus,
-      run.tasks.length > 0 && run.tasks.every((task) => task.status === "done")
+      run.tasks.length > 0 && run.tasks.every((task) => task.status === "done"),
     );
 
     await store.updateRun(runId, {
-      overallStatus: finalStatus
+      overallStatus: finalStatus,
     });
 
     const refreshed = await store.getRun(runId);
@@ -706,7 +718,7 @@ export function registerRunCommand(program: Command): void {
       try {
         const normalizedOptions: RunCommandOptions = {
           ...commandOptions,
-          ...(goal !== undefined ? { goal } : {})
+          ...(goal !== undefined ? { goal } : {}),
         };
 
         const inlineTask = normalizedOptions.task ?? normalizedOptions.prompt ?? normalizedOptions.goal;

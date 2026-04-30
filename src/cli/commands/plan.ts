@@ -45,9 +45,7 @@ export async function planCommand(options: { spec: string; config?: string }): P
 }
 
 export async function planCommandHandler(options: PlanCommandOptions): Promise<void> {
-  const commandOptions = options.config
-    ? { spec: options.spec, config: options.config }
-    : { spec: options.spec };
+  const commandOptions = options.config ? { spec: options.spec, config: options.config } : { spec: options.spec };
   await planCommand(commandOptions);
 }
 

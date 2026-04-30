@@ -128,6 +128,51 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish
 
+      - name: Generate docs reference
+        if: steps.npm_check.outputs.exists != 'true'
+        run: node scripts/generate-docs-reference.mjs
+
+      - name: Check docs sync token
+        if: steps.npm_check.outputs.exists != 'true'
+        id: docs_token
+        env:
+          DOCS_TOKEN: ${{ secrets.ORCA_WEB_DOCS_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [[ -n "$DOCS_TOKEN" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "::warning::Skipping docs sync because ORCA_WEB_DOCS_TOKEN is not configured."
+          echo "available=false" >> "$GITHUB_OUTPUT"
+
+      - name: Check out docs repository
+        if: steps.npm_check.outputs.exists != 'true' && steps.docs_token.outputs.available == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ratley/orca-web
+          path: orca-web
+          token: ${{ secrets.ORCA_WEB_DOCS_TOKEN }}
+
+      - name: Sync docs reference
+        if: steps.npm_check.outputs.exists != 'true' && steps.docs_token.outputs.available == 'true'
+        run: cp docs/orca-reference.md orca-web/ORCA_REFERENCE.md
+
+      - name: Create docs update PR
+        if: steps.npm_check.outputs.exists != 'true' && steps.docs_token.outputs.available == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ secrets.ORCA_WEB_DOCS_TOKEN }}
+          path: orca-web
+          branch: "automation/orca-reference-${{ steps.release.outputs.tag }}"
+          delete-branch: true
+          commit-message: "docs: update Orca reference for ${{ steps.release.outputs.tag }}"
+          title: "docs: update Orca reference for ${{ steps.release.outputs.tag }}"
+          body: |
+            Updates the generated Orca reference from happycatlabs/orca@${{ steps.release.outputs.release_sha }}.
+
       - name: Publish skipped
         if: steps.npm_check.outputs.exists == 'true'
         run: 'echo "No-op: version already published to npm."'

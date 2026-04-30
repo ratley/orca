@@ -42,7 +42,7 @@ function parseCodexEffortOption(value: string): CodexEffort {
 
 function applyExecutorOverrideForResume(
   config: OrcaConfig | undefined,
-  options: Pick<ResumeCommandOptions, "codexOnly" | "codexEffort">
+  options: Pick<ResumeCommandOptions, "codexOnly" | "codexEffort">,
 ): OrcaConfig | undefined {
   const nextConfig: OrcaConfig = { ...config };
 
@@ -103,7 +103,7 @@ export async function resumeCommandHandler(options: ResumeCommandOptions): Promi
       return {
         ...task,
         status: "pending" as const,
-        lastError: "Recovered from interrupted in_progress task"
+        lastError: "Recovered from interrupted in_progress task",
       };
     }
 
@@ -113,13 +113,13 @@ export async function resumeCommandHandler(options: ResumeCommandOptions): Promi
   await store.updateRun(run.runId, {
     mode: "run",
     overallStatus: "running",
-    tasks: resumedTasks
+    tasks: resumedTasks,
   });
 
   await runTaskRunner({
     runId: run.runId,
     store,
-    ...(effectiveConfig ? { config: effectiveConfig } : {})
+    ...(effectiveConfig ? { config: effectiveConfig } : {}),
   });
 
   const refreshed = await store.getRun(run.runId);

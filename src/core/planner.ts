@@ -9,7 +9,14 @@ import {
   type SessionInteractionContext,
 } from "../agents/codex/session.js";
 import { planSpec as planSpecWithClaude } from "../agents/claude/session.js";
-import type { HookEvent, OrcaConfig, PlannerAgent, PlannerRoutingDecision, Task, TaskGraphReviewResult } from "../types/index.js";
+import type {
+  HookEvent,
+  OrcaConfig,
+  PlannerAgent,
+  PlannerRoutingDecision,
+  Task,
+  TaskGraphReviewResult,
+} from "../types/index.js";
 import { logger } from "../utils/logger.js";
 import { loadSkills, type LoadedSkill } from "../utils/skill-loader.js";
 import { RunStore } from "../state/store.js";
@@ -103,13 +110,7 @@ async function selectPlanningAgent(
 
 function formatSkillsSection(skills: LoadedSkill[]): string {
   const formattedSkills = skills.map((skill) =>
-    [
-      `### ${skill.name}`,
-      "",
-      `Description: ${skill.description}`,
-      "",
-      skill.body
-    ].join("\n")
+    [`### ${skill.name}`, "", `Description: ${skill.description}`, "", skill.body].join("\n"),
   );
 
   return ["## Available Skills", "", ...formattedSkills].join("\n");
@@ -165,7 +166,7 @@ async function loadProjectInstructions(specPath: string): Promise<ProjectInstruc
       fileName,
       filePath,
       content,
-      truncated: rawContent.length > PROJECT_INSTRUCTION_CHAR_CAP
+      truncated: rawContent.length > PROJECT_INSTRUCTION_CHAR_CAP,
     });
   }
 
@@ -205,10 +206,13 @@ function buildSystemContext(skills: LoadedSkill[], instructions: ProjectInstruct
 }
 
 function getPlanReviewConfig(config: OrcaConfig | undefined): { enabled: boolean; onInvalid: "fail" | "warn_skip" } {
-  const review = (config?.review ?? {}) as OrcaConfig["review"] & { enabled?: boolean; onInvalid?: "fail" | "warn_skip" };
+  const review = (config?.review ?? {}) as OrcaConfig["review"] & {
+    enabled?: boolean;
+    onInvalid?: "fail" | "warn_skip";
+  };
   return {
     enabled: review.plan?.enabled ?? review.enabled ?? true,
-    onInvalid: review.plan?.onInvalid ?? review.onInvalid ?? "fail"
+    onInvalid: review.plan?.onInvalid ?? review.onInvalid ?? "fail",
   };
 }
 
@@ -231,11 +235,16 @@ async function runTaskGraphReview(
     review = await reviewFn(tasks, systemContext, config, interactionContext);
   } catch (error) {
     if (planReviewConfig.onInvalid === "warn_skip") {
-      logger.warn(`Review output invalid; skipping review changes (${error instanceof Error ? error.message : String(error)})`);
+      logger.warn(
+        `Review output invalid; skipping review changes (${error instanceof Error ? error.message : String(error)})`,
+      );
       return { finalTasks: tasks, review: null };
     }
 
-    throw new InvalidPlanError("review", `Review output invalid. ${error instanceof Error ? error.message : String(error)}`);
+    throw new InvalidPlanError(
+      "review",
+      `Review output invalid. ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 
   if (review.changes.length === 0) {
@@ -302,12 +311,17 @@ async function runFullPlanning(
     finalTasks = reviewed.finalTasks;
   } catch (error) {
     if (planReviewConfig.onInvalid === "warn_skip") {
-      logger.warn(`Review changes rejected; proceeding with planner graph (${error instanceof Error ? error.message : String(error)})`);
+      logger.warn(
+        `Review changes rejected; proceeding with planner graph (${error instanceof Error ? error.message : String(error)})`,
+      );
       finalTasks = result.tasks;
     } else if (error instanceof InvalidPlanError) {
       throw error;
     } else {
-      throw new InvalidPlanError("review", `Review stage failed. ${error instanceof Error ? error.message : String(error)}`);
+      throw new InvalidPlanError(
+        "review",
+        `Review stage failed. ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
@@ -351,7 +365,7 @@ export async function runPlanner(
   await store.updateRun(runId, {
     overallStatus: "planning",
     tasks: finalTasks,
-    milestones: ["plan-complete"]
+    milestones: ["plan-complete"],
   });
 
   logger.success(`Plan complete: ${finalTasks.length} tasks`);

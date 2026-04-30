@@ -110,7 +110,8 @@ describe("run command executor flags", () => {
   });
 
   test("dispatches onInvalidPlan hook when planner rejects invalid graph", async () => {
-    const { runModule, runPlannerMock, hookDispatchMock, runTaskRunnerMock, InvalidPlanErrorCtor } = await loadRunModule();
+    const { runModule, runPlannerMock, hookDispatchMock, runTaskRunnerMock, InvalidPlanErrorCtor } =
+      await loadRunModule();
 
     runPlannerMock.mockImplementationOnce(async () => {
       throw new InvalidPlanErrorCtor("review", "Review output invalid. cycle");
@@ -119,7 +120,7 @@ describe("run command executor flags", () => {
     await parseRun(runModule, ["run", "--task", "x"]);
     expect(process.exitCode).toBe(1);
     const invalidPlanEvent = hookDispatchMock.mock.calls.find(
-      (call) => (call[0] as { hook?: string })?.hook === "onInvalidPlan"
+      (call) => (call[0] as { hook?: string })?.hook === "onInvalidPlan",
     )?.[0] as { hook: string; message: string; error?: string; metadata?: { stage?: string } } | undefined;
 
     expect(invalidPlanEvent?.message).toBe("invalid-plan:review");
@@ -134,9 +135,7 @@ describe("run command executor flags", () => {
     await parseRun(runModule, ["run", "--task", "x", "--codex-effort", "medium"]);
 
     const plannerConfig = runPlannerMock.mock.calls[0]?.[3] as { codex?: { effort?: string } } | undefined;
-    const runnerArg = runTaskRunnerMock.mock.calls[0]?.[0] as
-      | { config?: { codex?: { effort?: string } } }
-      | undefined;
+    const runnerArg = runTaskRunnerMock.mock.calls[0]?.[0] as { config?: { codex?: { effort?: string } } } | undefined;
     expect(plannerConfig?.codex?.effort).toBe("medium");
     expect(runnerArg?.config?.codex?.effort).toBe("medium");
   });
@@ -157,9 +156,7 @@ describe("run command executor flags", () => {
 
   test("rejects invalid boolean value for --codex-only", async () => {
     const { runModule } = await loadRunModule();
-    await expect(
-      parseRun(runModule, ["run", "--task", "x", "--codex-only=false"])
-    ).rejects.toThrow();
+    await expect(parseRun(runModule, ["run", "--task", "x", "--codex-only=false"])).rejects.toThrow();
   });
 
   test("legacy review.enabled=false disables post-execution review", async () => {
@@ -171,7 +168,7 @@ describe("run command executor flags", () => {
       executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
       runPrompt: runPromptMock,
       reviewChanges: reviewChangesMock,
-      disconnect: async () => {}
+      disconnect: async () => {},
     }));
 
     const configPath = path.join(getTempDir(), "orca.config.js");
@@ -191,7 +188,7 @@ describe("run command executor flags", () => {
       executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
       runPrompt: async () => '{"summary":"clean","findings":[],"fixed":false}',
       reviewChanges: async () => "review",
-      disconnect: async () => {}
+      disconnect: async () => {},
     }));
 
     await parseRun(runModule, ["run", "--task", "x"]);
@@ -262,7 +259,7 @@ describe("run command executor flags", () => {
       executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
       runPrompt: async () => '{"summary":"needs fixes","findings":["lint"],"fixed":false}',
       reviewChanges: async () => "review",
-      disconnect: async () => {}
+      disconnect: async () => {},
     }));
 
     const configPath = path.join(getTempDir(), "orca.config.js");
@@ -271,7 +268,7 @@ describe("run command executor flags", () => {
     await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
 
     const findingsEvent = hookDispatchMock.mock.calls.find(
-      (call) => (call[0] as { hook?: string })?.hook === "onFindings"
+      (call) => (call[0] as { hook?: string })?.hook === "onFindings",
     )?.[0] as { metadata?: { findingsCount?: number; cycleIndex?: number } } | undefined;
 
     expect(findingsEvent?.metadata?.findingsCount).toBe(1);
@@ -286,7 +283,7 @@ describe("run command executor flags", () => {
       executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
       runPrompt: async () => '{"summary":"clean","findings":[],"fixed":false}',
       reviewChanges: reviewChangesMock,
-      disconnect: async () => {}
+      disconnect: async () => {},
     }));
 
     const configPath = path.join(getTempDir(), "orca.config.js");
@@ -304,7 +301,7 @@ describe("run command executor flags", () => {
       executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
       runPrompt: async () => '{"summary":"clean","findings":[],"fixed":false}',
       reviewChanges: async () => "review",
-      disconnect: async () => {}
+      disconnect: async () => {},
     }));
 
     const configPath = path.join(getTempDir(), "orca.config.js");
@@ -317,7 +314,7 @@ describe("run command executor flags", () => {
     await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
 
     const findingsEvent = hookDispatchMock.mock.calls.find(
-      (call) => (call[0] as { hook?: string })?.hook === "onFindings"
+      (call) => (call[0] as { hook?: string })?.hook === "onFindings",
     )?.[0] as { message?: string; metadata?: { findingsCount?: number } } | undefined;
 
     expect(findingsEvent?.metadata?.findingsCount).toBe(1);
@@ -333,11 +330,15 @@ describe("run command executor flags", () => {
       executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
       runPrompt: runPromptMock,
       reviewChanges: async () => "review",
-      disconnect: async () => {}
+      disconnect: async () => {},
     }));
 
     const configPath = path.join(getTempDir(), "orca.config.js");
-    await writeFile(configPath, "export default { review: { execution: { onFindings: 'auto_fix', maxCycles: 4, validator: { auto: false } } } };\n", "utf8");
+    await writeFile(
+      configPath,
+      "export default { review: { execution: { onFindings: 'auto_fix', maxCycles: 4, validator: { auto: false } } } };\n",
+      "utf8",
+    );
 
     await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
     expect(runPromptMock).toHaveBeenCalledTimes(2);
@@ -351,11 +352,15 @@ describe("run command executor flags", () => {
       executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
       runPrompt: runPromptMock,
       reviewChanges: async () => "review",
-      disconnect: async () => {}
+      disconnect: async () => {},
     }));
 
     const configPath = path.join(getTempDir(), "orca.config.js");
-    await writeFile(configPath, "export default { review: { execution: { onFindings: 'auto_fix', maxCycles: 2, validator: { auto: false } } } };\n", "utf8");
+    await writeFile(
+      configPath,
+      "export default { review: { execution: { onFindings: 'auto_fix', maxCycles: 2, validator: { auto: false } } } };\n",
+      "utf8",
+    );
 
     await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
     expect(runPromptMock).toHaveBeenCalledTimes(2);
@@ -369,11 +374,15 @@ describe("run command executor flags", () => {
       executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
       runPrompt: runPromptMock,
       reviewChanges: async () => "review",
-      disconnect: async () => {}
+      disconnect: async () => {},
     }));
 
     const configPath = path.join(getTempDir(), "orca.config.js");
-    await writeFile(configPath, "export default { review: { execution: { onFindings: 'fail', maxCycles: 3, validator: { auto: false } } } };\n", "utf8");
+    await writeFile(
+      configPath,
+      "export default { review: { execution: { onFindings: 'fail', maxCycles: 3, validator: { auto: false } } } };\n",
+      "utf8",
+    );
 
     await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
     expect(runPromptMock).toHaveBeenCalledTimes(1);
@@ -391,16 +400,19 @@ describe("run command executor flags", () => {
       executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
       runPrompt: runPromptMock,
       reviewChanges: async () => "review",
-      disconnect: async () => {}
+      disconnect: async () => {},
     }));
 
     const configPath = path.join(getTempDir(), "orca.config.js");
-    await writeFile(configPath, "export default { review: { execution: { onFindings: 'report_only', maxCycles: 3, validator: { auto: false } } } };\n", "utf8");
+    await writeFile(
+      configPath,
+      "export default { review: { execution: { onFindings: 'report_only', maxCycles: 3, validator: { auto: false } } } };\n",
+      "utf8",
+    );
 
     await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
     expect(runPromptMock).toHaveBeenCalledTimes(1);
   });
 });
 
-describe("resume command executor flags", () => {
-});
+describe("resume command executor flags", () => {});

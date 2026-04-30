@@ -53,6 +53,20 @@ function runCodexIntegrationSnippet(snippet: string): { exitCode: number; stdout
   };
 }
 
+function parseLastJsonLine<T>(stdout: string): T {
+  const jsonLine = stdout
+    .trim()
+    .split("\n")
+    .reverse()
+    .find((line) => line.trim().startsWith("{"));
+
+  if (!jsonLine) {
+    throw new Error(`No JSON object found in stdout:\n${stdout}`);
+  }
+
+  return JSON.parse(jsonLine) as T;
+}
+
 if (!codexPath) {
   test("codex adapter integration skipped (codex binary not found)", () => {
     expect(codexPath).toBeNull();
@@ -80,11 +94,11 @@ if (!codexPath) {
       expect(exitCode).toBe(0);
       expect(stderr).toBe("");
 
-      const parsed = JSON.parse(stdout.trim()) as {
+      const parsed = parseLastJsonLine<{
         threadId: string;
         outcome: string;
         rawLength: number;
-      };
+      }>(stdout);
       expect(parsed.threadId.length).toBeGreaterThan(0);
       expect(parsed.outcome === "done" || parsed.outcome === "failed").toBe(true);
       expect(parsed.rawLength).toBeGreaterThan(0);
@@ -110,10 +124,10 @@ if (!codexPath) {
       expect(exitCode).toBe(0);
       expect(stderr).toBe("");
 
-      const parsed = JSON.parse(stdout.trim()) as {
+      const parsed = parseLastJsonLine<{
         issues: unknown[];
         ok: boolean;
-      };
+      }>(stdout);
       expect(Array.isArray(parsed.issues)).toBe(true);
       expect(typeof parsed.ok).toBe("boolean");
     }, 300_000);

@@ -19,11 +19,15 @@ describe("post-exec reviewer JSON hardening integration", () => {
       executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
       runPrompt: runPromptMock,
       reviewChanges: async () => "review",
-      disconnect: async () => {}
+      disconnect: async () => {},
     }));
 
     const configPath = path.join(getTempDir(), "orca.config.js");
-    await writeFile(configPath, "export default { review: { execution: { onFindings: 'report_only', validator: { auto: false } } } };\n", "utf8");
+    await writeFile(
+      configPath,
+      "export default { review: { execution: { onFindings: 'report_only', validator: { auto: false } } } };\n",
+      "utf8",
+    );
 
     await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
 
@@ -31,7 +35,7 @@ describe("post-exec reviewer JSON hardening integration", () => {
     expect(runPromptMock).toHaveBeenNthCalledWith(
       2,
       expect.stringContaining("previous post-execution review response was invalid"),
-      "review"
+      "review",
     );
   });
 
@@ -46,20 +50,20 @@ describe("post-exec reviewer JSON hardening integration", () => {
       executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
       runPrompt: runPromptMock,
       reviewChanges: async () => "review",
-      disconnect: async () => {}
+      disconnect: async () => {},
     }));
 
     const configPath = path.join(getTempDir(), "orca.config.js");
-    await writeFile(configPath, "export default { review: { execution: { onFindings: 'report_only', validator: { auto: false } } } };\n", "utf8");
+    await writeFile(
+      configPath,
+      "export default { review: { execution: { onFindings: 'report_only', validator: { auto: false } } } };\n",
+      "utf8",
+    );
 
     await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
 
     expect(runPromptMock).toHaveBeenCalledTimes(2);
-    expect(runPromptMock).toHaveBeenNthCalledWith(
-      2,
-      expect.stringContaining("Schema validation failed"),
-      "review"
-    );
+    expect(runPromptMock).toHaveBeenNthCalledWith(2, expect.stringContaining("Schema validation failed"), "review");
   });
 
   test("invalid reviewer JSON after bounded retries is treated as findings and dispatches onFindings", async () => {
@@ -70,16 +74,20 @@ describe("post-exec reviewer JSON hardening integration", () => {
       executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
       runPrompt: runPromptMock,
       reviewChanges: async () => "review",
-      disconnect: async () => {}
+      disconnect: async () => {},
     }));
 
     const configPath = path.join(getTempDir(), "orca.config.js");
-    await writeFile(configPath, "export default { review: { execution: { onFindings: 'report_only', validator: { auto: false } } } };\n", "utf8");
+    await writeFile(
+      configPath,
+      "export default { review: { execution: { onFindings: 'report_only', validator: { auto: false } } } };\n",
+      "utf8",
+    );
 
     await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
 
     const findingsEvent = hookDispatchMock.mock.calls.find(
-      (call) => (call[0] as { hook?: string })?.hook === "onFindings"
+      (call) => (call[0] as { hook?: string })?.hook === "onFindings",
     )?.[0] as { message?: string; metadata?: { findingsCount?: number } } | undefined;
 
     expect(runPromptMock).toHaveBeenCalledTimes(2);

@@ -12,7 +12,7 @@ function makeEvent(overrides: Partial<HookEvent> = {}): HookEvent {
     hook: "onMilestone",
     message: "hook-message",
     timestamp: new Date().toISOString(),
-    ...overrides
+    ...overrides,
   } as HookEvent;
 }
 
@@ -62,8 +62,8 @@ describe("HookDispatcher", () => {
     const outputPath = path.join(tempDir, "hook-output.txt");
     const dispatcher = new HookDispatcher({
       commandHooks: {
-        onFindings: `node -e 'const fs=require("node:fs"); let input=""; process.stdin.on("data",(d)=>input+=d); process.stdin.on("end",()=>{ const p=JSON.parse(input||"{}"); fs.writeFileSync("${outputPath}", [p.hook,p.message,p.runId,p.taskId,p.metadata?.stage,p.metadata?.findingsCount,p.metadata?.findingsSummary,p.metadata?.cycleIndex,String(process.env.ORCA_HOOK),String(process.env.ORCA_MSG),String(process.env.ORCA_RUN_ID),String(process.env.ORCA_TASK_ID),String(process.env.ORCA_TASK_NAME),String(process.env.ORCA_ERROR)].join("|")); });'`
-      }
+        onFindings: `node -e 'const fs=require("node:fs"); let input=""; process.stdin.on("data",(d)=>input+=d); process.stdin.on("end",()=>{ const p=JSON.parse(input||"{}"); fs.writeFileSync("${outputPath}", [p.hook,p.message,p.runId,p.taskId,p.metadata?.stage,p.metadata?.findingsCount,p.metadata?.findingsSummary,p.metadata?.cycleIndex,String(process.env.ORCA_HOOK),String(process.env.ORCA_MSG),String(process.env.ORCA_RUN_ID),String(process.env.ORCA_TASK_ID),String(process.env.ORCA_TASK_NAME),String(process.env.ORCA_ERROR)].join("|")); });'`,
+      },
     });
 
     await dispatcher.dispatch(
@@ -71,12 +71,14 @@ describe("HookDispatcher", () => {
         hook: "onFindings",
         message: "hello $(whoami) && keep-literal",
         taskId: "task-9",
-        metadata: { stage: "review", findingsCount: 2, findingsSummary: "fix lint", cycleIndex: 1 }
-      })
+        metadata: { stage: "review", findingsCount: 2, findingsSummary: "fix lint", cycleIndex: 1 },
+      }),
     );
 
     const output = await fs.readFile(outputPath, "utf8");
-    expect(output).toBe("onFindings|hello $(whoami) && keep-literal|run-1000-abcd|task-9|review|2|fix lint|1|undefined|undefined|undefined|undefined|undefined|undefined");
+    expect(output).toBe(
+      "onFindings|hello $(whoami) && keep-literal|run-1000-abcd|task-9|review|2|fix lint|1|undefined|undefined|undefined|undefined|undefined|undefined",
+    );
   });
 
   test("handler error triggers onError", async () => {
@@ -138,14 +140,14 @@ describe("HookDispatcher", () => {
     const dispatcher = new HookDispatcher({
       commandHooks: {
         onMilestone: "exit 1",
-        onError: `node -e 'const fs=require("node:fs"); let input=""; process.stdin.on("data",(d)=>input+=d); process.stdin.on("end",()=>{ const p=JSON.parse(input||"{}"); fs.writeFileSync("${outputPath}", [p.message,p.runId,p.taskId].join("|")); });'`
-      }
+        onError: `node -e 'const fs=require("node:fs"); let input=""; process.stdin.on("data",(d)=>input+=d); process.stdin.on("end",()=>{ const p=JSON.parse(input||"{}"); fs.writeFileSync("${outputPath}", [p.message,p.runId,p.taskId].join("|")); });'`,
+      },
     });
 
     await dispatcher.dispatch(
       makeEvent({
-        taskId: "task-7"
-      })
+        taskId: "task-7",
+      }),
     );
 
     const output = await fs.readFile(outputPath, "utf8");
@@ -155,16 +157,16 @@ describe("HookDispatcher", () => {
   test("early command exit with large payload does not crash dispatch", async () => {
     const dispatcher = new HookDispatcher({
       commandHooks: {
-        onMilestone: "node -e 'process.exit(0)'"
-      }
+        onMilestone: "node -e 'process.exit(0)'",
+      },
     });
 
     await expect(
       dispatcher.dispatch(
         makeEvent({
-          message: "x".repeat(2 * 1024 * 1024)
-        })
-      )
+          message: "x".repeat(2 * 1024 * 1024),
+        }),
+      ),
     ).resolves.toBeUndefined();
   });
 });

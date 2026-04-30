@@ -1,13 +1,7 @@
 import { spawn } from "node:child_process";
 
 import type { HookDispatchOptions } from "./types.js";
-import type {
-  HookEvent,
-  HookEventMap,
-  HookHandler,
-  HookHandlerContext,
-  HookName
-} from "../types/index.js";
+import type { HookEvent, HookEventMap, HookHandler, HookHandlerContext, HookName } from "../types/index.js";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
@@ -18,7 +12,7 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
       promise,
       new Promise<T>((_, reject) => {
         timeout = setTimeout(() => reject(new Error(`Hook timeout after ${timeoutMs}ms`)), timeoutMs);
-      })
+      }),
     ]);
   } finally {
     if (timeout) {
@@ -48,7 +42,7 @@ export class HookDispatcher {
     const context: HookHandlerContext = {
       cwd: process.cwd(),
       pid: process.pid,
-      invokedAt: new Date().toISOString()
+      invokedAt: new Date().toISOString(),
     };
 
     for (const handler of handlers) {
@@ -74,7 +68,7 @@ export class HookDispatcher {
       const child = spawn(command, {
         shell: true,
         env: process.env,
-        stdio: ["pipe", "ignore", "pipe"]
+        stdio: ["pipe", "ignore", "pipe"],
       });
 
       let settled = false;
@@ -129,8 +123,8 @@ export class HookDispatcher {
         const details = stderr.trim();
         reject(
           new Error(
-            `Hook command failed (${signal ? `signal=${signal}` : `exit=${code ?? "unknown"}`})${details ? `: ${details}` : ""}`
-          )
+            `Hook command failed (${signal ? `signal=${signal}` : `exit=${code ?? "unknown"}`})${details ? `: ${details}` : ""}`,
+          ),
         );
       });
 
@@ -160,12 +154,12 @@ export class HookDispatcher {
       error: error instanceof Error ? error.message : String(error),
       ...(sourceEvent.taskId ? { taskId: sourceEvent.taskId } : {}),
       ...(sourceEvent.taskName ? { taskName: sourceEvent.taskName } : {}),
-      ...(sourceEvent.metadata ? { metadata: sourceEvent.metadata } : {})
+      ...(sourceEvent.metadata ? { metadata: sourceEvent.metadata } : {}),
     };
     const context: HookHandlerContext = {
       cwd: process.cwd(),
       pid: process.pid,
-      invokedAt: new Date().toISOString()
+      invokedAt: new Date().toISOString(),
     };
 
     for (const handler of onErrorHandlers) {

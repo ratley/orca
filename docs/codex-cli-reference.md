@@ -1,685 +1,685 @@
 # Command line options
 
 export const globalFlagOptions = [
-  {
-    key: "PROMPT",
-    type: "string",
-    description:
-      "Optional text instruction to start the session. Omit to launch the TUI without a pre-filled message.",
-  },
-  {
-    key: "--image, -i",
-    type: "path[,path...]",
-    description:
-      "Attach one or more image files to the initial prompt. Separate multiple paths with commas or repeat the flag.",
-  },
-  {
-    key: "--model, -m",
-    type: "string",
-    description:
-      "Override the model set in configuration (for example `gpt-5-codex`).",
-  },
-  {
-    key: "--oss",
-    type: "boolean",
-    defaultValue: "false",
-    description:
-      'Use the local open source model provider (equivalent to `-c model_provider="oss"`). Validates that Ollama is running.',
-  },
-  {
-    key: "--profile, -p",
-    type: "string",
-    description:
-      "Configuration profile name to load from `~/.codex/config.toml`.",
-  },
-  {
-    key: "--sandbox, -s",
-    type: "read-only | workspace-write | danger-full-access",
-    description:
-      "Select the sandbox policy for model-generated shell commands.",
-  },
-  {
-    key: "--ask-for-approval, -a",
-    type: "untrusted | on-request | never",
-    description:
-      "Control when Codex pauses for human approval before running a command. `on-failure` is deprecated; prefer `on-request` for interactive runs or `never` for non-interactive runs.",
-  },
-  {
-    key: "--full-auto",
-    type: "boolean",
-    defaultValue: "false",
-    description:
-      "Shortcut for low-friction local work: sets `--ask-for-approval on-request` and `--sandbox workspace-write`.",
-  },
-  {
-    key: "--dangerously-bypass-approvals-and-sandbox, --yolo",
-    type: "boolean",
-    defaultValue: "false",
-    description:
-      "Run every command without approvals or sandboxing. Only use inside an externally hardened environment.",
-  },
-  {
-    key: "--cd, -C",
-    type: "path",
-    description:
-      "Set the working directory for the agent before it starts processing your request.",
-  },
-  {
-    key: "--search",
-    type: "boolean",
-    defaultValue: "false",
-    description:
-      'Enable live web search (sets `web_search = "live"` instead of the default `"cached"`).',
-  },
-  {
-    key: "--add-dir",
-    type: "path",
-    description:
-      "Grant additional directories write access alongside the main workspace. Repeat for multiple paths.",
-  },
-  {
-    key: "--no-alt-screen",
-    type: "boolean",
-    defaultValue: "false",
-    description:
-      "Disable alternate screen mode for the TUI (overrides `tui.alternate_screen` for this run).",
-  },
-  {
-    key: "--enable",
-    type: "feature",
-    description:
-      "Force-enable a feature flag (translates to `-c features.<name>=true`). Repeatable.",
-  },
-  {
-    key: "--disable",
-    type: "feature",
-    description:
-      "Force-disable a feature flag (translates to `-c features.<name>=false`). Repeatable.",
-  },
-  {
-    key: "--config, -c",
-    type: "key=value",
-    description:
-      "Override configuration values. Values parse as JSON if possible; otherwise the literal string is used.",
-  },
+{
+key: "PROMPT",
+type: "string",
+description:
+"Optional text instruction to start the session. Omit to launch the TUI without a pre-filled message.",
+},
+{
+key: "--image, -i",
+type: "path[,path...]",
+description:
+"Attach one or more image files to the initial prompt. Separate multiple paths with commas or repeat the flag.",
+},
+{
+key: "--model, -m",
+type: "string",
+description:
+"Override the model set in configuration (for example `gpt-5-codex`).",
+},
+{
+key: "--oss",
+type: "boolean",
+defaultValue: "false",
+description:
+'Use the local open source model provider (equivalent to `-c model_provider="oss"`). Validates that Ollama is running.',
+},
+{
+key: "--profile, -p",
+type: "string",
+description:
+"Configuration profile name to load from `~/.codex/config.toml`.",
+},
+{
+key: "--sandbox, -s",
+type: "read-only | workspace-write | danger-full-access",
+description:
+"Select the sandbox policy for model-generated shell commands.",
+},
+{
+key: "--ask-for-approval, -a",
+type: "untrusted | on-request | never",
+description:
+"Control when Codex pauses for human approval before running a command. `on-failure` is deprecated; prefer `on-request` for interactive runs or `never` for non-interactive runs.",
+},
+{
+key: "--full-auto",
+type: "boolean",
+defaultValue: "false",
+description:
+"Shortcut for low-friction local work: sets `--ask-for-approval on-request` and `--sandbox workspace-write`.",
+},
+{
+key: "--dangerously-bypass-approvals-and-sandbox, --yolo",
+type: "boolean",
+defaultValue: "false",
+description:
+"Run every command without approvals or sandboxing. Only use inside an externally hardened environment.",
+},
+{
+key: "--cd, -C",
+type: "path",
+description:
+"Set the working directory for the agent before it starts processing your request.",
+},
+{
+key: "--search",
+type: "boolean",
+defaultValue: "false",
+description:
+'Enable live web search (sets `web_search = "live"` instead of the default `"cached"`).',
+},
+{
+key: "--add-dir",
+type: "path",
+description:
+"Grant additional directories write access alongside the main workspace. Repeat for multiple paths.",
+},
+{
+key: "--no-alt-screen",
+type: "boolean",
+defaultValue: "false",
+description:
+"Disable alternate screen mode for the TUI (overrides `tui.alternate_screen` for this run).",
+},
+{
+key: "--enable",
+type: "feature",
+description:
+"Force-enable a feature flag (translates to `-c features.<name>=true`). Repeatable.",
+},
+{
+key: "--disable",
+type: "feature",
+description:
+"Force-disable a feature flag (translates to `-c features.<name>=false`). Repeatable.",
+},
+{
+key: "--config, -c",
+type: "key=value",
+description:
+"Override configuration values. Values parse as JSON if possible; otherwise the literal string is used.",
+},
 ];
 
 export const commandOverview = [
-  {
-    key: "codex",
-    href: "/codex/cli/reference#codex-interactive",
-    type: "stable",
-    description:
-      "Launch the terminal UI. Accepts the global flags above plus an optional prompt or image attachments.",
-  },
-  {
-    key: "codex app-server",
-    href: "/codex/cli/reference#codex-app-server",
-    type: "experimental",
-    description:
-      "Launch the Codex app server for local development or debugging.",
-  },
-  {
-    key: "codex app",
-    href: "/codex/cli/reference#codex-app",
-    type: "stable",
-    description:
-      "Launch the Codex desktop app on macOS, optionally opening a specific workspace path.",
-  },
-  {
-    key: "codex debug app-server send-message-v2",
-    href: "/codex/cli/reference#codex-debug-app-server-send-message-v2",
-    type: "experimental",
-    description:
-      "Debug app-server by sending a single V2 message through the built-in test client.",
-  },
-  {
-    key: "codex apply",
-    href: "/codex/cli/reference#codex-apply",
-    type: "stable",
-    description:
-      "Apply the latest diff generated by a Codex Cloud task to your local working tree. Alias: `codex a`.",
-  },
-  {
-    key: "codex cloud",
-    href: "/codex/cli/reference#codex-cloud",
-    type: "experimental",
-    description:
-      "Browse or execute Codex Cloud tasks from the terminal without opening the TUI. Alias: `codex cloud-tasks`.",
-  },
-  {
-    key: "codex completion",
-    href: "/codex/cli/reference#codex-completion",
-    type: "stable",
-    description:
-      "Generate shell completion scripts for Bash, Zsh, Fish, or PowerShell.",
-  },
-  {
-    key: "codex features",
-    href: "/codex/cli/reference#codex-features",
-    type: "stable",
-    description:
-      "List feature flags and persistently enable or disable them in `config.toml`.",
-  },
-  {
-    key: "codex exec",
-    href: "/codex/cli/reference#codex-exec",
-    type: "stable",
-    description:
-      "Run Codex non-interactively. Alias: `codex e`. Stream results to stdout or JSONL and optionally resume previous sessions.",
-  },
-  {
-    key: "codex execpolicy",
-    href: "/codex/cli/reference#codex-execpolicy",
-    type: "experimental",
-    description:
-      "Evaluate execpolicy rule files and see whether a command would be allowed, prompted, or blocked.",
-  },
-  {
-    key: "codex login",
-    href: "/codex/cli/reference#codex-login",
-    type: "stable",
-    description:
-      "Authenticate Codex using ChatGPT OAuth, device auth, or an API key piped over stdin.",
-  },
-  {
-    key: "codex logout",
-    href: "/codex/cli/reference#codex-logout",
-    type: "stable",
-    description: "Remove stored authentication credentials.",
-  },
-  {
-    key: "codex mcp",
-    href: "/codex/cli/reference#codex-mcp",
-    type: "experimental",
-    description:
-      "Manage Model Context Protocol servers (list, add, remove, authenticate).",
-  },
-  {
-    key: "codex mcp-server",
-    href: "/codex/cli/reference#codex-mcp-server",
-    type: "experimental",
-    description:
-      "Run Codex itself as an MCP server over stdio. Useful when another agent consumes Codex.",
-  },
-  {
-    key: "codex resume",
-    href: "/codex/cli/reference#codex-resume",
-    type: "stable",
-    description:
-      "Continue a previous interactive session by ID or resume the most recent conversation.",
-  },
-  {
-    key: "codex fork",
-    href: "/codex/cli/reference#codex-fork",
-    type: "stable",
-    description:
-      "Fork a previous interactive session into a new thread, preserving the original transcript.",
-  },
-  {
-    key: "codex sandbox",
-    href: "/codex/cli/reference#codex-sandbox",
-    type: "experimental",
-    description:
-      "Run arbitrary commands inside Codex-provided macOS seatbelt or Linux sandboxes (Landlock by default, optional bubblewrap pipeline).",
-  },
+{
+key: "codex",
+href: "/codex/cli/reference#codex-interactive",
+type: "stable",
+description:
+"Launch the terminal UI. Accepts the global flags above plus an optional prompt or image attachments.",
+},
+{
+key: "codex app-server",
+href: "/codex/cli/reference#codex-app-server",
+type: "experimental",
+description:
+"Launch the Codex app server for local development or debugging.",
+},
+{
+key: "codex app",
+href: "/codex/cli/reference#codex-app",
+type: "stable",
+description:
+"Launch the Codex desktop app on macOS, optionally opening a specific workspace path.",
+},
+{
+key: "codex debug app-server send-message-v2",
+href: "/codex/cli/reference#codex-debug-app-server-send-message-v2",
+type: "experimental",
+description:
+"Debug app-server by sending a single V2 message through the built-in test client.",
+},
+{
+key: "codex apply",
+href: "/codex/cli/reference#codex-apply",
+type: "stable",
+description:
+"Apply the latest diff generated by a Codex Cloud task to your local working tree. Alias: `codex a`.",
+},
+{
+key: "codex cloud",
+href: "/codex/cli/reference#codex-cloud",
+type: "experimental",
+description:
+"Browse or execute Codex Cloud tasks from the terminal without opening the TUI. Alias: `codex cloud-tasks`.",
+},
+{
+key: "codex completion",
+href: "/codex/cli/reference#codex-completion",
+type: "stable",
+description:
+"Generate shell completion scripts for Bash, Zsh, Fish, or PowerShell.",
+},
+{
+key: "codex features",
+href: "/codex/cli/reference#codex-features",
+type: "stable",
+description:
+"List feature flags and persistently enable or disable them in `config.toml`.",
+},
+{
+key: "codex exec",
+href: "/codex/cli/reference#codex-exec",
+type: "stable",
+description:
+"Run Codex non-interactively. Alias: `codex e`. Stream results to stdout or JSONL and optionally resume previous sessions.",
+},
+{
+key: "codex execpolicy",
+href: "/codex/cli/reference#codex-execpolicy",
+type: "experimental",
+description:
+"Evaluate execpolicy rule files and see whether a command would be allowed, prompted, or blocked.",
+},
+{
+key: "codex login",
+href: "/codex/cli/reference#codex-login",
+type: "stable",
+description:
+"Authenticate Codex using ChatGPT OAuth, device auth, or an API key piped over stdin.",
+},
+{
+key: "codex logout",
+href: "/codex/cli/reference#codex-logout",
+type: "stable",
+description: "Remove stored authentication credentials.",
+},
+{
+key: "codex mcp",
+href: "/codex/cli/reference#codex-mcp",
+type: "experimental",
+description:
+"Manage Model Context Protocol servers (list, add, remove, authenticate).",
+},
+{
+key: "codex mcp-server",
+href: "/codex/cli/reference#codex-mcp-server",
+type: "experimental",
+description:
+"Run Codex itself as an MCP server over stdio. Useful when another agent consumes Codex.",
+},
+{
+key: "codex resume",
+href: "/codex/cli/reference#codex-resume",
+type: "stable",
+description:
+"Continue a previous interactive session by ID or resume the most recent conversation.",
+},
+{
+key: "codex fork",
+href: "/codex/cli/reference#codex-fork",
+type: "stable",
+description:
+"Fork a previous interactive session into a new thread, preserving the original transcript.",
+},
+{
+key: "codex sandbox",
+href: "/codex/cli/reference#codex-sandbox",
+type: "experimental",
+description:
+"Run arbitrary commands inside Codex-provided macOS seatbelt or Linux sandboxes (Landlock by default, optional bubblewrap pipeline).",
+},
 ];
 
 export const execOptions = [
-  {
-    key: "PROMPT",
-    type: "string | - (read stdin)",
-    description:
-      "Initial instruction for the task. Use `-` to pipe the prompt from stdin.",
-  },
-  {
-    key: "--image, -i",
-    type: "path[,path...]",
-    description:
-      "Attach images to the first message. Repeatable; supports comma-separated lists.",
-  },
-  {
-    key: "--model, -m",
-    type: "string",
-    description: "Override the configured model for this run.",
-  },
-  {
-    key: "--oss",
-    type: "boolean",
-    defaultValue: "false",
-    description:
-      "Use the local open source provider (requires a running Ollama instance).",
-  },
-  {
-    key: "--sandbox, -s",
-    type: "read-only | workspace-write | danger-full-access",
-    description:
-      "Sandbox policy for model-generated commands. Defaults to configuration.",
-  },
-  {
-    key: "--profile, -p",
-    type: "string",
-    description: "Select a configuration profile defined in config.toml.",
-  },
-  {
-    key: "--full-auto",
-    type: "boolean",
-    defaultValue: "false",
-    description:
-      "Apply the low-friction automation preset (`workspace-write` sandbox and `on-request` approvals).",
-  },
-  {
-    key: "--dangerously-bypass-approvals-and-sandbox, --yolo",
-    type: "boolean",
-    defaultValue: "false",
-    description:
-      "Bypass approval prompts and sandboxing. Dangerous—only use inside an isolated runner.",
-  },
-  {
-    key: "--cd, -C",
-    type: "path",
-    description: "Set the workspace root before executing the task.",
-  },
-  {
-    key: "--skip-git-repo-check",
-    type: "boolean",
-    defaultValue: "false",
-    description:
-      "Allow running outside a Git repository (useful for one-off directories).",
-  },
-  {
-    key: "--ephemeral",
-    type: "boolean",
-    defaultValue: "false",
-    description: "Run without persisting session rollout files to disk.",
-  },
-  {
-    key: "--output-schema",
-    type: "path",
-    description:
-      "JSON Schema file describing the expected final response shape. Codex validates tool output against it.",
-  },
-  {
-    key: "--color",
-    type: "always | never | auto",
-    defaultValue: "auto",
-    description: "Control ANSI color in stdout.",
-  },
-  {
-    key: "--json, --experimental-json",
-    type: "boolean",
-    defaultValue: "false",
-    description:
-      "Print newline-delimited JSON events instead of formatted text.",
-  },
-  {
-    key: "--output-last-message, -o",
-    type: "path",
-    description:
-      "Write the assistant’s final message to a file. Useful for downstream scripting.",
-  },
-  {
-    key: "Resume subcommand",
-    type: "codex exec resume [SESSION_ID]",
-    description:
-      "Resume an exec session by ID or add `--last` to continue the most recent session from the current working directory. Add `--all` to consider sessions from any directory. Accepts an optional follow-up prompt.",
-  },
-  {
-    key: "-c, --config",
-    type: "key=value",
-    description:
-      "Inline configuration override for the non-interactive run (repeatable).",
-  },
+{
+key: "PROMPT",
+type: "string | - (read stdin)",
+description:
+"Initial instruction for the task. Use `-` to pipe the prompt from stdin.",
+},
+{
+key: "--image, -i",
+type: "path[,path...]",
+description:
+"Attach images to the first message. Repeatable; supports comma-separated lists.",
+},
+{
+key: "--model, -m",
+type: "string",
+description: "Override the configured model for this run.",
+},
+{
+key: "--oss",
+type: "boolean",
+defaultValue: "false",
+description:
+"Use the local open source provider (requires a running Ollama instance).",
+},
+{
+key: "--sandbox, -s",
+type: "read-only | workspace-write | danger-full-access",
+description:
+"Sandbox policy for model-generated commands. Defaults to configuration.",
+},
+{
+key: "--profile, -p",
+type: "string",
+description: "Select a configuration profile defined in config.toml.",
+},
+{
+key: "--full-auto",
+type: "boolean",
+defaultValue: "false",
+description:
+"Apply the low-friction automation preset (`workspace-write` sandbox and `on-request` approvals).",
+},
+{
+key: "--dangerously-bypass-approvals-and-sandbox, --yolo",
+type: "boolean",
+defaultValue: "false",
+description:
+"Bypass approval prompts and sandboxing. Dangerous—only use inside an isolated runner.",
+},
+{
+key: "--cd, -C",
+type: "path",
+description: "Set the workspace root before executing the task.",
+},
+{
+key: "--skip-git-repo-check",
+type: "boolean",
+defaultValue: "false",
+description:
+"Allow running outside a Git repository (useful for one-off directories).",
+},
+{
+key: "--ephemeral",
+type: "boolean",
+defaultValue: "false",
+description: "Run without persisting session rollout files to disk.",
+},
+{
+key: "--output-schema",
+type: "path",
+description:
+"JSON Schema file describing the expected final response shape. Codex validates tool output against it.",
+},
+{
+key: "--color",
+type: "always | never | auto",
+defaultValue: "auto",
+description: "Control ANSI color in stdout.",
+},
+{
+key: "--json, --experimental-json",
+type: "boolean",
+defaultValue: "false",
+description:
+"Print newline-delimited JSON events instead of formatted text.",
+},
+{
+key: "--output-last-message, -o",
+type: "path",
+description:
+"Write the assistant’s final message to a file. Useful for downstream scripting.",
+},
+{
+key: "Resume subcommand",
+type: "codex exec resume [SESSION_ID]",
+description:
+"Resume an exec session by ID or add `--last` to continue the most recent session from the current working directory. Add `--all` to consider sessions from any directory. Accepts an optional follow-up prompt.",
+},
+{
+key: "-c, --config",
+type: "key=value",
+description:
+"Inline configuration override for the non-interactive run (repeatable).",
+},
 ];
 
 export const appServerOptions = [
-  {
-    key: "--listen",
-    type: "stdio:// | ws://IP:PORT",
-    defaultValue: "stdio://",
-    description:
-      "Transport listener URL. `ws://` is experimental and intended for development/testing.",
-  },
+{
+key: "--listen",
+type: "stdio:// | ws://IP:PORT",
+defaultValue: "stdio://",
+description:
+"Transport listener URL. `ws://` is experimental and intended for development/testing.",
+},
 ];
 
 export const appOptions = [
-  {
-    key: "PATH",
-    type: "path",
-    defaultValue: ".",
-    description:
-      "Workspace path to open in Codex Desktop (`codex app` is available on macOS only).",
-  },
-  {
-    key: "--download-url",
-    type: "url",
-    description:
-      "Advanced override for the Codex desktop DMG download URL used during install.",
-  },
+{
+key: "PATH",
+type: "path",
+defaultValue: ".",
+description:
+"Workspace path to open in Codex Desktop (`codex app` is available on macOS only).",
+},
+{
+key: "--download-url",
+type: "url",
+description:
+"Advanced override for the Codex desktop DMG download URL used during install.",
+},
 ];
 
 export const debugAppServerSendMessageV2Options = [
-  {
-    key: "USER_MESSAGE",
-    type: "string",
-    description:
-      "Message text sent to app-server through the built-in V2 test-client flow.",
-  },
+{
+key: "USER_MESSAGE",
+type: "string",
+description:
+"Message text sent to app-server through the built-in V2 test-client flow.",
+},
 ];
 
 export const resumeOptions = [
-  {
-    key: "SESSION_ID",
-    type: "uuid",
-    description:
-      "Resume the specified session. Omit and use `--last` to continue the most recent session.",
-  },
-  {
-    key: "--last",
-    type: "boolean",
-    defaultValue: "false",
-    description:
-      "Skip the picker and resume the most recent conversation from the current working directory.",
-  },
-  {
-    key: "--all",
-    type: "boolean",
-    defaultValue: "false",
-    description:
-      "Include sessions outside the current working directory when selecting the most recent session.",
-  },
+{
+key: "SESSION_ID",
+type: "uuid",
+description:
+"Resume the specified session. Omit and use `--last` to continue the most recent session.",
+},
+{
+key: "--last",
+type: "boolean",
+defaultValue: "false",
+description:
+"Skip the picker and resume the most recent conversation from the current working directory.",
+},
+{
+key: "--all",
+type: "boolean",
+defaultValue: "false",
+description:
+"Include sessions outside the current working directory when selecting the most recent session.",
+},
 ];
 
 export const featuresOptions = [
-  {
-    key: "List subcommand",
-    type: "codex features list",
-    description:
-      "Show known feature flags, their maturity stage, and their effective state.",
-  },
-  {
-    key: "Enable subcommand",
-    type: "codex features enable <feature>",
-    description:
-      "Persistently enable a feature flag in `config.toml`. Respects the active `--profile` when provided.",
-  },
-  {
-    key: "Disable subcommand",
-    type: "codex features disable <feature>",
-    description:
-      "Persistently disable a feature flag in `config.toml`. Respects the active `--profile` when provided.",
-  },
+{
+key: "List subcommand",
+type: "codex features list",
+description:
+"Show known feature flags, their maturity stage, and their effective state.",
+},
+{
+key: "Enable subcommand",
+type: "codex features enable <feature>",
+description:
+"Persistently enable a feature flag in `config.toml`. Respects the active `--profile` when provided.",
+},
+{
+key: "Disable subcommand",
+type: "codex features disable <feature>",
+description:
+"Persistently disable a feature flag in `config.toml`. Respects the active `--profile` when provided.",
+},
 ];
 
 export const execResumeOptions = [
-  {
-    key: "SESSION_ID",
-    type: "uuid",
-    description:
-      "Resume the specified session. Omit and use `--last` to continue the most recent session.",
-  },
-  {
-    key: "--last",
-    type: "boolean",
-    defaultValue: "false",
-    description:
-      "Resume the most recent conversation from the current working directory.",
-  },
-  {
-    key: "--all",
-    type: "boolean",
-    defaultValue: "false",
-    description:
-      "Include sessions outside the current working directory when selecting the most recent session.",
-  },
-  {
-    key: "--image, -i",
-    type: "path[,path...]",
-    description:
-      "Attach one or more images to the follow-up prompt. Separate multiple paths with commas or repeat the flag.",
-  },
-  {
-    key: "PROMPT",
-    type: "string | - (read stdin)",
-    description:
-      "Optional follow-up instruction sent immediately after resuming.",
-  },
+{
+key: "SESSION_ID",
+type: "uuid",
+description:
+"Resume the specified session. Omit and use `--last` to continue the most recent session.",
+},
+{
+key: "--last",
+type: "boolean",
+defaultValue: "false",
+description:
+"Resume the most recent conversation from the current working directory.",
+},
+{
+key: "--all",
+type: "boolean",
+defaultValue: "false",
+description:
+"Include sessions outside the current working directory when selecting the most recent session.",
+},
+{
+key: "--image, -i",
+type: "path[,path...]",
+description:
+"Attach one or more images to the follow-up prompt. Separate multiple paths with commas or repeat the flag.",
+},
+{
+key: "PROMPT",
+type: "string | - (read stdin)",
+description:
+"Optional follow-up instruction sent immediately after resuming.",
+},
 ];
 
 export const forkOptions = [
-  {
-    key: "SESSION_ID",
-    type: "uuid",
-    description:
-      "Fork the specified session. Omit and use `--last` to fork the most recent session.",
-  },
-  {
-    key: "--last",
-    type: "boolean",
-    defaultValue: "false",
-    description:
-      "Skip the picker and fork the most recent conversation automatically.",
-  },
-  {
-    key: "--all",
-    type: "boolean",
-    defaultValue: "false",
-    description:
-      "Show sessions beyond the current working directory in the picker.",
-  },
+{
+key: "SESSION_ID",
+type: "uuid",
+description:
+"Fork the specified session. Omit and use `--last` to fork the most recent session.",
+},
+{
+key: "--last",
+type: "boolean",
+defaultValue: "false",
+description:
+"Skip the picker and fork the most recent conversation automatically.",
+},
+{
+key: "--all",
+type: "boolean",
+defaultValue: "false",
+description:
+"Show sessions beyond the current working directory in the picker.",
+},
 ];
 
 export const execpolicyOptions = [
-  {
-    key: "--rules, -r",
-    type: "path (repeatable)",
-    description:
-      "Path to an execpolicy rule file to evaluate. Provide multiple flags to combine rules across files.",
-  },
-  {
-    key: "--pretty",
-    type: "boolean",
-    defaultValue: "false",
-    description: "Pretty-print the JSON result.",
-  },
-  {
-    key: "COMMAND...",
-    type: "var-args",
-    description: "Command to be checked against the specified policies.",
-  },
+{
+key: "--rules, -r",
+type: "path (repeatable)",
+description:
+"Path to an execpolicy rule file to evaluate. Provide multiple flags to combine rules across files.",
+},
+{
+key: "--pretty",
+type: "boolean",
+defaultValue: "false",
+description: "Pretty-print the JSON result.",
+},
+{
+key: "COMMAND...",
+type: "var-args",
+description: "Command to be checked against the specified policies.",
+},
 ];
 
 export const loginOptions = [
-  {
-    key: "--with-api-key",
-    type: "boolean",
-    description:
-      "Read an API key from stdin (for example `printenv OPENAI_API_KEY | codex login --with-api-key`).",
-  },
-  {
-    key: "--device-auth",
-    type: "boolean",
-    description:
-      "Use OAuth device code flow instead of launching a browser window.",
-  },
-  {
-    key: "status subcommand",
-    type: "codex login status",
-    description:
-      "Print the active authentication mode and exit with 0 when logged in.",
-  },
+{
+key: "--with-api-key",
+type: "boolean",
+description:
+"Read an API key from stdin (for example `printenv OPENAI_API_KEY | codex login --with-api-key`).",
+},
+{
+key: "--device-auth",
+type: "boolean",
+description:
+"Use OAuth device code flow instead of launching a browser window.",
+},
+{
+key: "status subcommand",
+type: "codex login status",
+description:
+"Print the active authentication mode and exit with 0 when logged in.",
+},
 ];
 
 export const applyOptions = [
-  {
-    key: "TASK_ID",
-    type: "string",
-    description:
-      "Identifier of the Codex Cloud task whose diff should be applied.",
-  },
+{
+key: "TASK_ID",
+type: "string",
+description:
+"Identifier of the Codex Cloud task whose diff should be applied.",
+},
 ];
 
 export const sandboxMacOptions = [
-  {
-    key: "--full-auto",
-    type: "boolean",
-    defaultValue: "false",
-    description:
-      "Grant write access to the current workspace and `/tmp` without approvals.",
-  },
-  {
-    key: "--config, -c",
-    type: "key=value",
-    description:
-      "Pass configuration overrides into the sandboxed run (repeatable).",
-  },
-  {
-    key: "COMMAND...",
-    type: "var-args",
-    description:
-      "Shell command to execute under macOS Seatbelt. Everything after `--` is forwarded.",
-  },
+{
+key: "--full-auto",
+type: "boolean",
+defaultValue: "false",
+description:
+"Grant write access to the current workspace and `/tmp` without approvals.",
+},
+{
+key: "--config, -c",
+type: "key=value",
+description:
+"Pass configuration overrides into the sandboxed run (repeatable).",
+},
+{
+key: "COMMAND...",
+type: "var-args",
+description:
+"Shell command to execute under macOS Seatbelt. Everything after `--` is forwarded.",
+},
 ];
 
 export const sandboxLinuxOptions = [
-  {
-    key: "--full-auto",
-    type: "boolean",
-    defaultValue: "false",
-    description:
-      "Grant write access to the current workspace and `/tmp` inside the Landlock sandbox.",
-  },
-  {
-    key: "--config, -c",
-    type: "key=value",
-    description:
-      "Configuration overrides applied before launching the sandbox (repeatable).",
-  },
-  {
-    key: "COMMAND...",
-    type: "var-args",
-    description:
-      "Command to execute under Landlock + seccomp. Provide the executable after `--`.",
-  },
+{
+key: "--full-auto",
+type: "boolean",
+defaultValue: "false",
+description:
+"Grant write access to the current workspace and `/tmp` inside the Landlock sandbox.",
+},
+{
+key: "--config, -c",
+type: "key=value",
+description:
+"Configuration overrides applied before launching the sandbox (repeatable).",
+},
+{
+key: "COMMAND...",
+type: "var-args",
+description:
+"Command to execute under Landlock + seccomp. Provide the executable after `--`.",
+},
 ];
 
 export const completionOptions = [
-  {
-    key: "SHELL",
-    type: "bash | zsh | fish | power-shell | elvish",
-    defaultValue: "bash",
-    description: "Shell to generate completions for. Output prints to stdout.",
-  },
+{
+key: "SHELL",
+type: "bash | zsh | fish | power-shell | elvish",
+defaultValue: "bash",
+description: "Shell to generate completions for. Output prints to stdout.",
+},
 ];
 
 export const cloudExecOptions = [
-  {
-    key: "QUERY",
-    type: "string",
-    description:
-      "Task prompt. If omitted, Codex prompts interactively for details.",
-  },
-  {
-    key: "--env",
-    type: "ENV_ID",
-    description:
-      "Target Codex Cloud environment identifier (required). Use `codex cloud` to list options.",
-  },
-  {
-    key: "--attempts",
-    type: "1-4",
-    defaultValue: "1",
-    description:
-      "Number of assistant attempts (best-of-N) Codex Cloud should run.",
-  },
+{
+key: "QUERY",
+type: "string",
+description:
+"Task prompt. If omitted, Codex prompts interactively for details.",
+},
+{
+key: "--env",
+type: "ENV_ID",
+description:
+"Target Codex Cloud environment identifier (required). Use `codex cloud` to list options.",
+},
+{
+key: "--attempts",
+type: "1-4",
+defaultValue: "1",
+description:
+"Number of assistant attempts (best-of-N) Codex Cloud should run.",
+},
 ];
 
 export const cloudListOptions = [
-  {
-    key: "--env",
-    type: "ENV_ID",
-    description: "Filter tasks by environment identifier.",
-  },
-  {
-    key: "--limit",
-    type: "1-20",
-    defaultValue: "20",
-    description: "Maximum number of tasks to return.",
-  },
-  {
-    key: "--cursor",
-    type: "string",
-    description: "Pagination cursor returned by a previous request.",
-  },
-  {
-    key: "--json",
-    type: "boolean",
-    defaultValue: "false",
-    description: "Emit machine-readable JSON instead of plain text.",
-  },
+{
+key: "--env",
+type: "ENV_ID",
+description: "Filter tasks by environment identifier.",
+},
+{
+key: "--limit",
+type: "1-20",
+defaultValue: "20",
+description: "Maximum number of tasks to return.",
+},
+{
+key: "--cursor",
+type: "string",
+description: "Pagination cursor returned by a previous request.",
+},
+{
+key: "--json",
+type: "boolean",
+defaultValue: "false",
+description: "Emit machine-readable JSON instead of plain text.",
+},
 ];
 
 export const mcpCommands = [
-  {
-    key: "list",
-    type: "--json",
-    description:
-      "List configured MCP servers. Add `--json` for machine-readable output.",
-  },
-  {
-    key: "get <name>",
-    type: "--json",
-    description:
-      "Show a specific server configuration. `--json` prints the raw config entry.",
-  },
-  {
-    key: "add <name>",
-    type: "-- <command...> | --url <value>",
-    description:
-      "Register a server using a stdio launcher command or a streamable HTTP URL. Supports `--env KEY=VALUE` for stdio transports.",
-  },
-  {
-    key: "remove <name>",
-    description: "Delete a stored MCP server definition.",
-  },
-  {
-    key: "login <name>",
-    type: "--scopes scope1,scope2",
-    description:
-      "Start an OAuth login for a streamable HTTP server (servers that support OAuth only).",
-  },
-  {
-    key: "logout <name>",
-    description:
-      "Remove stored OAuth credentials for a streamable HTTP server.",
-  },
+{
+key: "list",
+type: "--json",
+description:
+"List configured MCP servers. Add `--json` for machine-readable output.",
+},
+{
+key: "get <name>",
+type: "--json",
+description:
+"Show a specific server configuration. `--json` prints the raw config entry.",
+},
+{
+key: "add <name>",
+type: "-- <command...> | --url <value>",
+description:
+"Register a server using a stdio launcher command or a streamable HTTP URL. Supports `--env KEY=VALUE` for stdio transports.",
+},
+{
+key: "remove <name>",
+description: "Delete a stored MCP server definition.",
+},
+{
+key: "login <name>",
+type: "--scopes scope1,scope2",
+description:
+"Start an OAuth login for a streamable HTTP server (servers that support OAuth only).",
+},
+{
+key: "logout <name>",
+description:
+"Remove stored OAuth credentials for a streamable HTTP server.",
+},
 ];
 
 export const mcpAddOptions = [
-  {
-    key: "COMMAND...",
-    type: "stdio transport",
-    description:
-      "Executable plus arguments to launch the MCP server. Provide after `--`.",
-  },
-  {
-    key: "--env KEY=VALUE",
-    type: "repeatable",
-    description:
-      "Environment variable assignments applied when launching a stdio server.",
-  },
-  {
-    key: "--url",
-    type: "https://…",
-    description:
-      "Register a streamable HTTP server instead of stdio. Mutually exclusive with `COMMAND...`.",
-  },
-  {
-    key: "--bearer-token-env-var",
-    type: "ENV_VAR",
-    description:
-      "Environment variable whose value is sent as a bearer token when connecting to a streamable HTTP server.",
-  },
+{
+key: "COMMAND...",
+type: "stdio transport",
+description:
+"Executable plus arguments to launch the MCP server. Provide after `--`.",
+},
+{
+key: "--env KEY=VALUE",
+type: "repeatable",
+description:
+"Environment variable assignments applied when launching a stdio server.",
+},
+{
+key: "--url",
+type: "https://…",
+description:
+"Register a streamable HTTP server instead of stdio. Mutually exclusive with `COMMAND...`.",
+},
+{
+key: "--bearer-token-env-var",
+type: "ENV_VAR",
+description:
+"Environment variable whose value is sent as a bearer token when connecting to a streamable HTTP server.",
+},
 ];
 
 ## How to read this reference
@@ -687,9 +687,9 @@ export const mcpAddOptions = [
 This page catalogs every documented Codex CLI command and flag. Use the interactive tables to search by key or description. Each section indicates whether the option is stable or experimental and calls out risky combinations.
 
 The CLI inherits most defaults from <code>~/.codex/config.toml</code>. Any
-  <code>-c key=value</code> overrides you pass at the command line take
-  precedence for that invocation. See [Config
-  basics](https://developers.openai.com/codex/config-basic#configuration-precedence) for more information.
+<code>-c key=value</code> overrides you pass at the command line take
+precedence for that invocation. See [Config
+basics](https://developers.openai.com/codex/config-basic#configuration-precedence) for more information.
 
 ## Global flags
 
@@ -701,8 +701,8 @@ When you run a subcommand, place global flags after it (for example, `codex exec
 ## Command overview
 
 The Maturity column uses feature maturity labels such as Experimental, Beta,
-  and Stable. See [Feature Maturity](https://developers.openai.com/codex/feature-maturity) for how to
-  interpret these labels.
+and Stable. See [Feature Maturity](https://developers.openai.com/codex/feature-maturity) for how to
+interpret these labels.
 
 <ConfigTable
   client:load

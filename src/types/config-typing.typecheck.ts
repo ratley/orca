@@ -29,8 +29,8 @@ defineOrcaConfig({
     onError: async (event) => {
       const errorMessage: string = event.error;
       void errorMessage;
-    }
-  }
+    },
+  },
 });
 
 defineOrcaConfig({
@@ -74,8 +74,8 @@ defineOrcaConfig({
 defineOrcaConfig({
   hooks: {
     // @ts-expect-error unknown hook key should be rejected by types
-    onMystery: async () => {}
-  }
+    onMystery: async () => {},
+  },
 });
 
 defineOrcaConfig({
@@ -84,6 +84,6 @@ defineOrcaConfig({
       // @ts-expect-error onMilestone does not guarantee taskId
       const mustExist: string = event.taskId;
       void mustExist;
-    }
-  }
+    },
+  },
 });

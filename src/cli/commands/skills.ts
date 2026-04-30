@@ -80,7 +80,7 @@ function formatSkillsTable(skills: LoadedSkill[], configSkillDirs: Set<string>):
     skill.name,
     skill.description,
     detectSkillSource(skill, configSkillDirs),
-    skill.dirPath
+    skill.dirPath,
   ]);
 
   return formatTable(headers, rows);

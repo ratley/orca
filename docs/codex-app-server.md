@@ -3,7 +3,7 @@
 Codex app-server is the interface Codex uses to power rich clients (for example, the Codex VS Code extension). Use it when you want a deep integration inside your own product: authentication, conversation history, approvals, and streamed agent events. The app-server implementation is open source in the Codex GitHub repository ([openai/codex/codex-rs/app-server](https://github.com/openai/codex/tree/main/codex-rs/app-server)). See the [Open Source](https://developers.openai.com/codex/open-source) page for the full list of open-source Codex components.
 
 If you are automating jobs or running Codex in CI, use the
-  <a href="/codex/sdk">Codex SDK</a> instead.
+<a href="/codex/sdk">Codex SDK</a> instead.
 
 ## Protocol
 
@@ -56,9 +56,6 @@ codex app-server generate-json-schema --out ./schemas
 Example (Node.js / TypeScript):
 
 ```ts
-
-
-
 const proc = spawn("codex", ["app-server"], {
   stdio: ["pipe", "pipe", "inherit"],
 });
@@ -159,10 +156,7 @@ Example with notification opt-out:
     },
     "capabilities": {
       "experimentalApi": true,
-      "optOutNotificationMethods": [
-        "codex/event/session_configured",
-        "item/agentMessage/delta"
-      ]
+      "optOutNotificationMethods": ["codex/event/session_configured", "item/agentMessage/delta"]
     }
   }
 }
