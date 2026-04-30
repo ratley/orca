@@ -1,0 +1,24 @@
+name: Codex Code Review
+
+# Thin caller. The workflow body — gpt-5.5 prompt, codex subscription
+# auth, incremental review, sticky-comment lifecycle — lives in
+# happycatlabs/codex-review-workflow. Update there to update every
+# consumer at once.
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+# Required: the reusable workflow needs pull-requests + issues write
+# to post the sticky review comment. GitHub bounds the called
+# workflow's job-level permissions by the caller's workflow-level
+# permissions, so the caller must declare at least these.
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  review:
+    uses: happycatlabs/codex-review-workflow/.github/workflows/codex-code-review.yml@main
+    secrets: inherit
