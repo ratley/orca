@@ -15,9 +15,11 @@ import type {
 
 import type {
   HookEvent,
+  OpenAIModelId,
   OrcaConfig,
   PendingAnswerChannel,
   PlanResult,
+  PlannerRoutingDecision,
   RunId,
   Task,
   TaskExecutionResult,
@@ -239,8 +241,31 @@ function buildPlanDecisionPrompt(
     ...getClarificationRequestGuidance(clarificationToolAvailable, "planning"),
     "Decide whether this spec needs multi-step planning or can run as one direct execution task.",
     "Set needsPlan=true when coordination/dependencies/research/design across multiple steps are required.",
-    "Set needsPlan=false when a single focused execution task is sufficient.",
+    "Set needsPlan=true when the request spans multiple files, modules, docs, tests, CLI behavior, storage behavior, workflows, or user-facing design choices.",
+    "Set needsPlan=true when task boundaries, sequencing, ownership lanes, or acceptance criteria would materially improve execution.",
+    "Set needsPlan=false only when the request is a single focused edit with obvious files and obvious verification.",
     "Return JSON only with shape: {\"needsPlan\":boolean,\"reason\":string}",
+    "Spec:",
+    spec,
+  ].join("\n\n");
+}
+
+function buildPlannerRoutingPrompt(
+  spec: string,
+  systemContext: string,
+  clarificationToolAvailable: boolean,
+): string {
+  return [
+    systemContext,
+    "You are Orca's planner router.",
+    ...getClarificationRequestGuidance(clarificationToolAvailable, "planning"),
+    "Choose which planning agent should generate the task graph for this request.",
+    "Default to claude for requests that already passed Orca's multi-step planning gate.",
+    "Choose claude for broad, creative, ambiguous, product/design-heavy, multi-domain, strategy-heavy, or coordination-heavy planning.",
+    "Choose claude when the work needs task boundaries, sequencing, ownership lanes, or tradeoff judgment across multiple files or subsystems.",
+    "Choose codex only when the planning itself is clearly narrow, mechanical, implementation-heavy, and already constrained to obvious code/test edits.",
+    "Do not choose based on execution; Codex will still execute the tasks after planning.",
+    "Return JSON only with shape: {\"planner\":\"claude\"|\"codex\",\"reason\":\"...\"}",
     "Spec:",
     spec,
   ].join("\n\n");
@@ -421,6 +446,28 @@ function parsePlanDecision(raw: string): PlanNeedDecision {
 
   return {
     needsPlan: candidate.needsPlan,
+    reason: candidate.reason,
+  };
+}
+
+function parsePlannerRoutingDecision(raw: string): PlannerRoutingDecision {
+  const json = extractJson(raw);
+  const parsed = JSON.parse(json) as unknown;
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Codex planner routing response was not a JSON object");
+  }
+
+  const candidate = parsed as { planner?: unknown; reason?: unknown };
+  if (candidate.planner !== "claude" && candidate.planner !== "codex") {
+    throw new Error("Codex planner routing response missing planner 'claude' or 'codex'");
+  }
+
+  if (typeof candidate.reason !== "string" || candidate.reason.trim().length === 0) {
+    throw new Error("Codex planner routing response missing non-empty reason");
+  }
+
+  return {
+    planner: candidate.planner,
     reason: candidate.reason,
   };
 }
@@ -635,6 +682,22 @@ function getModel(config?: OrcaConfig): string {
   return config?.codex?.model ?? process.env.ORCA_CODEX_MODEL ?? "gpt-5.3-codex";
 }
 
+function getPlannerRouterModel(config?: OrcaConfig): OpenAIModelId {
+  return config?.planner?.router?.model
+    ?? (process.env.ORCA_PLANNER_ROUTER_MODEL as OpenAIModelId | undefined)
+    ?? "gpt-5.3-codex-spark";
+}
+
+function withPlannerRouterModel(config?: OrcaConfig): OrcaConfig {
+  return {
+    ...config,
+    codex: {
+      ...config?.codex,
+      model: getPlannerRouterModel(config),
+    },
+  };
+}
+
 type ThinkingStep = "decision" | "planning" | "review" | "execution";
 
 const DEFAULT_THINKING_BY_STEP: Record<ThinkingStep, CodexEffort> = {
@@ -645,6 +708,8 @@ const DEFAULT_THINKING_BY_STEP: Record<ThinkingStep, CodexEffort> = {
 };
 
 const ANSWER_FILE_POLL_MS = 500;
+const MAX_INLINE_SKILL_CONTEXT_CHARS = 24_000;
+const MAX_INLINE_SKILL_BODY_CHARS = 4_000;
 
 function getEffort(config: OrcaConfig | undefined, step: ThinkingStep): CodexEffort {
   const explicitThinkingLevel = config?.codex?.thinkingLevel?.[step];
@@ -665,18 +730,40 @@ function buildTurnInput(text: string, skills: LoadedSkill[]): Array<{ type: "tex
     return [{ type: "text", text }];
   }
 
-  const skillContext = usableSkills.map((skill) => [
-    `Skill: ${skill.name}`,
-    `Source: ${skill.filePath}`,
-    skill.body.trim(),
-  ].join("\n")).join("\n\n");
+  const sections: string[] = [];
+  let remainingChars = MAX_INLINE_SKILL_CONTEXT_CHARS;
+  let omittedCount = 0;
+
+  for (const skill of usableSkills) {
+    const trimmedBody = skill.body.trim();
+    const body = trimmedBody.length > MAX_INLINE_SKILL_BODY_CHARS
+      ? `${trimmedBody.slice(0, MAX_INLINE_SKILL_BODY_CHARS)}\n[truncated]`
+      : trimmedBody;
+    const section = [
+      `Skill: ${skill.name}`,
+      `Source: ${skill.filePath}`,
+      body,
+    ].join("\n");
+
+    if (section.length > remainingChars) {
+      omittedCount += 1;
+      continue;
+    }
+
+    sections.push(section);
+    remainingChars -= section.length + 2;
+  }
+
+  if (omittedCount > 0) {
+    sections.push(`[${omittedCount} additional skills omitted to keep this Codex turn within context budget]`);
+  }
 
   return [{
     type: "text",
     text: [
       text,
       "Referenced Orca skills:",
-      skillContext,
+      sections.join("\n\n"),
     ].join("\n\n"),
   }];
 }
@@ -1192,6 +1279,7 @@ export async function createCodexSession(
   interactionContext?: SessionInteractionContext,
 ): Promise<{
   decidePlanningNeed: (spec: string, systemContext: string) => Promise<PlanNeedDecision>;
+  selectPlannerAgent: (spec: string, systemContext: string) => Promise<PlannerRoutingDecision>;
   planSpec: (spec: string, systemContext: string) => Promise<PlanResult>;
   reviewTaskGraph: (tasks: Task[], systemContext: string) => Promise<TaskGraphReviewResult>;
   executeTask: (task: Task, runId: string, systemContext?: string) => Promise<TaskExecutionResult>;
@@ -1512,6 +1600,19 @@ export async function createCodexSession(
       return parsePlanDecision(rawResponse);
     },
 
+    async selectPlannerAgent(spec: string, systemContext: string): Promise<PlannerRoutingDecision> {
+      const result = await client.runTurn(
+        buildRunTurnParams(
+          "decision",
+          buildTurnInput(buildPlannerRoutingPrompt(spec, systemContext, clarificationToolAvailable), skills),
+          clarificationToolAvailable,
+        ),
+      );
+
+      const rawResponse = extractAgentText(result);
+      return parsePlannerRoutingDecision(rawResponse);
+    },
+
     async planSpec(
       spec: string,
       systemContext: string,
@@ -1569,6 +1670,7 @@ export async function createCodexSession(
           const clarificationRawResponse = extractAgentText(clarificationResult);
           const clarificationDecision = parseExecutionClarificationDecision(clarificationRawResponse);
           clarificationContext = clarificationDecision.context.trim();
+          await startNewThread();
         }
 
         result = await client.runTurn({
@@ -1695,6 +1797,21 @@ export async function planSpec(
 
   try {
     return await session.planSpec(spec, systemContext);
+  } finally {
+    await session.disconnect();
+  }
+}
+
+export async function selectPlannerAgent(
+  spec: string,
+  systemContext: string,
+  config?: OrcaConfig,
+  interactionContext?: SessionInteractionContext,
+): Promise<PlannerRoutingDecision> {
+  const session = await createCodexSession(process.cwd(), withPlannerRouterModel(config), interactionContext);
+
+  try {
+    return await session.selectPlannerAgent(spec, systemContext);
   } finally {
     await session.disconnect();
   }

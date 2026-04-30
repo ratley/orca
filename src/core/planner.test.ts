@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
-import { runPlanner, setDecidePlanningNeedForTests, setPlanSpecForTests, setReviewTaskGraphForTests } from "./planner.js";
+import { runPlanner, setDecidePlanningNeedForTests, setPlanSpecForTests, setReviewTaskGraphForTests, setSelectPlannerAgentForTests } from "./planner.js";
 import { RunStore } from "../state/store.js";
 
 describe("runPlanner task graph validation", () => {
@@ -26,6 +26,7 @@ describe("runPlanner task graph validation", () => {
     setPlanSpecForTests(async () => ({ tasks: [...baseTasks], rawResponse: "[]" }));
     setDecidePlanningNeedForTests(async () => ({ needsPlan: true, reason: "default" }));
     setReviewTaskGraphForTests(async () => ({ changes: [], rawResponse: "{}" }));
+    setSelectPlannerAgentForTests(async () => ({ planner: "codex", reason: "test default" }));
   });
 
   afterEach(async () => {
@@ -33,6 +34,7 @@ describe("runPlanner task graph validation", () => {
     setPlanSpecForTests(null);
     setDecidePlanningNeedForTests(null);
     setReviewTaskGraphForTests(null);
+    setSelectPlannerAgentForTests(null);
     await rm(tempDir, { recursive: true, force: true });
   });
 
@@ -86,5 +88,39 @@ describe("runPlanner task graph validation", () => {
 
     await runPlanner(specPath, store, runId, undefined, { allowPlanSkip: true });
     expect(calledPlanSpec).toBe(true);
+  });
+
+  test("does not route to a planner when planning is skipped", async () => {
+    setDecidePlanningNeedForTests(async () => ({ needsPlan: false, reason: "single step" }));
+    let calledRouter = false;
+    setSelectPlannerAgentForTests(async () => {
+      calledRouter = true;
+      return { planner: "claude", reason: "should not run" };
+    });
+
+    await runPlanner(specPath, store, runId, undefined, { allowPlanSkip: true });
+    expect(calledRouter).toBe(false);
+  });
+
+  test("uses router when planner agent is auto", async () => {
+    let routerSpec = "";
+    setSelectPlannerAgentForTests(async (spec) => {
+      routerSpec = spec;
+      return { planner: "codex", reason: "narrow coding task" };
+    });
+
+    await runPlanner(specPath, store, runId, { planner: { agent: "auto" } });
+    expect(routerSpec).toBe("# spec");
+  });
+
+  test("forced planner agent bypasses router", async () => {
+    let calledRouter = false;
+    setSelectPlannerAgentForTests(async () => {
+      calledRouter = true;
+      return { planner: "codex", reason: "should not run" };
+    });
+
+    await runPlanner(specPath, store, runId, { planner: { agent: "claude" } });
+    expect(calledRouter).toBe(false);
   });
 });

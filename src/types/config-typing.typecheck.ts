@@ -1,6 +1,18 @@
-import { defineOrcaConfig } from "./index.js";
+import { customModel, defineOrcaConfig } from "./index.js";
 
 defineOrcaConfig({
+  planner: {
+    agent: "auto",
+    router: {
+      model: "gpt-5.3-codex-spark",
+    },
+  },
+  claude: {
+    command: "claude",
+    model: "claude-opus-4-7",
+    effort: "high",
+    timeoutMs: 300000,
+  },
   hooks: {
     onQuestion: async (event) => {
       const questionId: string = event.questions[0]?.id ?? "";
@@ -19,6 +31,44 @@ defineOrcaConfig({
       void errorMessage;
     }
   }
+});
+
+defineOrcaConfig({
+  planner: {
+    agent: "claude",
+  },
+});
+
+defineOrcaConfig({
+  planner: {
+    agent: "codex",
+  },
+});
+
+defineOrcaConfig({
+  planner: {
+    agent: "claude",
+    // @ts-expect-error router is only valid when planner.agent is auto
+    router: {
+      model: "gpt-5.3-codex-spark",
+    },
+  },
+});
+
+defineOrcaConfig({
+  codex: {
+    model: customModel("private-openai-model"),
+  },
+  claude: {
+    model: customModel("private-claude-model"),
+  },
+});
+
+defineOrcaConfig({
+  codex: {
+    // @ts-expect-error unknown OpenAI models must use customModel()
+    model: "private-openai-model",
+  },
 });
 
 defineOrcaConfig({

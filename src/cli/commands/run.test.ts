@@ -182,6 +182,32 @@ describe("run command executor flags", () => {
     expect(reviewChangesMock).not.toHaveBeenCalled();
   });
 
+  test("marks run failed when task graph consultation throws", async () => {
+    const { runModule, createCodexSessionMock, runTaskRunnerMock } = await loadRunModule();
+    createCodexSessionMock.mockImplementationOnce(async () => ({
+      consultTaskGraph: async () => {
+        throw new Error("Quota exceeded. Check your plan and billing details.");
+      },
+      executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
+      runPrompt: async () => '{"summary":"clean","findings":[],"fixed":false}',
+      reviewChanges: async () => "review",
+      disconnect: async () => {}
+    }));
+
+    await parseRun(runModule, ["run", "--task", "x"]);
+
+    expect(process.exitCode).toBe(1);
+    expect(runTaskRunnerMock).not.toHaveBeenCalled();
+
+    const statusPath = path.join(getTempDir(), "runs", "run-test-1000-abcd", "status.json");
+    const status = JSON.parse(await readFile(statusPath, "utf8")) as {
+      overallStatus?: string;
+      errors?: Array<{ message?: string }>;
+    };
+    expect(status.overallStatus).toBe("failed");
+    expect(status.errors?.[0]?.message).toContain("Quota exceeded");
+  });
+
   test("does not dispatch onComplete twice when execution review is disabled", async () => {
     const { runModule, runTaskRunnerMock, hookDispatchMock } = await loadRunModule();
     runTaskRunnerMock.mockImplementationOnce(

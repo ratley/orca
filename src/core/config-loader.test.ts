@@ -157,6 +157,89 @@ describe("config-loader", () => {
     expect(resolved?.executor).toBe("codex");
   });
 
+  test("resolveConfigFromPaths accepts auto planner router and claude config", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(
+      cliPath,
+      "export default { planner: { agent: 'auto', router: { model: 'gpt-5.3-codex-spark' } }, claude: { command: '/bin/claude', model: 'claude-opus-4-7', effort: 'high', timeoutMs: 1000 } };\n",
+      "utf8"
+    );
+
+    const resolved = await resolveConfigFromPaths(
+      path.join(tempDir, "missing-global.js"),
+      path.join(tempDir, "missing-project.js"),
+      cliPath
+    );
+
+    expect(resolved?.planner).toEqual({ agent: "auto", router: { model: "gpt-5.3-codex-spark" } });
+    expect(resolved?.claude).toEqual({ command: "/bin/claude", model: "claude-opus-4-7", effort: "high", timeoutMs: 1000 });
+  });
+
+  test("resolveConfigFromPaths accepts forced claude planner without router", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(cliPath, "export default { planner: { agent: 'claude' } };\n", "utf8");
+
+    const resolved = await resolveConfigFromPaths(
+      path.join(tempDir, "missing-global.js"),
+      path.join(tempDir, "missing-project.js"),
+      cliPath
+    );
+
+    expect(resolved?.planner).toEqual({ agent: "claude" });
+  });
+
+  test("resolveConfigFromPaths rejects invalid planner agent", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(cliPath, "export default { planner: { agent: 'opus' } };\n", "utf8");
+
+    await expect(
+      resolveConfigFromPaths(
+        path.join(tempDir, "missing-global.js"),
+        path.join(tempDir, "missing-project.js"),
+        cliPath
+      )
+    ).rejects.toThrow("Config.planner.agent must be 'auto', 'codex', or 'claude'");
+  });
+
+  test("resolveConfigFromPaths validates planner.router.model shape", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(cliPath, "export default { planner: { router: { model: 123 } } };\n", "utf8");
+
+    await expect(
+      resolveConfigFromPaths(
+        path.join(tempDir, "missing-global.js"),
+        path.join(tempDir, "missing-project.js"),
+        cliPath
+      )
+    ).rejects.toThrow("Config.planner.router.model must be a string");
+  });
+
+  test("resolveConfigFromPaths rejects router for forced planner agents", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(cliPath, "export default { planner: { agent: 'claude', router: { model: 'gpt-5.3-codex-spark' } } };\n", "utf8");
+
+    await expect(
+      resolveConfigFromPaths(
+        path.join(tempDir, "missing-global.js"),
+        path.join(tempDir, "missing-project.js"),
+        cliPath
+      )
+    ).rejects.toThrow("Config.planner.router is only used when Config.planner.agent is 'auto'");
+  });
+
+  test("resolveConfigFromPaths rejects invalid claude effort", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(cliPath, "export default { claude: { effort: 'extreme' } };\n", "utf8");
+
+    await expect(
+      resolveConfigFromPaths(
+        path.join(tempDir, "missing-global.js"),
+        path.join(tempDir, "missing-project.js"),
+        cliPath
+      )
+    ).rejects.toThrow("Config.claude.effort must be one of");
+  });
+
   test("resolveConfigFromPaths throws on invalid codex effort value", async () => {
     const cliPath = path.join(tempDir, "cli.config.js");
     await fs.writeFile(cliPath, "export default { codex: { effort: 'extreme' } };\n", "utf8");
@@ -385,6 +468,37 @@ describe("config-loader", () => {
       review: "high",
       execution: "medium",
     });
+  });
+
+  test("mergeConfigs merges planner and claude settings", () => {
+    const merged = mergeConfigs(
+      {
+        planner: { agent: "auto" as const, router: { model: "gpt-5.3-codex-spark" as const } },
+        claude: { command: "claude-a", effort: "high" as const, timeoutMs: 1000 },
+      },
+      {
+        planner: { agent: "claude" as const },
+        claude: { model: "sonnet" },
+      }
+    );
+
+    expect(merged?.planner).toEqual({ agent: "claude" });
+    expect(merged?.claude).toEqual({ command: "claude-a", model: "sonnet", effort: "high", timeoutMs: 1000 });
+  });
+
+  test("mergeConfigs does not materialize empty planner router", () => {
+    const merged = mergeConfigs({ planner: { agent: "claude" as const } });
+
+    expect(merged?.planner).toEqual({ agent: "claude" });
+  });
+
+  test("mergeConfigs drops router when later config forces planner agent", () => {
+    const merged = mergeConfigs(
+      { planner: { agent: "auto" as const, router: { model: "gpt-5.3-codex-spark" as const } } },
+      { planner: { agent: "codex" as const } }
+    );
+
+    expect(merged?.planner).toEqual({ agent: "codex" });
   });
 
   test("mergeConfigs deeply merges review plan/execution settings", () => {

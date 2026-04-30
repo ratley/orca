@@ -101,6 +101,75 @@ function coerceConfig(candidate: unknown): OrcaConfig {
     candidate.executor = "codex";
   }
 
+  if ("planner" in candidate && candidate.planner !== undefined) {
+    if (!isObject(candidate.planner)) {
+      throw new Error(`Config.planner must be an object, got ${describeType(candidate.planner)}`);
+    }
+
+    if ("agent" in candidate.planner && candidate.planner.agent !== undefined) {
+      if (candidate.planner.agent !== "auto" && candidate.planner.agent !== "codex" && candidate.planner.agent !== "claude") {
+        const display = typeof candidate.planner.agent === "string"
+          ? candidate.planner.agent
+          : (JSON.stringify(candidate.planner.agent) ?? describeType(candidate.planner.agent));
+        throw new Error(`Config.planner.agent must be 'auto', 'codex', or 'claude', got ${display}`);
+      }
+    }
+
+    if ("router" in candidate.planner && candidate.planner.router !== undefined) {
+      if (candidate.planner.agent === "claude" || candidate.planner.agent === "codex") {
+        throw new Error(
+          `Config.planner.router is only used when Config.planner.agent is 'auto'. Remove router for forced '${candidate.planner.agent}' planning.`
+        );
+      }
+
+      if (!isObject(candidate.planner.router)) {
+        throw new Error(`Config.planner.router must be an object, got ${describeType(candidate.planner.router)}`);
+      }
+
+      if ("model" in candidate.planner.router && candidate.planner.router.model !== undefined && typeof candidate.planner.router.model !== "string") {
+        throw new Error(`Config.planner.router.model must be a string, got ${describeType(candidate.planner.router.model)}`);
+      }
+    }
+  }
+
+  if ("claude" in candidate && candidate.claude !== undefined) {
+    if (!isObject(candidate.claude)) {
+      throw new Error(`Config.claude must be an object, got ${describeType(candidate.claude)}`);
+    }
+
+    if ("command" in candidate.claude && candidate.claude.command !== undefined && typeof candidate.claude.command !== "string") {
+      throw new Error(`Config.claude.command must be a string, got ${describeType(candidate.claude.command)}`);
+    }
+
+    if ("model" in candidate.claude && candidate.claude.model !== undefined && typeof candidate.claude.model !== "string") {
+      throw new Error(`Config.claude.model must be a string, got ${describeType(candidate.claude.model)}`);
+    }
+
+    if ("effort" in candidate.claude && candidate.claude.effort !== undefined) {
+      if (
+        candidate.claude.effort !== "low" &&
+        candidate.claude.effort !== "medium" &&
+        candidate.claude.effort !== "high" &&
+        candidate.claude.effort !== "xhigh" &&
+        candidate.claude.effort !== "max"
+      ) {
+        const effortDisplay = typeof candidate.claude.effort === "string"
+          ? candidate.claude.effort
+          : (JSON.stringify(candidate.claude.effort) ?? describeType(candidate.claude.effort));
+        throw new Error(`Config.claude.effort must be one of low, medium, high, xhigh, max; got ${effortDisplay}`);
+      }
+    }
+
+    if ("timeoutMs" in candidate.claude && candidate.claude.timeoutMs !== undefined) {
+      if (typeof candidate.claude.timeoutMs !== "number" || !Number.isInteger(candidate.claude.timeoutMs) || candidate.claude.timeoutMs < 1) {
+        const timeoutDisplay = typeof candidate.claude.timeoutMs === "number"
+          ? candidate.claude.timeoutMs
+          : (JSON.stringify(candidate.claude.timeoutMs) ?? describeType(candidate.claude.timeoutMs));
+        throw new Error(`Config.claude.timeoutMs must be an integer >= 1, got ${timeoutDisplay}`);
+      }
+    }
+  }
+
   if ("codex" in candidate && candidate.codex !== undefined) {
     if (!isObject(candidate.codex)) {
       throw new Error(`Config.codex must be an object, got ${describeType(candidate.codex)}`);
@@ -319,6 +388,31 @@ export function mergeConfigs(...configs: Array<OrcaConfig | undefined>): OrcaCon
         ...config.codex,
         ...(mergedThinkingLevel !== undefined ? { thinkingLevel: mergedThinkingLevel } : {})
       };
+    }
+
+    if (merged.planner !== undefined || config.planner !== undefined) {
+      const mergedRouter = (merged.planner?.router !== undefined || config.planner?.router !== undefined)
+        ? {
+          ...merged.planner?.router,
+          ...config.planner?.router
+        }
+        : undefined;
+      const mergedPlannerWithoutRouter = { ...merged.planner };
+      const configPlannerWithoutRouter = { ...config.planner };
+      delete (mergedPlannerWithoutRouter as { router?: unknown }).router;
+      delete (configPlannerWithoutRouter as { router?: unknown }).router;
+
+      merged.planner = {
+        ...mergedPlannerWithoutRouter,
+        ...configPlannerWithoutRouter,
+        ...(mergedRouter !== undefined && config.planner?.agent !== "claude" && config.planner?.agent !== "codex"
+          ? { router: mergedRouter }
+          : {})
+      };
+    }
+
+    if (merged.claude !== undefined || config.claude !== undefined) {
+      merged.claude = { ...merged.claude, ...config.claude };
     }
 
     if (merged.pr !== undefined || config.pr !== undefined) {

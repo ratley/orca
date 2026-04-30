@@ -3,9 +3,9 @@ name: orca
 description: "Orchestrate multi-step AI coding tasks via the Orca CLI. Use when: running multi-file code changes, spawning background agents, planning and executing complex coding tasks end-to-end. NOT for: simple single-file edits, reading code, or any work in ~/clawd workspace."
 ---
 
-# Orca — Operator Guide
+# Orca - Operator Guide
 
-Orca (`orcastrator`) breaks a goal into a task graph and executes it end-to-end via Codex. Codex plans and executes; a reviewer catches regressions and can auto-fix.
+Orca (`orcastrator`) breaks a goal into a task graph and executes it end-to-end via Codex. Planning can be skipped, routed to Codex, or routed to the local Claude Code CLI through `claude -p`; execution and review still run through Codex.
 
 ---
 
@@ -13,7 +13,40 @@ Orca (`orcastrator`) breaks a goal into a task graph and executes it end-to-end 
 
 - Must be run inside a git repo (or pass `--skip-git-repo-check`)
 - Codex executor (default): requires `~/.codex/auth.json` (Codex OAuth)
+- Claude planning (optional): requires `claude` on PATH, or set `claude.command`
 - Install: `npm install -g orcastrator`
+
+---
+
+## Planner Routing
+
+| Planner config | When to use |
+|---|---|
+| `planner.agent: "auto"` (default) | Let a Codex router choose Claude or Codex for task graph generation |
+| `planner.agent: "claude"` | Force broad or ambiguous planning through local Claude Code (`claude -p`) |
+| `planner.agent: "codex"` | Force task graph generation to stay in Codex |
+
+`planner.router` only applies to `planner.agent: "auto"`. Forced planner configs should be this simple:
+
+```json
+[
+  { "planner": { "agent": "claude" } },
+  { "planner": { "agent": "codex" } }
+]
+```
+
+Automatic routing is the only shape that uses a router model:
+
+```json
+{
+  "planner": {
+    "agent": "auto",
+    "router": { "model": "gpt-5.3-codex-spark" }
+  }
+}
+```
+
+Claude planning shells out to `claude -p` with the prompt on stdin. It does not replace Codex execution, task graph review, or post-execution review.
 
 ---
 
@@ -171,6 +204,20 @@ export default {
   executor: "codex",              // "codex"
   sessionLogs: "./session-logs",  // where to write session logs
 
+  planner: {
+    agent: "auto",                // "auto" | "claude" | "codex"
+    router: {
+      model: "gpt-5.3-codex-spark", // only valid with agent: "auto"
+    },
+  },
+
+  claude: {
+    command: "claude",
+    model: "claude-opus-4-7",
+    effort: "high",
+    timeoutMs: 300000,
+  },
+
   hooks: {
     onFindings: async (event, context) => { /* fires after reviewer */ },
     onComplete: async (event, context) => { /* fires on success */ },
@@ -193,6 +240,8 @@ export default {
   },
 
   codex: {
+    model: "gpt-5.5",
+    effort: "high",
     multiAgent: false,
     perCwdExtraUserRoots: [
       { cwd: process.cwd(), extraUserRoots: ["/tmp/shared-skills"] }

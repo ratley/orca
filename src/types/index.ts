@@ -177,6 +177,86 @@ export interface TaskGraphReviewResult {
   rawResponse: string;
 }
 
+export type PlannerAgent = "codex" | "claude";
+export type PlannerAgentSelection = PlannerAgent | "auto";
+export type ClaudeEffort = CodexEffort | "max";
+
+declare const CUSTOM_MODEL_ID: unique symbol;
+export type CustomModelId = string & { readonly [CUSTOM_MODEL_ID]: true };
+
+export type OpenAIModelId =
+  | "gpt-5.5"
+  | "gpt-5.2"
+  | "gpt-5.2-pro"
+  | "gpt-5.2-codex"
+  | "gpt-5.1"
+  | "gpt-5.1-codex"
+  | "gpt-5.1-codex-max"
+  | "gpt-5.1-codex-mini"
+  | "gpt-5"
+  | "gpt-5-codex"
+  | "gpt-5.3-codex"
+  | "gpt-5.3-codex-spark"
+  | CustomModelId;
+
+export type ClaudeModelId =
+  | "claude-opus-4-7"
+  | "claude-sonnet-4-6"
+  | "claude-opus-4-1"
+  | "claude-opus-4-1-20250805"
+  | "claude-opus-4-0"
+  | "claude-opus-4-20250514"
+  | "claude-sonnet-4-0"
+  | "claude-sonnet-4-20250514"
+  | "claude-3-7-sonnet-latest"
+  | "claude-3-7-sonnet-20250219"
+  | "claude-3-5-sonnet-latest"
+  | "claude-3-5-sonnet-20241022"
+  | "claude-3-5-haiku-latest"
+  | "claude-3-5-haiku-20241022"
+  | "opus"
+  | "sonnet"
+  | "haiku"
+  | "opusplan"
+  | "default"
+  | CustomModelId;
+
+export interface PlannerRoutingDecision {
+  planner: PlannerAgent;
+  reason: string;
+}
+
+export interface PlannerRouterConfig {
+  /**
+   * Codex model used only for planner.agent="auto" routing.
+   */
+  model?: OpenAIModelId;
+}
+
+export type PlannerConfig =
+  | {
+    /**
+     * Ask a Codex router to choose Claude or Codex for task graph generation.
+     * This is also the default when planner is omitted.
+     */
+    agent?: "auto";
+    router?: PlannerRouterConfig;
+  }
+  | {
+    /**
+     * Always use Claude for non-skipped task graph generation.
+     */
+    agent: "claude";
+    router?: never;
+  }
+  | {
+    /**
+     * Always use Codex for non-skipped task graph generation.
+     */
+    agent: "codex";
+    router?: never;
+  };
+
 export interface OrcaConfig {
   openaiApiKey?: string;
   runsDir?: string;
@@ -184,9 +264,16 @@ export interface OrcaConfig {
   skills?: string[];
   maxRetries?: number;
   executor?: "codex";
+  planner?: PlannerConfig;
+  claude?: {
+    command?: string;
+    model?: ClaudeModelId;
+    effort?: ClaudeEffort;
+    timeoutMs?: number;
+  };
   codex?: {
     enabled?: boolean;
-    model?: string;
+    model?: OpenAIModelId;
     effort?: CodexEffort;
     thinkingLevel?: {
       decision?: CodexEffort;
@@ -236,4 +323,8 @@ export interface OrcaConfig {
 
 export function defineOrcaConfig(config: OrcaConfig): OrcaConfig {
   return config;
+}
+
+export function customModel<T extends string>(id: T): CustomModelId {
+  return id as unknown as CustomModelId;
 }

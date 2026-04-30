@@ -5,9 +5,11 @@ import {
   decidePlanningNeed as decidePlanningNeedWithCodex,
   planSpec as planSpecWithCodex,
   reviewTaskGraph as reviewTaskGraphWithCodex,
+  selectPlannerAgent as selectPlannerAgentWithCodex,
   type SessionInteractionContext,
 } from "../agents/codex/session.js";
-import type { HookEvent, OrcaConfig, Task, TaskGraphReviewResult } from "../types/index.js";
+import { planSpec as planSpecWithClaude } from "../agents/claude/session.js";
+import type { HookEvent, OrcaConfig, PlannerAgent, PlannerRoutingDecision, Task, TaskGraphReviewResult } from "../types/index.js";
 import { logger } from "../utils/logger.js";
 import { loadSkills, type LoadedSkill } from "../utils/skill-loader.js";
 import { RunStore } from "../state/store.js";
@@ -21,6 +23,7 @@ const PROJECT_INSTRUCTION_CHAR_CAP = 4_000;
 type PlanSpecFn = typeof planSpecWithCodex;
 type DecidePlanningNeedFn = typeof decidePlanningNeedWithCodex;
 type ReviewTaskGraphFn = typeof reviewTaskGraphWithCodex;
+type SelectPlannerAgentFn = typeof selectPlannerAgentWithCodex;
 
 export class InvalidPlanError extends Error {
   readonly stage: "planner" | "review";
@@ -42,6 +45,7 @@ type ProjectInstruction = {
 let testPlanSpecOverride: PlanSpecFn | null = null;
 let testDecidePlanningNeedOverride: DecidePlanningNeedFn | null = null;
 let testReviewTaskGraphOverride: ReviewTaskGraphFn | null = null;
+let testSelectPlannerAgentOverride: SelectPlannerAgentFn | null = null;
 
 export function setPlanSpecForTests(fn: PlanSpecFn | null): void {
   testPlanSpecOverride = fn;
@@ -55,8 +59,16 @@ export function setReviewTaskGraphForTests(fn: ReviewTaskGraphFn | null): void {
   testReviewTaskGraphOverride = fn;
 }
 
-function resolvePlanSpecImpl(_config?: OrcaConfig): PlanSpecFn {
-  return testPlanSpecOverride ?? planSpecWithCodex;
+export function setSelectPlannerAgentForTests(fn: SelectPlannerAgentFn | null): void {
+  testSelectPlannerAgentOverride = fn;
+}
+
+function resolvePlanSpecImpl(_config: OrcaConfig | undefined, planner: PlannerAgent): PlanSpecFn {
+  if (testPlanSpecOverride) {
+    return testPlanSpecOverride;
+  }
+
+  return planner === "claude" ? planSpecWithClaude : planSpecWithCodex;
 }
 
 function resolveDecidePlanningNeedImpl(_config?: OrcaConfig): DecidePlanningNeedFn {
@@ -65,6 +77,28 @@ function resolveDecidePlanningNeedImpl(_config?: OrcaConfig): DecidePlanningNeed
 
 function resolveReviewTaskGraphImpl(_config?: OrcaConfig): ReviewTaskGraphFn {
   return testReviewTaskGraphOverride ?? reviewTaskGraphWithCodex;
+}
+
+function resolveConfiguredPlannerAgent(config?: OrcaConfig): PlannerAgent | "auto" {
+  return config?.planner?.agent ?? "auto";
+}
+
+async function selectPlanningAgent(
+  spec: string,
+  systemContext: string,
+  config?: OrcaConfig,
+  interactionContext?: SessionInteractionContext,
+): Promise<PlannerRoutingDecision> {
+  const configured = resolveConfiguredPlannerAgent(config);
+  if (configured !== "auto") {
+    return {
+      planner: configured,
+      reason: `configured planner.agent=${configured}`,
+    };
+  }
+
+  const router = testSelectPlannerAgentOverride ?? selectPlannerAgentWithCodex;
+  return await router(spec, systemContext, config, interactionContext);
 }
 
 function formatSkillsSection(skills: LoadedSkill[]): string {
@@ -249,7 +283,10 @@ async function runFullPlanning(
   config?: OrcaConfig,
   interactionContext?: SessionInteractionContext,
 ): Promise<Task[]> {
-  const planSpecImpl = resolvePlanSpecImpl(config);
+  const selectedPlanner = await selectPlanningAgent(spec, systemContext, config, interactionContext);
+  logger.info(`Planning agent: ${selectedPlanner.planner} (${selectedPlanner.reason})`);
+
+  const planSpecImpl = resolvePlanSpecImpl(config, selectedPlanner.planner);
   const result = await planSpecImpl(spec, systemContext, config, interactionContext);
 
   try {

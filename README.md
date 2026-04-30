@@ -111,6 +111,7 @@ Orca loads config in this order (later overrides earlier):
 `.ts` is preferred over `.js` when both exist.
 
 Orca is Codex-only. Stale executor values from older configs are coerced to `codex`.
+Planning can be routed separately: by default Orca asks a lightweight Codex router whether Claude or Codex should generate the task graph, then Codex executes the resulting tasks.
 
 ```ts
 // orca.config.ts
@@ -123,9 +124,23 @@ export default defineOrcaConfig({
   skills: ["./.orca/skills"],
   maxRetries: 1,
 
+  planner: {
+    agent: "auto",                  // "auto" | "claude" | "codex"
+    router: {
+      model: "gpt-5.3-codex-spark",
+    },
+  },
+
+  claude: {
+    command: "claude",              // uses `claude -p` for planning
+    model: "claude-opus-4-7",
+    effort: "high",
+    timeoutMs: 300000,
+  },
+
   codex: {
-    model: "gpt-5.3-codex",
-    effort: "medium",             // fallback for all Codex turns unless overridden below
+    model: "gpt-5.5",
+    effort: "high",               // fallback for all Codex turns unless overridden below
     thinkingLevel: {
       decision: "low",            // planning gate / quick routing decisions
       planning: "xhigh",          // task graph generation
@@ -183,6 +198,54 @@ After planning, Orca runs a pre-execution review that can edit the task graph (a
 After execution, Orca runs validation commands and asks Codex to review findings. With `onFindings: "auto_fix"`, it applies fixes and retries up to `maxCycles` times, then reports. Set `ORCA_SKIP_VALIDATORS=1` to skip validator auto-detection at runtime.
 
 Use `codex.thinkingLevel` when you want per-step reasoning levels instead of a single global `codex.effort`. Supported steps: `decision`, `planning`, `review`, `execution`.
+
+### Planner routing
+
+Set `planner.agent: "claude"` to always use the local Claude Code CLI for task graph generation, or `planner.agent: "codex"` to keep planning in Codex. The default `planner.agent: "auto"` asks Codex using `planner.router.model` and routes broad, creative, ambiguous work to Claude while keeping narrow implementation-heavy planning in Codex.
+
+`planner.router` is only valid with `planner.agent: "auto"`:
+
+```ts
+// Automatic routing
+planner: {
+  agent: "auto",
+  router: { model: "gpt-5.3-codex-spark" },
+}
+
+// Forced planning agent; no router is used
+planner: {
+  agent: "claude",
+}
+```
+
+The same rule is easiest to read as JSON shapes:
+
+```json
+[
+  { "planner": { "agent": "auto", "router": { "model": "gpt-5.3-codex-spark" } } },
+  { "planner": { "agent": "claude" } },
+  { "planner": { "agent": "codex" } }
+]
+```
+
+Do not include `router` with forced `claude` or forced `codex` planning; Orca rejects that config because the router is bypassed.
+
+Claude planning shells out to the configured command with `-p` and passes the prompt on stdin. It does not replace Codex execution, task-graph review, or post-execution review.
+
+Model IDs are typed for the documented OpenAI and Claude models Orca supports. Check the provider docs when updating those lists: [OpenAI models](https://platform.openai.com/docs/models), [Anthropic Claude models](https://docs.anthropic.com/en/docs/about-claude/models), and [Claude Code model config](https://docs.anthropic.com/en/docs/claude-code/model-config). If you need an unreleased, private, or provider-specific model, wrap it explicitly:
+
+```ts
+import { customModel, defineOrcaConfig } from "orcastrator";
+
+export default defineOrcaConfig({
+  codex: {
+    model: customModel("private-openai-model"),
+  },
+  claude: {
+    model: customModel("private-claude-model"),
+  },
+});
+```
 
 ### Multi-agent mode
 

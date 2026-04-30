@@ -628,6 +628,23 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
           });
           await writeSessionSummary(store, runId, effectiveConfig?.sessionLogs);
         }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const failedAt = new Date().toISOString();
+        const currentRun = await store.getRun(runId);
+        await store.updateRun(runId, {
+          overallStatus: "failed",
+          ...(currentRun
+            ? {
+                errors: [
+                  ...currentRun.errors,
+                  { at: failedAt, message },
+                ],
+              }
+            : {}),
+        });
+        await writeSessionSummary(store, runId, effectiveConfig?.sessionLogs);
+        throw error;
       } finally {
         await codexSession.disconnect();
       }
@@ -654,6 +671,9 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
 
     console.log(`Overall status: ${refreshed.overallStatus}`);
     console.log(`Run dir: ${store.getRunDir(runId)}`);
+    if (refreshed.overallStatus !== "completed") {
+      process.exitCode = 1;
+    }
   } finally {
     if (usesInlineTask) {
       await unlink(specPath).catch(() => {
