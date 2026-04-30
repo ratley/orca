@@ -282,11 +282,11 @@ Options:
   -h, --help       display help for command
 ```
 
-## Config And Public Type Reference
+## Config Schema And Public Type Reference
 
 Codex effort values: `low|medium|high|xhigh`.
 
-This section is generated from `src/types/index.ts`, which is re-exported by the package entry point.
+This section is generated from the Zod-backed config schema and public types in `src/types/index.ts`, which are re-exported by the package entry point.
 
 ```ts
 export type PlannerAgent = "codex" | "claude";
@@ -432,4 +432,221 @@ export interface OrcaConfig {
     };
   };
 }
+
+const scalarStringSchema = z.custom<string>((value) => typeof value === "string", {
+  message: "must be a string",
+});
+const scalarBooleanSchema = z.custom<boolean>((value) => typeof value === "boolean", {
+  message: "must be a boolean",
+});
+const positiveIntegerSchema = z.custom<number>(
+  (value) => typeof value === "number" && Number.isInteger(value) && value >= 1,
+  { message: "must be an integer >= 1" },
+);
+const nonnegativeIntegerSchema = z.custom<number>(
+  (value) => typeof value === "number" && Number.isInteger(value) && value >= 0,
+  { message: "must be a nonnegative integer" },
+);
+
+const openAIModelSchema = scalarStringSchema as z.ZodType<OpenAIModelId>;
+const claudeModelSchema = scalarStringSchema as z.ZodType<ClaudeModelId>;
+
+const codexEffortSchema = z
+  .custom<string>((value) => typeof value === "string", {
+    message: "must be a string",
+  })
+  .transform((value, context): CodexEffort => {
+    try {
+      return parseCodexEffort(value);
+    } catch (error) {
+      context.addIssue({
+        code: "custom",
+        message: error instanceof Error ? error.message : String(error),
+      });
+
+      return z.NEVER;
+    }
+  });
+
+const claudeEffortSchema = z.custom<ClaudeEffort>(
+  (value) => typeof value === "string" && ([...CODEX_EFFORT_VALUES, "max"] as string[]).includes(value),
+  { message: "must be one of low, medium, high, xhigh, max" },
+);
+
+const hookNameValues = [
+  "onMilestone",
+  "onQuestion",
+  "onTaskComplete",
+  "onTaskFail",
+  "onInvalidPlan",
+  "onFindings",
+  "onComplete",
+  "onError",
+] as const satisfies readonly HookName[];
+
+const hookNameSet = new Set<string>(hookNameValues);
+
+function addUnknownHookIssue(context: z.RefinementCtx, configPath: "hooks" | "hookCommands", hookName: string) {
+  context.addIssue({
+    code: "custom",
+    path: [hookName],
+    message: `Unknown hook key in Config.${configPath}: ${hookName}. Allowed hooks: ${hookNameValues.join(", ")}`,
+  });
+}
+
+const hookHandlerSchema = z.custom<HookHandler>((value) => typeof value === "function", {
+  message: "must be a function",
+});
+
+const hooksSchema = z.record(z.string(), hookHandlerSchema).superRefine((hooks, context) => {
+  for (const hookName of Object.keys(hooks)) {
+    if (!hookNameSet.has(hookName)) {
+      addUnknownHookIssue(context, "hooks", hookName);
+    }
+  }
+}) as z.ZodType<OrcaConfig["hooks"]>;
+
+const hookCommandsSchema = z.record(z.string(), scalarStringSchema).superRefine((hookCommands, context) => {
+  for (const hookName of Object.keys(hookCommands)) {
+    if (!hookNameSet.has(hookName)) {
+      addUnknownHookIssue(context, "hookCommands", hookName);
+    }
+  }
+}) as z.ZodType<OrcaConfig["hookCommands"]>;
+
+export const PlannerRouterConfigSchema = z
+  .object({
+    model: openAIModelSchema.optional(),
+  })
+  .passthrough() as z.ZodType<PlannerRouterConfig>;
+
+export const PlannerConfigSchema = z
+  .object({
+    agent: z
+      .enum(["auto", "codex", "claude"], {
+        message: "must be 'auto', 'codex', or 'claude'",
+      })
+      .optional(),
+    router: PlannerRouterConfigSchema.optional(),
+  })
+  .passthrough()
+  .superRefine((planner, context) => {
+    if ((planner.agent === "claude" || planner.agent === "codex") && planner.router !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["router"],
+        message: `Config.planner.router is only used when Config.planner.agent is 'auto'. Remove router for forced '${planner.agent}' planning.`,
+      });
+    }
+  }) as z.ZodType<PlannerConfig>;
+
+const codexThinkingLevelSchema = z
+  .object({
+    decision: codexEffortSchema.optional(),
+    planning: codexEffortSchema.optional(),
+    review: codexEffortSchema.optional(),
+    execution: codexEffortSchema.optional(),
+  })
+  .passthrough();
+
+export const CodexConfigSchema = z
+  .object({
+    enabled: scalarBooleanSchema.optional(),
+    model: openAIModelSchema.optional(),
+    effort: codexEffortSchema.optional(),
+    thinkingLevel: codexThinkingLevelSchema.optional(),
+    command: scalarStringSchema.optional(),
+    timeoutMs: positiveIntegerSchema.optional(),
+    multiAgent: scalarBooleanSchema.optional(),
+    perCwdExtraUserRoots: z
+      .array(
+        z
+          .object({
+            cwd: scalarStringSchema,
+            extraUserRoots: z.array(scalarStringSchema),
+          })
+          .passthrough(),
+      )
+      .optional(),
+  })
+  .passthrough()
+  .superRefine((codex, context) => {
+    if ("thinking" in codex && codex.thinking !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["thinking"],
+        message: "Config.codex.thinking is no longer supported. Use Config.codex.thinkingLevel instead.",
+      });
+    }
+  }) as z.ZodType<OrcaConfig["codex"]>;
+
+export const ClaudeConfigSchema = z
+  .object({
+    command: scalarStringSchema.optional(),
+    model: claudeModelSchema.optional(),
+    effort: claudeEffortSchema.optional(),
+    timeoutMs: positiveIntegerSchema.optional(),
+  })
+  .passthrough() as z.ZodType<OrcaConfig["claude"]>;
+
+const reviewOnInvalidSchema = z.enum(["fail", "warn_skip"], {
+  message: "must be 'fail' or 'warn_skip'",
+});
+const reviewOnFindingsSchema = z.enum(["auto_fix", "report_only", "fail"], {
+  message: "must be 'auto_fix', 'report_only', or 'fail'",
+});
+
+export const ReviewConfigSchema = z
+  .object({
+    enabled: scalarBooleanSchema.optional(),
+    onInvalid: reviewOnInvalidSchema.optional(),
+    plan: z
+      .object({
+        enabled: scalarBooleanSchema.optional(),
+        onInvalid: reviewOnInvalidSchema.optional(),
+      })
+      .passthrough()
+      .optional(),
+    execution: z
+      .object({
+        enabled: scalarBooleanSchema.optional(),
+        maxCycles: positiveIntegerSchema.optional(),
+        onFindings: reviewOnFindingsSchema.optional(),
+        validator: z
+          .object({
+            auto: scalarBooleanSchema.optional(),
+            commands: z.array(scalarStringSchema).optional(),
+          })
+          .passthrough()
+          .optional(),
+        prompt: scalarStringSchema.optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough() as z.ZodType<OrcaConfig["review"]>;
+
+export const OrcaConfigSchema = z
+  .object({
+    openaiApiKey: scalarStringSchema.optional(),
+    runsDir: scalarStringSchema.optional(),
+    sessionLogs: scalarStringSchema.optional(),
+    skills: z.array(scalarStringSchema).optional(),
+    maxRetries: nonnegativeIntegerSchema.optional(),
+    executor: z.literal("codex").optional(),
+    planner: PlannerConfigSchema.optional(),
+    claude: ClaudeConfigSchema.optional(),
+    codex: CodexConfigSchema.optional(),
+    hooks: hooksSchema.optional(),
+    hookCommands: hookCommandsSchema.optional(),
+    pr: z
+      .object({
+        enabled: scalarBooleanSchema.optional(),
+        requireConfirmation: scalarBooleanSchema.optional(),
+      })
+      .passthrough()
+      .optional(),
+    review: ReviewConfigSchema.optional(),
+  })
+  .passthrough();
 ```

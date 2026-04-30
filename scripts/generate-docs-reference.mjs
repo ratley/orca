@@ -17,15 +17,11 @@ const outputPath =
     : defaultOutputPath;
 
 if (!existsSync(cliPath)) {
-  console.error(
-    "Missing dist/cli/index.js. Run `npm run build` before generating docs.",
-  );
+  console.error("Missing dist/cli/index.js. Run `npm run build` before generating docs.");
   process.exit(1);
 }
 
-const packageJson = JSON.parse(
-  readFileSync(resolve(rootDir, "package.json"), "utf8"),
-);
+const packageJson = JSON.parse(readFileSync(resolve(rootDir, "package.json"), "utf8"));
 const typeSource = readFileSync(resolve(rootDir, "src/types/index.ts"), "utf8");
 const effortSource = readFileSync(resolve(rootDir, "src/types/effort.ts"), "utf8");
 
@@ -52,9 +48,7 @@ function extractSourceSection(source, startMarker, endMarker) {
 }
 
 function extractArrayValues(source, marker) {
-  const match = source.match(
-    new RegExp(`${marker} = \\[([^\\]]+)\\] as const;`),
-  );
+  const match = source.match(new RegExp(`${marker} = \\[([^\\]]+)\\] as const;`));
   if (!match?.[1]) {
     throw new Error(`Could not find values for ${marker}`);
   }
@@ -87,10 +81,7 @@ const configReference = extractSourceSection(
   "export type PlannerAgent",
   "export function defineOrcaConfig",
 );
-const effortValues = extractArrayValues(
-  effortSource,
-  "CODEX_THINKING_LEVEL_VALUES",
-);
+const effortValues = extractArrayValues(effortSource, "CODEX_THINKING_LEVEL_VALUES");
 
 const commandSections = commandHelps
   .map(([title, args]) => {
@@ -122,11 +113,11 @@ This section is generated from the Commander command tree used by the built Orca
 
 ${commandSections}
 
-## Config And Public Type Reference
+## Config Schema And Public Type Reference
 
 Codex effort values: \`${effortValues.join("|")}\`.
 
-This section is generated from \`src/types/index.ts\`, which is re-exported by the package entry point.
+This section is generated from the Zod-backed config schema and public types in \`src/types/index.ts\`, which are re-exported by the package entry point.
 
 \`\`\`ts
 ${configReference}

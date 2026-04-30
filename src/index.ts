@@ -1,4 +1,13 @@
-export { customModel, defineOrcaConfig } from "./types/index.js";
+export {
+  ClaudeConfigSchema,
+  CodexConfigSchema,
+  OrcaConfigSchema,
+  PlannerConfigSchema,
+  PlannerRouterConfigSchema,
+  ReviewConfigSchema,
+  customModel,
+  defineOrcaConfig,
+} from "./types/index.js";
 
 export type {
   BaseHookEvent,

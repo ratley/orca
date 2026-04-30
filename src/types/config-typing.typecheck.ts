@@ -1,4 +1,4 @@
-import { customModel, defineOrcaConfig } from "./index.js";
+import { OrcaConfigSchema, customModel, defineOrcaConfig } from "./index.js";
 
 defineOrcaConfig({
   planner: {
@@ -32,6 +32,15 @@ defineOrcaConfig({
     },
   },
 });
+
+const parsedConfig = OrcaConfigSchema.parse({
+  planner: {
+    agent: "auto",
+    router: { model: "gpt-5.3-codex-spark" },
+  },
+});
+
+defineOrcaConfig(parsedConfig);
 
 defineOrcaConfig({
   planner: {
