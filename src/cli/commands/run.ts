@@ -1,19 +1,17 @@
 import { constants as fsConstants } from "node:fs";
-import { exec as execCallback } from "node:child_process";
-import { access, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { access, mkdir, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { promisify } from "node:util";
 
 import { InvalidArgumentError, type Command } from "commander";
-import { z } from "zod";
 
 import { createCodexSession } from "../../agents/codex/session.js";
 import { ensureCodexMultiAgent } from "../../core/codex-config.js";
 import { resolveConfig } from "../../core/config-loader.js";
+import { formatFlowInstructions, resolveSelectedFlowConfig } from "../../core/flow-config.js";
 import { InvalidPlanError, runPlanner } from "../../core/planner.js";
-import { runTaskRunner } from "../../core/task-runner.js";
+import { resolveTaskRunnerParallelism, runTaskRunner } from "../../core/task-runner.js";
 import { createOpenclawHookHandler, detectOpenclawAvailability } from "../../hooks/adapters/openclaw.js";
 import { createStdoutHookHandler } from "../../hooks/adapters/stdout.js";
 import { HookDispatcher } from "../../hooks/dispatcher.js";
@@ -21,32 +19,8 @@ import { RunStore } from "../../state/store.js";
 import type { HookEvent, HookHandler, HookName, OrcaConfig } from "../../types/index.js";
 import { parseCodexEffort, type CodexEffort } from "../../types/effort.js";
 import { generateRunId } from "../../utils/ids.js";
+import { buildReviewCompletedTaskOption, runPostExecutionReview } from "./review-runner.js";
 import { readCodexAuthJson } from "./setup.js";
-
-const exec = promisify(execCallback);
-
-type FindingsMode = "auto_fix" | "report_only" | "fail";
-
-interface ValidationResult {
-  command: string;
-  exitCode: number;
-  output: string;
-}
-
-interface ExecutionReviewResult {
-  findings: string[];
-  summary: string;
-  fixed: boolean;
-  rawResponse: string;
-}
-
-const ExecutionReviewPayloadSchema = z.object({
-  summary: z.string().min(1),
-  findings: z.array(z.string()),
-  fixed: z.boolean()
-}).strict();
-
-type StructuredReviewResult = z.infer<typeof ExecutionReviewPayloadSchema>;
 
 export interface RunCommandOptions {
   spec?: string;
@@ -55,6 +29,7 @@ export interface RunCommandOptions {
   prompt?: string;
   goal?: string;
   config?: string;
+  flow?: string;
   codexOnly?: boolean;
   codexEffort?: CodexEffort;
   onMilestone?: string;
@@ -190,161 +165,6 @@ function applyExecutorOverrideForRun(
   return nextConfig;
 }
 
-function getExecutionReviewConfig(config?: OrcaConfig): {
-  enabled: boolean;
-  maxCycles: number;
-  onFindings: FindingsMode;
-  validatorAuto: boolean;
-  validatorCommands?: string[];
-  prompt?: string;
-} {
-  const review = (config?.review ?? {}) as OrcaConfig["review"] & { enabled?: boolean };
-  const executionConfig = review.execution;
-  const skipValidators = process.env.ORCA_SKIP_VALIDATORS === "1";
-  return {
-    enabled: executionConfig?.enabled ?? review.enabled ?? true,
-    maxCycles: executionConfig?.maxCycles ?? 2,
-    onFindings: executionConfig?.onFindings ?? "auto_fix",
-    validatorAuto: skipValidators ? false : (executionConfig?.validator?.auto ?? true),
-    ...(executionConfig?.validator?.commands !== undefined ? { validatorCommands: executionConfig.validator.commands } : {}),
-    ...(executionConfig?.prompt !== undefined ? { prompt: executionConfig.prompt } : {})
-  };
-}
-
-async function detectValidatorCommands(): Promise<string[]> {
-  try {
-    const packageJson = JSON.parse(await readFile(path.join(process.cwd(), "package.json"), "utf8")) as { scripts?: Record<string, string> };
-    const scripts = packageJson.scripts ?? {};
-    if (typeof scripts.validate === "string") {
-      return ["npm run validate"];
-    }
-
-    const fallbacks = ["lint", "typecheck", "test", "build"].filter((name) => typeof scripts[name] === "string");
-    return fallbacks.map((name) => `npm run ${name}`);
-  } catch {
-    return [];
-  }
-}
-
-async function runValidatorCommands(commands: string[]): Promise<ValidationResult[]> {
-  const results: ValidationResult[] = [];
-  for (const command of commands) {
-    try {
-      const { stdout, stderr } = await exec(command, { cwd: process.cwd() });
-      results.push({ command, exitCode: 0, output: `${stdout}${stderr}`.trim() });
-    } catch (error) {
-      const failed = error as { stdout?: string; stderr?: string; code?: number };
-      results.push({
-        command,
-        exitCode: typeof failed.code === "number" ? failed.code : 1,
-        output: `${failed.stdout ?? ""}${failed.stderr ?? ""}`.trim()
-      });
-    }
-  }
-
-  return results;
-}
-
-function buildPostExecutionReviewPrompt(cycleIndex: number, validationResults: ValidationResult[], extraPrompt?: string): string {
-  return [
-    "You are Orca's post-execution reviewer.",
-    "Inspect uncommitted repository changes and validation command output.",
-    "If there are fixable findings, apply fixes directly in the workspace before responding.",
-    "Respond with JSON only using this exact shape:",
-    '{"summary":"...","findings":["..."],"fixed":true|false}',
-    `Cycle: ${cycleIndex}`,
-    "Validation output:",
-    JSON.stringify(validationResults, null, 2),
-    ...(extraPrompt ? ["Additional reviewer instructions:", extraPrompt] : [])
-  ].join("\n\n");
-}
-
-function extractJsonCandidate(raw: string): string {
-  const match = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
-  return (match?.[1] ?? raw).trim();
-}
-
-function parseStructuredExecutionReview(raw: string):
-  | { ok: true; value: StructuredReviewResult }
-  | { ok: false; error: string } {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(extractJsonCandidate(raw));
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { ok: false, error: `JSON parse failed: ${message}` };
-  }
-
-  const result = ExecutionReviewPayloadSchema.safeParse(parsed);
-  if (!result.success) {
-    const details = result.error.issues
-      .map((issue) => `${issue.path.length > 0 ? issue.path.join(".") : "<root>"}: ${issue.message}`)
-      .join("; ");
-    return { ok: false, error: `Schema validation failed: ${details}` };
-  }
-
-  return { ok: true, value: result.data };
-}
-
-function buildExecutionReviewRepairPrompt(
-  cycleIndex: number,
-  previousResponse: string,
-  parseError: string,
-  extraPrompt?: string
-): string {
-  return [
-    "Your previous post-execution review response was invalid.",
-    `Cycle: ${cycleIndex}`,
-    `Validation failure: ${parseError}`,
-    "Return JSON only using this exact shape and types:",
-    '{"summary":"...","findings":["..."],"fixed":true|false}',
-    "Do not include markdown fences.",
-    "Do not include any additional keys.",
-    "Previous invalid response:",
-    previousResponse,
-    ...(extraPrompt ? ["Additional reviewer instructions:", extraPrompt] : [])
-  ].join("\n\n");
-}
-
-async function requestStructuredExecutionReview(
-  runPrompt: (prompt: string) => Promise<string>,
-  cycleIndex: number,
-  basePrompt: string,
-  extraPrompt?: string
-): Promise<ExecutionReviewResult> {
-  const maxAttempts = 2;
-  let prompt = basePrompt;
-  let lastRaw = "";
-  let lastError = "unknown validation error";
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const raw = await runPrompt(prompt);
-    lastRaw = raw;
-    const parsed = parseStructuredExecutionReview(raw);
-    if (parsed.ok) {
-      return {
-        findings: parsed.value.findings,
-        summary: parsed.value.summary,
-        fixed: parsed.value.fixed,
-        rawResponse: raw
-      };
-    }
-
-    lastError = parsed.error;
-    console.error(`[orca] Post-execution reviewer response failed validation (attempt ${attempt}/${maxAttempts}): ${parsed.error}`);
-    if (attempt < maxAttempts) {
-      prompt = buildExecutionReviewRepairPrompt(cycleIndex, raw, parsed.error, extraPrompt);
-    }
-  }
-
-  return {
-    findings: [`review-response-parse-error: ${lastError}`],
-    summary: `Post-execution reviewer returned invalid JSON after ${maxAttempts} attempts (${lastError})`,
-    fixed: false,
-    rawResponse: lastRaw
-  };
-}
-
 export async function runCommandHandler(options: RunCommandOptions): Promise<void> {
   const inlineTask = options.task ?? options.prompt ?? options.goal;
   const inputSpecPath = options.spec ?? options.plan;
@@ -380,7 +200,8 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
     });
 
     await maybeCreateFirstRunGlobalConfig();
-    const orcaConfig = await resolveConfig(options.config);
+    const selectedFlow = resolveSelectedFlowConfig(await resolveConfig(options.config), options.flow);
+    const orcaConfig = selectedFlow.config;
     const effectiveConfig = applyExecutorOverrideForRun(orcaConfig, options);
 
     if (!isCodexAvailableForRun()) {
@@ -391,9 +212,15 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
 
     const runId = generateRunId(specPath);
     console.log(`Run ID: ${runId}`);
+    if (selectedFlow.name !== undefined) {
+      console.log(`Flow: ${selectedFlow.name}`);
+    }
 
     const store = createStore();
     await store.createRun(runId, specPath);
+    if (selectedFlow.name !== undefined) {
+      await store.updateRun(runId, { flowName: selectedFlow.name });
+    }
 
     const cliCommandHooks = buildCliCommandHooks(options);
     const dispatcher = new HookDispatcher({
@@ -444,7 +271,14 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
     };
 
     try {
-      await runPlanner(specPath, store, runId, effectiveConfig, { allowPlanSkip: true, emitHook });
+      const planningFlowInstructions = formatFlowInstructions(selectedFlow, "planning");
+      await runPlanner(specPath, store, runId, effectiveConfig, {
+        allowPlanSkip: true,
+        emitHook,
+        ...(planningFlowInstructions !== undefined
+          ? { systemContextSections: [planningFlowInstructions] }
+          : {})
+      });
     } catch (error) {
       if (error instanceof InvalidPlanError) {
         await emitHook({
@@ -474,6 +308,8 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
       if (multiAgentResult.action === "created" || multiAgentResult.action === "appended") {
         console.log(`Multi-agent: enabled (updated ${multiAgentResult.path})`);
       }
+      const taskRunnerParallelism = await resolveTaskRunnerParallelism(effectiveConfig);
+      const runnerUsesParallelSessions = taskRunnerParallelism > 1;
 
       const codexSession = await createCodexSession(cwd, effectiveConfig, {
         runId: runId as HookEvent["runId"],
@@ -505,84 +341,41 @@ export async function runCommandHandler(options: RunCommandOptions): Promise<voi
 
         console.log("Codex consultation passed. Starting execution...");
 
+        const executionFlowInstructions = formatFlowInstructions(selectedFlow, "execution");
+
         await runTaskRunner({
           runId: runId as HookEvent["runId"],
           store,
           ...(effectiveConfig ? { config: effectiveConfig } : {}),
           emitHook,
-          executeTask: (task, taskRunId, _config, systemContext) =>
-            codexSession.executeTask(task, taskRunId, systemContext),
+          ...(executionFlowInstructions !== undefined
+            ? { systemContextSections: [executionFlowInstructions] }
+            : {}),
+          ...(!runnerUsesParallelSessions
+            ? {
+                executeTask: (task, taskRunId, _config, systemContext) =>
+                  codexSession.executeTask(task, taskRunId, systemContext)
+              }
+            : {}),
+          ...buildReviewCompletedTaskOption({
+            cwd,
+            runId: runId as HookEvent["runId"],
+            store,
+            ...(effectiveConfig ? { config: effectiveConfig } : {}),
+            codexSession,
+            runnerUsesParallelSessions,
+            emitHook
+          }),
         });
 
-        const reviewConfig = getExecutionReviewConfig(effectiveConfig);
-        const finalSummaries: string[] = [];
-        const runAfterExecution = await store.getRun(runId);
-
-        if (reviewConfig.enabled && (runAfterExecution?.tasks.length ?? 0) > 0) {
-          const configured = reviewConfig.validatorCommands?.filter((item) => item.trim().length > 0) ?? [];
-          const validatorCommands = configured.length > 0
-            ? configured
-            : (reviewConfig.validatorAuto ? await detectValidatorCommands() : []);
-
-          for (let cycleIndex = 1; cycleIndex <= reviewConfig.maxCycles; cycleIndex += 1) {
-            const validationResults = await runValidatorCommands(validatorCommands);
-            const prompt = buildPostExecutionReviewPrompt(cycleIndex, validationResults, reviewConfig.prompt);
-            const reviewResult = await requestStructuredExecutionReview(
-              (prompt) => codexSession.runPrompt(prompt, "review"),
-              cycleIndex,
-              prompt,
-              reviewConfig.prompt
-            );
-            finalSummaries.push(`cycle ${cycleIndex}: ${reviewResult.summary}`);
-
-            if (reviewResult.findings.length === 0) {
-              break;
-            }
-
-            await emitHook({
-              runId: runId as HookEvent["runId"],
-              hook: "onFindings",
-              message: reviewResult.summary,
-              timestamp: new Date().toISOString(),
-              metadata: {
-                findingsCount: reviewResult.findings.length,
-                findingsSummary: reviewResult.summary,
-                cycleIndex
-              }
-            });
-
-            if (reviewConfig.onFindings === "report_only") {
-              break;
-            }
-
-            if (reviewConfig.onFindings === "fail") {
-              await store.updateRun(runId, { overallStatus: "failed" });
-              break;
-            }
-
-            if (!reviewResult.fixed) {
-              break;
-            }
-          }
-        }
-
-        let fallbackReview = "";
-        if (reviewConfig.enabled) {
-          fallbackReview = await codexSession.reviewChanges();
-        }
-
-        console.log("Codex post-execution final review summary:");
-        if (finalSummaries.length > 0) {
-          for (const summary of finalSummaries) {
-            console.log(`- ${summary}`);
-          }
-        } else {
-          console.log("- Post-execution review loop disabled.");
-        }
-
-        if (fallbackReview.length > 0) {
-          console.log(fallbackReview);
-        }
+        await runPostExecutionReview({
+          runId: runId as HookEvent["runId"],
+          store,
+          ...(effectiveConfig ? { config: effectiveConfig } : {}),
+          selectedFlow,
+          codexSession,
+          emitHook
+        });
       } finally {
         await codexSession.disconnect();
       }
@@ -627,6 +420,7 @@ export function registerRunCommand(program: Command): void {
     .option("--task <text>", "Inline task text (alternative to --spec)")
     .option("-p, --prompt <text>", "Inline task text (alias for --task)")
     .option("--config <path>", "Path to orca config file")
+    .option("--flow <name>", "Use a configured flow preset")
     .option("--codex-only", "Force Codex executor for this run (overrides config)")
     .option("--codex-effort <value>", "Codex thinking level override for this run", parseCodexEffortOption)
     .option("--on-milestone <cmd>", "Shell hook command for onMilestone")

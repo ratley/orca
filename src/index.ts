@@ -1,4 +1,4 @@
-export { defineOrcaConfig } from "./types/index.js";
+export { defineOrcaConfig, defineOrcaFlow } from "./types/index.js";
 
 export type {
   BaseHookEvent,
@@ -8,6 +8,12 @@ export type {
   HookHandlerContext,
   HookName,
   OrcaConfig,
+  OrcaFlowBaselineConfig,
+  OrcaFlowConfig,
+  OrcaFlowExecutionConfig,
+  OrcaFlowOverridesConfig,
+  OrcaFlowPlanningConfig,
+  OrcaFlowSummaryConfig,
   PlanResult,
   RunId,
   RunStatus,

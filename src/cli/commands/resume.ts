@@ -1,11 +1,22 @@
 import { InvalidArgumentError, type Command } from "commander";
 
+import { createCodexSession } from "../../agents/codex/session.js";
 import { resolveConfig } from "../../core/config-loader.js";
-import { runTaskRunner } from "../../core/task-runner.js";
+import {
+  formatFlowInstructions,
+  resolveSelectedFlowConfig,
+  type ResolvedFlowConfig
+} from "../../core/flow-config.js";
+import { resolveTaskRunnerParallelism, runTaskRunner } from "../../core/task-runner.js";
 import { RunStore } from "../../state/store.js";
 import type { OrcaConfig, RunStatus } from "../../types/index.js";
 import { parseCodexEffort, type CodexEffort } from "../../types/effort.js";
 import { getLastRun } from "../../utils/last-run.js";
+import {
+  buildReviewCompletedTaskOption,
+  emitJsonHook,
+  runPostExecutionReview
+} from "./review-runner.js";
 
 export interface ResumeCommandOptions {
   run?: string;
@@ -61,10 +72,20 @@ function applyExecutorOverrideForResume(
   return nextConfig;
 }
 
+function resolveResumeFlowConfig(
+  config: OrcaConfig | undefined,
+  run: RunStatus
+): ResolvedFlowConfig {
+  if (run.flowName === undefined) {
+    return config === undefined ? {} : { config };
+  }
+
+  return resolveSelectedFlowConfig(config, run.flowName);
+}
+
 export async function resumeCommandHandler(options: ResumeCommandOptions): Promise<void> {
   const store = createStore();
   const resolvedConfig = await resolveConfig(options.config);
-  const effectiveConfig = applyExecutorOverrideForResume(resolvedConfig, options);
 
   if (options.last) {
     const lastRun = await getLastRun(store);
@@ -98,6 +119,10 @@ export async function resumeCommandHandler(options: ResumeCommandOptions): Promi
     return;
   }
 
+  const selectedFlow = resolveResumeFlowConfig(resolvedConfig, run);
+  const effectiveConfig = applyExecutorOverrideForResume(selectedFlow.config, options);
+  const executionFlowInstructions = formatFlowInstructions(selectedFlow, "execution");
+
   const resumedTasks = run.tasks.map((task) => {
     if (task.status === "in_progress") {
       return {
@@ -116,11 +141,52 @@ export async function resumeCommandHandler(options: ResumeCommandOptions): Promi
     tasks: resumedTasks
   });
 
-  await runTaskRunner({
+  const cwd = process.cwd();
+  const taskRunnerParallelism = await resolveTaskRunnerParallelism(effectiveConfig);
+  const runnerUsesParallelSessions = taskRunnerParallelism > 1;
+  const codexSession = await createCodexSession(cwd, effectiveConfig, {
     runId: run.runId,
     store,
-    ...(effectiveConfig ? { config: effectiveConfig } : {})
+    emitHook: emitJsonHook,
   });
+
+  try {
+    await runTaskRunner({
+      runId: run.runId,
+      store,
+      ...(effectiveConfig ? { config: effectiveConfig } : {}),
+      emitHook: emitJsonHook,
+      ...(executionFlowInstructions !== undefined
+        ? { systemContextSections: [executionFlowInstructions] }
+        : {}),
+      ...(!runnerUsesParallelSessions
+        ? {
+            executeTask: (task, taskRunId, _config, systemContext) =>
+              codexSession.executeTask(task, taskRunId, systemContext)
+          }
+        : {}),
+      ...buildReviewCompletedTaskOption({
+        cwd,
+        runId: run.runId,
+        store,
+        ...(effectiveConfig ? { config: effectiveConfig } : {}),
+        codexSession,
+        runnerUsesParallelSessions,
+        emitHook: emitJsonHook
+      }),
+    });
+
+    await runPostExecutionReview({
+      runId: run.runId,
+      store,
+      ...(effectiveConfig ? { config: effectiveConfig } : {}),
+      selectedFlow,
+      codexSession,
+      emitHook: emitJsonHook
+    });
+  } finally {
+    await codexSession.disconnect();
+  }
 
   const refreshed = await store.getRun(run.runId);
   if (!refreshed) {

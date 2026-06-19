@@ -5,7 +5,9 @@ import { createCodexSession } from "../agents/codex/session.js";
 import { RunStore } from "../state/store.js";
 import type { HookEvent, OrcaConfig, RunId, RunStatus, Task } from "../types/index.js";
 import { loadSkills, type LoadedSkill } from "../utils/skill-loader.js";
+import { isCodexMultiAgentActive } from "./codex-config.js";
 import { getRunnable, validateDAG } from "./dependency-graph.js";
+import { getTaskReviewConfig } from "./review-cycle.js";
 import { shouldRetry } from "./retry-policy.js";
 
 export type EmitHook = (event: HookEvent) => Promise<void>;
@@ -17,8 +19,25 @@ export type ExecuteTaskFn = (
   systemContext?: string
 ) => Promise<{ outcome: "done" | "failed"; rawResponse: string; error?: string }>;
 
+export type ReviewCompletedTaskFn = (context: {
+  task: Task;
+  run: RunStatus;
+  spec: string | null;
+  systemContext?: string;
+}) => Promise<{ outcome: "accepted" | "failed"; summary: string; error?: string }>;
+
+type CodexSession = Awaited<ReturnType<typeof createCodexSession>>;
+
+type TaskAttemptResult =
+  | { task: Task; outcome: "done" }
+  | { task: Task; outcome: "retry"; error: string; retries: number }
+  | { task: Task; outcome: "failed"; error: string };
+
 // Non-null only when set by tests — null means "use real executor logic"
 let testExecuteTaskOverride: ExecuteTaskFn | null = null;
+
+const SPEC_CONTEXT_CHAR_CAP = 12_000;
+const DEFAULT_MULTI_AGENT_PARALLEL_TASKS = 4;
 
 export function setExecuteTaskForTests(fn: ExecuteTaskFn | null): void {
   testExecuteTaskOverride = fn;
@@ -67,13 +86,101 @@ function hasPendingTasks(tasks: Task[]): boolean {
   return tasks.some((task) => task.status === "pending" || task.status === "in_progress");
 }
 
+function getConfiguredParallelTaskLimit(config?: OrcaConfig): number {
+  return config?.codex?.maxParallelTasks ?? DEFAULT_MULTI_AGENT_PARALLEL_TASKS;
+}
+
+function shouldSerializeAutoFixTaskReview(config?: OrcaConfig): boolean {
+  const taskReviewConfig = getTaskReviewConfig(config);
+  return taskReviewConfig.enabled && taskReviewConfig.onFindings === "auto_fix";
+}
+
+export async function resolveTaskRunnerParallelism(config?: OrcaConfig): Promise<number> {
+  if (!(await isCodexMultiAgentActive(config))) {
+    return 1;
+  }
+
+  return getConfiguredParallelTaskLimit(config);
+}
+
+function selectRunnableTasks(tasks: Task[], parallelTaskLimit: number): Task[] {
+  return getRunnable(tasks).slice(0, parallelTaskLimit);
+}
+
+function buildTaskAttemptErrorResult(task: Task, inProgressTasks: Task[], error: unknown): TaskAttemptResult {
+  const errorMessage = toErrorMessage(error);
+  const currentTask = inProgressTasks.find((candidate) => candidate.id === task.id);
+
+  if (!currentTask) {
+    throw new Error(`Task missing during error handling: ${task.id}`);
+  }
+
+  if (shouldRetry(currentTask, error)) {
+    return {
+      task,
+      outcome: "retry",
+      error: errorMessage,
+      retries: currentTask.retries + 1
+    };
+  }
+
+  return { task, outcome: "failed", error: errorMessage };
+}
+
+function buildTaskAttemptFailureResult(task: Task, error: unknown): TaskAttemptResult {
+  return { task, outcome: "failed", error: toErrorMessage(error) };
+}
+
+function suppressRetriesAfterTerminalFailure(results: TaskAttemptResult[]): TaskAttemptResult[] {
+  if (!results.some((result) => result.outcome === "failed")) {
+    return results;
+  }
+
+  return results.map((result) => {
+    if (result.outcome !== "retry") {
+      return result;
+    }
+
+    return {
+      task: result.task,
+      outcome: "failed",
+      error: `Retry suppressed because another task failed in the same wave: ${result.error}`
+    };
+  });
+}
+
+function mergeAppendedItems<T>(baseItems: T[], latestItems: T[], nextItems: T[]): T[] {
+  return [...latestItems, ...nextItems.slice(baseItems.length)];
+}
+
+async function emitRunFailure(run: RunStatus, emitHook: EmitHook, failureMessage: string): Promise<void> {
+  const failedAt = new Date().toISOString();
+  await emitHook({
+    runId: run.runId,
+    hook: "onMilestone",
+    message: "execution-failed",
+    timestamp: failedAt,
+    metadata: { overallStatus: "failed" }
+  });
+  await emitHook({
+    runId: run.runId,
+    hook: "onError",
+    message: `run-failed: ${failureMessage}`,
+    timestamp: failedAt,
+    error: failureMessage,
+    metadata: { overallStatus: "failed" }
+  });
+}
+
 export interface TaskRunnerOptions {
   runId: RunId;
   store: RunStore;
   config?: OrcaConfig;
   emitHook?: EmitHook;
+  systemContextSections?: string[];
   /** Override executor — used by tests only. In production, use config.executor. */
   executeTask?: ExecuteTaskFn;
+  reviewCompletedTask?: ReviewCompletedTaskFn;
 }
 
 function formatSkillsSection(skills: LoadedSkill[]): string {
@@ -88,6 +195,58 @@ function formatSkillsSection(skills: LoadedSkill[]): string {
   );
 
   return ["## Available Skills", "", ...formattedSkills].join("\n");
+}
+
+async function loadSpecContext(specPath: string): Promise<{ content: string; truncated: boolean } | null> {
+  try {
+    const raw = await fs.readFile(specPath, "utf8");
+    return {
+      content: raw.slice(0, SPEC_CONTEXT_CHAR_CAP),
+      truncated: raw.length > SPEC_CONTEXT_CHAR_CAP
+    };
+  } catch {
+    return null;
+  }
+}
+
+function formatTaskSystemContext(
+  skills: LoadedSkill[],
+  spec: { content: string; truncated: boolean } | null,
+  run: RunStatus,
+  extraSections: string[] = []
+): string | undefined {
+  const sections: string[] = [];
+
+  if (skills.length > 0) {
+    sections.push(formatSkillsSection(skills));
+  }
+
+  sections.push(...extraSections.filter((section) => section.trim().length > 0));
+
+  if (spec) {
+    sections.push([
+      "## Original Spec",
+      "",
+      "The task graph was derived from this source spec. Keep implementation choices tied back to it.",
+      "",
+      "```md",
+      spec.content,
+      "```",
+      ...(spec.truncated ? [`(truncated to ${SPEC_CONTEXT_CHAR_CAP} characters)`] : [])
+    ].join("\n"));
+  }
+
+  sections.push([
+    "## Current Task Graph",
+    "",
+    "Use this to preserve continuity with completed work and avoid drifting away from later tasks.",
+    "",
+    "```json",
+    JSON.stringify(run.tasks, null, 2),
+    "```"
+  ].join("\n"));
+
+  return sections.length > 0 ? sections.join("\n\n") : undefined;
 }
 
 function buildSessionSummary(run: RunStatus): string {
@@ -105,6 +264,7 @@ function buildSessionSummary(run: RunStatus): string {
     "",
     `- Run ID: \`${run.runId}\``,
     `- Spec Path: \`${run.specPath}\``,
+    ...(run.flowName !== undefined ? [`- Flow: \`${run.flowName}\``] : []),
     `- Status: \`${run.overallStatus}\``,
     `- Created At: \`${run.createdAt}\``,
     `- Updated At: \`${run.updatedAt}\``,
@@ -140,18 +300,39 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
   const emitHook = options.emitHook ?? defaultEmitHook;
   const { runId, store, config } = options;
   const skills = await loadSkills(config);
-  const taskSystemContext = skills.length === 0 ? undefined : formatSkillsSection(skills);
+  const specContextPromise = store.getRun(runId).then((run) => run ? loadSpecContext(run.specPath) : null);
+  const requestedParallelTaskLimit = await resolveTaskRunnerParallelism(config);
 
   // Test mocks bypass all executor logic entirely — no real sessions created.
   const mockFn: ExecuteTaskFn | null = options.executeTask ?? testExecuteTaskOverride;
+  // Per-task auto-fix reviews inspect and may mutate the shared worktree. Keep
+  // those waves single-task so a reviewer is not repairing a sibling task's diff.
+  const parallelTaskLimit = options.reviewCompletedTask && shouldSerializeAutoFixTaskReview(config)
+    ? 1
+    : requestedParallelTaskLimit;
 
-  // Build real executor (Codex persistent session).
-  // Only runs in production — skipped completely when a mock is active.
-  let codexSession: Awaited<ReturnType<typeof createCodexSession>> | undefined;
+  // Sequential execution preserves the original shared persistent session.
+  // Parallel execution gives each task its own session so runnable graph
+  // branches can make progress concurrently without interleaving turns.
+  let codexSession: CodexSession | undefined;
   let executeTaskFn: ExecuteTaskFn;
 
   if (mockFn) {
     executeTaskFn = mockFn;
+  } else if (parallelTaskLimit > 1) {
+    executeTaskFn = async (task, taskRunId, _cfg, systemContext) => {
+      const taskSession = await createCodexSession(process.cwd(), config, {
+        runId,
+        store,
+        emitHook,
+      });
+
+      try {
+        return await taskSession.executeTask(task, taskRunId, systemContext);
+      } finally {
+        await taskSession.disconnect();
+      }
+    };
   } else {
     codexSession = await createCodexSession(process.cwd(), config, {
       runId,
@@ -196,7 +377,14 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
         return;
       }
 
-      const runnable = getRunnable(run.tasks);
+      if (run.overallStatus === "failed") {
+        const failureMessage = run.errors[run.errors.length - 1]?.message ?? "execution-failed";
+        await emitRunFailure(run, emitHook, failureMessage);
+        await writeSessionSummary(store, runId, config?.sessionLogs);
+        return;
+      }
+
+      const runnable = selectRunnableTasks(run.tasks, parallelTaskLimit);
 
       if (runnable.length === 0) {
         const hasFailedTask = run.tasks.some((task) => task.status === "failed");
@@ -226,23 +414,8 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
 
         if (hasFailedTask) {
           await store.updateRun(runId, { overallStatus: "failed" });
-          const failedAt = new Date().toISOString();
           const failureMessage = run.errors[run.errors.length - 1]?.message ?? "execution-failed";
-          await emitHook({
-            runId: run.runId,
-            hook: "onMilestone",
-            message: "execution-failed",
-            timestamp: failedAt,
-            metadata: { overallStatus: "failed" }
-          });
-          await emitHook({
-            runId: run.runId,
-            hook: "onError",
-            message: `run-failed: ${failureMessage}`,
-            timestamp: failedAt,
-            error: failureMessage,
-            metadata: { overallStatus: "failed" }
-          });
+          await emitRunFailure(run, emitHook, failureMessage);
           await writeSessionSummary(store, runId, config?.sessionLogs);
           return;
         }
@@ -267,14 +440,10 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
         return;
       }
 
-      const task = runnable[0];
-      if (!task) {
-        throw new Error("Task selection failed");
-      }
-
       const now = new Date().toISOString();
+      const runnableIds = new Set(runnable.map((task) => task.id));
       const inProgressTasks = run.tasks.map((candidate) => {
-        if (candidate.id !== task.id) {
+        if (!runnableIds.has(candidate.id)) {
           return candidate;
         }
 
@@ -285,18 +454,106 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
         };
       });
 
-      await store.updateRun(runId, {
+      const startedRun = await store.updateRunIfActive(runId, {
         mode: "run",
         overallStatus: "running",
         tasks: inProgressTasks
       });
 
-      try {
-        const result = await executeTaskFn(task, runId, config, taskSystemContext);
+      if (startedRun.overallStatus === "cancelled") {
+        await emitHook({
+          runId: startedRun.runId,
+          hook: "onMilestone",
+          message: "execution-cancelled",
+          timestamp: new Date().toISOString(),
+          metadata: { overallStatus: "cancelled" }
+        });
+        await writeSessionSummary(store, runId, config?.sessionLogs);
+        return;
+      }
+
+      if (startedRun.overallStatus === "failed") {
+        const failureMessage = startedRun.errors[startedRun.errors.length - 1]?.message ?? "execution-failed";
+        await emitRunFailure(startedRun, emitHook, failureMessage);
+        await writeSessionSummary(store, runId, config?.sessionLogs);
+        return;
+      }
+
+      if (startedRun.overallStatus === "completed") {
+        await writeSessionSummary(store, runId, config?.sessionLogs);
+        return;
+      }
+
+      const specContext = await specContextPromise;
+      const runForTaskContext: RunStatus = {
+        ...run,
+        mode: "run",
+        overallStatus: "running",
+        tasks: inProgressTasks
+      };
+
+      const taskSystemContext = formatTaskSystemContext(
+        skills,
+        specContext,
+        runForTaskContext,
+        options.systemContextSections
+      );
+      const attemptResults = await Promise.all(runnable.map(async (task): Promise<TaskAttemptResult> => {
+        try {
+          const result = await executeTaskFn(task, runId, config, taskSystemContext);
+
+          if (result.outcome !== "done") {
+            throw new Error(result.error ?? "Task execution failed");
+          }
+
+          return { task, outcome: "done" };
+        } catch (error) {
+          return buildTaskAttemptErrorResult(task, inProgressTasks, error);
+        }
+      }));
+      const reviewedAttemptResults: TaskAttemptResult[] = [];
+
+      // Completed-task reviews may inspect and mutate the shared worktree, so
+      // keep execution parallel but serialize reviews after the whole wave.
+      for (const result of attemptResults) {
+        if (result.outcome !== "done" || !options.reviewCompletedTask) {
+          reviewedAttemptResults.push(result);
+          continue;
+        }
+
+        try {
+          const reviewResult = await options.reviewCompletedTask({
+            task: result.task,
+            run: runForTaskContext,
+            spec: specContext?.content ?? null,
+            ...(taskSystemContext !== undefined ? { systemContext: taskSystemContext } : {})
+          });
+
+          if (reviewResult.outcome === "failed") {
+            throw new Error(reviewResult.error ?? reviewResult.summary);
+          }
+
+          reviewedAttemptResults.push(result);
+        } catch (error) {
+          reviewedAttemptResults.push(buildTaskAttemptFailureResult(result.task, error));
+        }
+      }
+
+      const finalAttemptResults = suppressRetriesAfterTerminalFailure(reviewedAttemptResults);
+      let nextTasks = inProgressTasks;
+      let nextMilestones = run.milestones;
+      let nextErrors = run.errors;
+      let nextOverallStatus: RunStatus["overallStatus"] = "running";
+
+      for (const result of finalAttemptResults) {
+        const currentTask = nextTasks.find((candidate) => candidate.id === result.task.id);
+        if (!currentTask) {
+          throw new Error(`Task missing during result handling: ${result.task.id}`);
+        }
 
         if (result.outcome === "done") {
-          const doneTasks = inProgressTasks.map((candidate) => {
-            if (candidate.id !== task.id) {
+          nextTasks = nextTasks.map((candidate) => {
+            if (candidate.id !== result.task.id) {
               return candidate;
             }
 
@@ -306,91 +563,119 @@ export async function runTaskRunner(options: TaskRunnerOptions): Promise<void> {
               finishedAt: new Date().toISOString()
             };
           });
-
-          await store.updateRun(runId, { tasks: doneTasks });
-
-          await emitHook({
-            runId: run.runId,
-            hook: "onTaskComplete",
-            message: `Task completed: ${task.name}`,
-            timestamp: new Date().toISOString(),
-            taskId: task.id,
-            taskName: task.name
-          });
-
           continue;
         }
 
-        throw new Error(result.error ?? "Task execution failed");
-      } catch (error) {
-        const errorMessage = toErrorMessage(error);
-        const currentTask = inProgressTasks.find((candidate) => candidate.id === task.id);
-
-        if (!currentTask) {
-          throw new Error(`Task missing during error handling: ${task.id}`);
-        }
-
-        if (shouldRetry(currentTask, error)) {
-          const retryTasks = inProgressTasks.map((candidate) => {
-            if (candidate.id !== task.id) {
+        if (result.outcome === "retry") {
+          nextTasks = nextTasks.map((candidate) => {
+            if (candidate.id !== result.task.id) {
               return candidate;
             }
 
             return {
               ...stripOptionalFields(candidate, ["finishedAt"]),
               status: "pending" as const,
-              retries: currentTask.retries + 1,
-              lastError: errorMessage
+              retries: result.retries,
+              lastError: result.error
             };
           });
-
-          await store.updateRun(runId, {
-            tasks: retryTasks,
-            milestones: [...run.milestones, `retry:${task.id}:${currentTask.retries + 1}`]
-          });
-
-          await emitHook({
-            runId: run.runId,
-            hook: "onMilestone",
-            message: `retrying-task:${task.id}`,
-            timestamp: new Date().toISOString(),
-            taskId: task.id,
-            taskName: task.name,
-            metadata: { retries: currentTask.retries + 1 }
-          });
-
+          nextMilestones = [...nextMilestones, `retry:${result.task.id}:${result.retries}`];
           continue;
         }
 
         const failedAt = new Date().toISOString();
-        const failedTasks = applyTaskUpdate(inProgressTasks, task.id, {
+        nextTasks = applyTaskUpdate(nextTasks, result.task.id, {
           status: "failed",
           finishedAt: failedAt,
-          lastError: errorMessage
+          lastError: result.error
         });
+        nextErrors = [
+          ...nextErrors,
+          {
+            at: failedAt,
+            message: result.error,
+            taskId: result.task.id
+          }
+        ];
+        nextOverallStatus = "failed";
+      }
 
-        await store.updateRun(runId, {
-          tasks: failedTasks,
-          overallStatus: "failed",
-          errors: [
-            ...run.errors,
-            {
-              at: failedAt,
-              message: errorMessage,
-              taskId: task.id
-            }
-          ]
+      const latestRun = await store.getRun(runId);
+      if (!latestRun) {
+        throw new Error(`Run not found before result write: ${runId}`);
+      }
+
+      if (latestRun.overallStatus === "cancelled") {
+        await emitHook({
+          runId: latestRun.runId,
+          hook: "onMilestone",
+          message: "execution-cancelled",
+          timestamp: new Date().toISOString(),
+          metadata: { overallStatus: "cancelled" }
         });
+        await writeSessionSummary(store, runId, config?.sessionLogs);
+        return;
+      }
+
+      if (latestRun.overallStatus === "failed") {
+        const failureMessage = latestRun.errors[latestRun.errors.length - 1]?.message ?? "execution-failed";
+        await emitRunFailure(latestRun, emitHook, failureMessage);
+        await writeSessionSummary(store, runId, config?.sessionLogs);
+        return;
+      }
+
+      const mergedMilestones = mergeAppendedItems(run.milestones, latestRun.milestones, nextMilestones);
+      const mergedErrors = mergeAppendedItems(run.errors, latestRun.errors, nextErrors);
+
+      await store.updateRun(runId, {
+        tasks: nextTasks,
+        milestones: mergedMilestones,
+        errors: mergedErrors,
+        overallStatus: nextOverallStatus
+      });
+
+      for (const result of finalAttemptResults) {
+        if (result.outcome === "done") {
+          await emitHook({
+            runId: run.runId,
+            hook: "onTaskComplete",
+            message: `Task completed: ${result.task.name}`,
+            timestamp: new Date().toISOString(),
+            taskId: result.task.id,
+            taskName: result.task.name
+          });
+          continue;
+        }
+
+        if (result.outcome === "retry") {
+          await emitHook({
+            runId: run.runId,
+            hook: "onMilestone",
+            message: `retrying-task:${result.task.id}`,
+            timestamp: new Date().toISOString(),
+            taskId: result.task.id,
+            taskName: result.task.name,
+            metadata: { retries: result.retries }
+          });
+          continue;
+        }
 
         await emitHook({
           runId: run.runId,
           hook: "onTaskFail",
-          message: `Task failed: ${task.name}`,
-          timestamp: failedAt,
-          taskId: task.id,
-          taskName: task.name,
-          error: errorMessage
+          message: `Task failed: ${result.task.name}`,
+          timestamp: new Date().toISOString(),
+          taskId: result.task.id,
+          taskName: result.task.name,
+          error: result.error
         });
+      }
+
+      if (nextOverallStatus === "failed") {
+        const failureMessage = mergedErrors[mergedErrors.length - 1]?.message ?? "execution-failed";
+        await emitRunFailure(run, emitHook, failureMessage);
+        await writeSessionSummary(store, runId, config?.sessionLogs);
+        return;
       }
     }
   } catch (error) {

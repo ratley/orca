@@ -78,6 +78,7 @@ export function createRunCommandTestHarness(tempPrefix: string): RunCommandTestH
     const runPlannerMock = mock(async () => {});
     const runTaskRunnerMock = mock(async (options: { runId: string; store: { updateRun: (runId: string, patch: unknown) => Promise<void> } }) => {
       await options.store.updateRun(options.runId, {
+        overallStatus: "completed",
         tasks: [
           {
             id: "t1",
@@ -114,6 +115,43 @@ export function createRunCommandTestHarness(tempPrefix: string): RunCommandTestH
 
       return { executor: "codex" as const };
     });
+    const mergeConfigsMock = (...configs: Array<Record<string, unknown> | undefined>) => {
+      const presentConfigs = configs.filter((config): config is Record<string, unknown> => config !== undefined);
+      if (presentConfigs.length === 0) {
+        return undefined;
+      }
+
+      const merged: Record<string, unknown> = {};
+      for (const config of presentConfigs) {
+        for (const [key, value] of Object.entries(config)) {
+          if (key !== "skills" && key !== "codex" && key !== "review" && key !== "hookCommands") {
+            merged[key] = value;
+          }
+        }
+        if ("skills" in config && Array.isArray(config.skills)) {
+          merged.skills = [...new Set([...((merged.skills as string[] | undefined) ?? []), ...config.skills])];
+        }
+        if ("codex" in config) {
+          merged.codex = {
+            ...(merged.codex as Record<string, unknown> | undefined),
+            ...(config.codex as Record<string, unknown> | undefined)
+          };
+        }
+        if ("review" in config) {
+          merged.review = {
+            ...(merged.review as Record<string, unknown> | undefined),
+            ...(config.review as Record<string, unknown> | undefined)
+          };
+        }
+        if ("hookCommands" in config) {
+          merged.hookCommands = {
+            ...(merged.hookCommands as Record<string, unknown> | undefined),
+            ...(config.hookCommands as Record<string, unknown> | undefined)
+          };
+        }
+      }
+      return merged;
+    };
     const ensureCodexMultiAgentMock = mock(async () => ({
       action: "skipped" as const,
       path: path.join(tempDir, "mock-codex-config.toml")
@@ -131,13 +169,18 @@ export function createRunCommandTestHarness(tempPrefix: string): RunCommandTestH
       InvalidPlanError: TestInvalidPlanError
     }));
     void mock.module("../../core/task-runner.js", () => ({
-      runTaskRunner: runTaskRunnerMock
+      runTaskRunner: runTaskRunnerMock,
+      resolveTaskRunnerParallelism: async (config?: { codex?: { multiAgent?: boolean; maxParallelTasks?: number } }) =>
+        config?.codex?.multiAgent === true ? config.codex.maxParallelTasks ?? 4 : 1
     }));
     void mock.module("../../core/config-loader.js", () => ({
-      resolveConfig: resolveConfigMock
+      resolveConfig: resolveConfigMock,
+      mergeConfigs: mergeConfigsMock
     }));
     void mock.module("../../core/codex-config.js", () => ({
-      ensureCodexMultiAgent: ensureCodexMultiAgentMock
+      ensureCodexMultiAgent: ensureCodexMultiAgentMock,
+      isCodexMultiAgentActive: async (config?: { codex?: { multiAgent?: boolean } }) =>
+        config?.codex?.multiAgent === true
     }));
     void mock.module("../../agents/codex/session.js", () => ({
       createCodexSession: createCodexSessionMock

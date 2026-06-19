@@ -8,6 +8,7 @@ const { version } = require("../../package.json") as { version: string };
 
 import { registerAnswerCommand } from "./commands/answer.js";
 import { registerCancelCommand } from "./commands/cancel.js";
+import { registerFlowsCommand } from "./commands/flows.js";
 import { registerHelpCommand } from "./commands/help.js";
 import { registerListCommand } from "./commands/list.js";
 import { registerPrCommand } from "./commands/pr/index.js";
@@ -29,6 +30,7 @@ registerPlanCommand(program);
 registerStatusCommand(program);
 registerListCommand(program);
 registerSkillsCommand(program);
+registerFlowsCommand(program);
 registerResumeCommand(program);
 registerCancelCommand(program);
 registerPrCommand(program);

@@ -36,6 +36,7 @@ export interface RunStatus {
   runId: RunId;
   mode: "plan" | "run";
   specPath: string;
+  flowName?: string;
   createdAt: string;
   updatedAt: string;
   overallStatus:
@@ -170,6 +171,45 @@ export interface TaskGraphReviewResult {
   rawResponse: string;
 }
 
+export interface OrcaFlowBaselineConfig {
+  prompt?: string;
+  skills?: string[];
+}
+
+export interface OrcaFlowPlanningConfig {
+  prompt?: string;
+  review?: NonNullable<NonNullable<OrcaConfig["review"]>["plan"]>;
+}
+
+export interface OrcaFlowExecutionConfig {
+  prompt?: string;
+  codex?: NonNullable<OrcaConfig["codex"]>;
+  review?: NonNullable<NonNullable<OrcaConfig["review"]>["task"]>;
+}
+
+export interface OrcaFlowSummaryConfig {
+  prompt?: string;
+}
+
+export interface OrcaFlowOverridesConfig {
+  skills?: string[];
+  maxRetries?: number;
+  codex?: NonNullable<OrcaConfig["codex"]>;
+  review?: NonNullable<OrcaConfig["review"]>;
+  hookCommands?: Partial<Record<HookName, string>>;
+  pr?: NonNullable<OrcaConfig["pr"]>;
+}
+
+export interface OrcaFlowConfig {
+  description?: string;
+  baseline?: OrcaFlowBaselineConfig;
+  planning?: OrcaFlowPlanningConfig;
+  execution?: OrcaFlowExecutionConfig;
+  review?: NonNullable<OrcaConfig["review"]>;
+  overrides?: OrcaFlowOverridesConfig;
+  summary?: OrcaFlowSummaryConfig;
+}
+
 export interface OrcaConfig {
   openaiApiKey?: string;
   runsDir?: string;
@@ -190,6 +230,7 @@ export interface OrcaConfig {
     command?: string;
     timeoutMs?: number;
     multiAgent?: boolean;
+    maxParallelTasks?: number;
     /**
      * Optional extra skill roots to use for specific working directories when
      * querying Codex app-server skills/list.
@@ -205,6 +246,10 @@ export interface OrcaConfig {
     enabled?: boolean;
     requireConfirmation?: boolean;
   };
+  flow?: {
+    default?: string;
+    presets?: Record<string, OrcaFlowConfig>;
+  };
   review?: {
     /** @deprecated Use review.plan.enabled */
     enabled?: boolean;
@@ -213,6 +258,12 @@ export interface OrcaConfig {
     plan?: {
       enabled?: boolean;
       onInvalid?: "fail" | "warn_skip";
+    };
+    task?: {
+      enabled?: boolean;
+      maxCycles?: number;
+      onFindings?: "auto_fix" | "report_only" | "fail";
+      prompt?: string;
     };
     execution?: {
       enabled?: boolean;
@@ -229,4 +280,8 @@ export interface OrcaConfig {
 
 export function defineOrcaConfig(config: OrcaConfig): OrcaConfig {
   return config;
+}
+
+export function defineOrcaFlow(flow: OrcaFlowConfig): OrcaFlowConfig {
+  return flow;
 }

@@ -156,12 +156,18 @@ function formatProjectInstructionsSection(instructions: ProjectInstruction[]): s
   return parts.join("\n");
 }
 
-function buildSystemContext(skills: LoadedSkill[], instructions: ProjectInstruction[]): string {
+function buildSystemContext(
+  skills: LoadedSkill[],
+  instructions: ProjectInstruction[],
+  extraSections: string[] = []
+): string {
   const sections = [DEFAULT_SYSTEM_CONTEXT];
 
   if (instructions.length > 0) {
     sections.push(formatProjectInstructionsSection(instructions));
   }
+
+  sections.push(...extraSections.filter((section) => section.trim().length > 0));
 
   if (skills.length > 0) {
     sections.push(formatSkillsSection(skills));
@@ -225,6 +231,7 @@ async function runTaskGraphReview(
 type PlannerOptions = {
   allowPlanSkip?: boolean;
   emitHook?: (event: HookEvent) => Promise<void>;
+  systemContextSections?: string[];
 };
 
 function buildSingleExecutionTask(spec: string): Task[] {
@@ -286,7 +293,7 @@ export async function runPlanner(
 ): Promise<void> {
   const spec = await fs.readFile(specPath, "utf8");
   const [skills, instructions] = await Promise.all([loadSkills(config), loadProjectInstructions(specPath)]);
-  const systemContext = buildSystemContext(skills, instructions);
+  const systemContext = buildSystemContext(skills, instructions, options?.systemContextSections);
   const interactiveContext = {
     runId: runId as HookEvent["runId"],
     store,

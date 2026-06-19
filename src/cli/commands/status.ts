@@ -59,6 +59,9 @@ function formatKnownRunIds(runs: RunStatus[]): string {
 async function printDetailedRun(run: RunStatus): Promise<void> {
   console.log(`Run ID: ${run.runId}`);
   console.log(`Spec Path: ${run.specPath}`);
+  if (run.flowName !== undefined) {
+    console.log(`Flow: ${run.flowName}`);
+  }
   console.log(`Mode: ${run.mode}`);
   console.log(`Overall Status: ${run.overallStatus}`);
   console.log(`Created: ${run.createdAt}`);

@@ -25,6 +25,10 @@ async function waitFor<T>(load: () => Promise<T | null>, timeoutMs = 2_000): Pro
   throw new Error(`Timed out after ${timeoutMs}ms`);
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function mockMultiAgentDetection(active = false): void {
   mock.module("../../core/codex-config.js", () => ({
     isCodexMultiAgentActive: async () => active,
@@ -732,17 +736,10 @@ describe("codex session question flow", () => {
     const answerResponse = new Promise<void>((resolve) => {
       resolveAnswerResponse = resolve;
     });
-    let clientInstance: EventEmitter | null = null;
-
     try {
       mockMultiAgentDetection(false);
       mock.module("@ratley/codex-client", () => ({
         CodexClient: class extends EventEmitter {
-          constructor() {
-            super();
-            clientInstance = this;
-          }
-
           async connect(): Promise<void> {}
           async disconnect(): Promise<void> {}
           async startThread(): Promise<{ id: string }> {
@@ -758,7 +755,7 @@ describe("codex session question flow", () => {
           rejectServerRequest(): void {}
           async runTurn(): Promise<{ agentMessage: string; turn: { status: "completed" }; items: [] }> {
             queueMicrotask(() => {
-              clientInstance?.emit("request:userInput", {
+              this.emit("request:userInput", {
                 requestId: "req-1",
                 itemId: "item-1",
                 threadId: "thread-1",
@@ -780,7 +777,7 @@ describe("codex session question flow", () => {
             });
 
             await answerResponse;
-            clientInstance?.emit("serverRequest:resolved", { requestId: "req-1" });
+            this.emit("serverRequest:resolved", { requestId: "req-1" });
 
             return {
               agentMessage: '{"outcome":"done"}',
@@ -870,6 +867,191 @@ describe("codex session question flow", () => {
         await expect(readFile(answerPath, "utf8")).rejects.toThrow();
       } finally {
         await session.disconnect();
+      }
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("serializes concurrent pending questions for the same run", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "orca-question-queue-"));
+    const store = new RunStore(path.join(tempDir, "runs"));
+    const runId = "run-1000-queue";
+    await store.createRun(runId, "/tmp/spec.md");
+    await store.updateRun(runId, { mode: "run", overallStatus: "running" });
+
+    const hookEvents: Array<{ requestId: string | number; taskId?: string; questions: Array<{ id: string }> }> = [];
+    const responses: Array<{ requestId: string | number; response: unknown }> = [];
+    const responseResolvers = new Map<string | number, () => void>();
+    let clientCount = 0;
+
+    try {
+      mockMultiAgentDetection(false);
+      mock.module("@ratley/codex-client", () => ({
+        CodexClient: class extends EventEmitter {
+          readonly index: number;
+          readonly requestId: string;
+          readonly threadId: string;
+          readonly questionId: string;
+
+          constructor() {
+            super();
+            clientCount += 1;
+            this.index = clientCount;
+            this.requestId = `req-${this.index}`;
+            this.threadId = `thread-${this.index}`;
+            this.questionId = `choice_${this.index}`;
+          }
+
+          async connect(): Promise<void> {}
+          async disconnect(): Promise<void> {}
+          async startThread(): Promise<{ id: string }> {
+            return { id: this.threadId };
+          }
+          async runReview(): Promise<{ reviewText: string }> {
+            return { reviewText: "ok" };
+          }
+          respondToUserInputRequest(requestId: string | number, response: unknown): void {
+            responses.push({ requestId, response });
+            responseResolvers.get(requestId)?.();
+          }
+          rejectServerRequest(): void {}
+          async runTurn(): Promise<{ agentMessage: string; turn: { status: "completed" }; items: [] }> {
+            queueMicrotask(() => {
+              this.emit("request:userInput", {
+                requestId: this.requestId,
+                itemId: `item-${this.index}`,
+                threadId: this.threadId,
+                turnId: `turn-${this.index}`,
+                questions: [
+                  {
+                    header: `Choice ${this.index}`,
+                    id: this.questionId,
+                    question: `Which option for task ${this.index}?`,
+                    isOther: false,
+                    isSecret: false,
+                  },
+                ],
+              });
+            });
+
+            await new Promise<void>((resolve) => {
+              responseResolvers.set(this.requestId, resolve);
+            });
+            this.emit("serverRequest:resolved", { requestId: this.requestId });
+
+            return {
+              agentMessage: '{"outcome":"done"}',
+              turn: { status: "completed" },
+              items: [],
+            };
+          }
+        },
+      }));
+
+      mock.module("../../utils/skill-loader.js", () => ({
+        loadSkills: async () => [],
+      }));
+
+      const { createCodexSession } = await import(`./session.ts?test=${Math.random()}`);
+      const sessionOne = await createCodexSession(process.cwd(), undefined, {
+        runId: runId as `${string}-${number}-${string}`,
+        store,
+        emitHook: async (event) => {
+          if (event.hook === "onQuestion") {
+            hookEvents.push({
+              requestId: event.requestId,
+              ...(event.taskId ? { taskId: event.taskId } : {}),
+              questions: event.questions.map((question) => ({ id: question.id })),
+            });
+          }
+        },
+      });
+      const sessionTwo = await createCodexSession(process.cwd(), undefined, {
+        runId: runId as `${string}-${number}-${string}`,
+        store,
+        emitHook: async (event) => {
+          if (event.hook === "onQuestion") {
+            hookEvents.push({
+              requestId: event.requestId,
+              ...(event.taskId ? { taskId: event.taskId } : {}),
+              questions: event.questions.map((question) => ({ id: question.id })),
+            });
+          }
+        },
+      });
+
+      try {
+        const executionOne = sessionOne.executeTask(
+          {
+            id: "task-1",
+            name: "Task one",
+            description: "Ask the first question.",
+            dependencies: [],
+            acceptance_criteria: ["answered"],
+            status: "pending",
+            retries: 0,
+            maxRetries: 3,
+          },
+          runId,
+        );
+        const executionTwo = sessionTwo.executeTask(
+          {
+            id: "task-2",
+            name: "Task two",
+            description: "Ask the second question.",
+            dependencies: [],
+            acceptance_criteria: ["answered"],
+            status: "pending",
+            retries: 0,
+            maxRetries: 3,
+          },
+          runId,
+        );
+
+        const firstWaitingRun = await waitFor(async () => {
+          const run = await store.getRun(runId);
+          return run?.pendingQuestion?.requestId === "req-1" ? run : null;
+        });
+        expect(firstWaitingRun.pendingQuestion?.questions[0]?.id).toBe("choice_1");
+
+        await delay(100);
+        const stillFirstRun = await store.getRun(runId);
+        expect(stillFirstRun?.pendingQuestion?.requestId).toBe("req-1");
+        expect(hookEvents.map((event) => event.requestId)).toEqual(["req-1"]);
+
+        const answerPath = path.join(store.getRunDir(runId), "answer.txt");
+        await writeFile(
+          answerPath,
+          `${JSON.stringify({ answers: { choice_1: { answers: ["one"] } } })}\n`,
+          "utf8",
+        );
+
+        const secondWaitingRun = await waitFor(async () => {
+          const run = await store.getRun(runId);
+          return run?.pendingQuestion?.requestId === "req-2" ? run : null;
+        });
+        expect(secondWaitingRun.pendingQuestion?.questions[0]?.id).toBe("choice_2");
+        expect(hookEvents.map((event) => event.requestId)).toEqual(["req-1", "req-2"]);
+
+        await writeFile(
+          answerPath,
+          `${JSON.stringify({ answers: { choice_2: { answers: ["two"] } } })}\n`,
+          "utf8",
+        );
+
+        const results = await Promise.all([executionOne, executionTwo]);
+        expect(results.map((result) => result.outcome)).toEqual(["done", "done"]);
+        expect(responses.map((response) => response.requestId)).toEqual(["req-1", "req-2"]);
+
+        const resumedRun = await waitFor(async () => {
+          const run = await store.getRun(runId);
+          return run && run.pendingQuestion === undefined ? run : null;
+        });
+        expect(resumedRun.overallStatus).toBe("running");
+      } finally {
+        await sessionOne.disconnect();
+        await sessionTwo.disconnect();
       }
     } finally {
       await rm(tempDir, { recursive: true, force: true });

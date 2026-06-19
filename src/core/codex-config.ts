@@ -68,6 +68,30 @@ function hasEnabledRootMultiAgentSetting(content: string): boolean {
   return false;
 }
 
+function addMultiAgentToRootFeaturesSection(content: string): string | null {
+  const lines = content.split(/\r?\n/u);
+  const sectionStart = lines.findIndex((line) => {
+    const sectionPath = parseSectionPath(line.trim());
+    return sectionPath !== null && isRootFeaturesSection(sectionPath);
+  });
+
+  if (sectionStart === -1) {
+    return null;
+  }
+
+  let insertAt = lines.length;
+  for (let index = sectionStart + 1; index < lines.length; index += 1) {
+    const sectionPath = parseSectionPath(lines[index]?.trim() ?? "");
+    if (sectionPath !== null) {
+      insertAt = index;
+      break;
+    }
+  }
+
+  lines.splice(insertAt, 0, "multi_agent = true");
+  return lines.join("\n");
+}
+
 export async function isCodexMultiAgentActive(
   config?: OrcaConfig,
   _configFile?: string,
@@ -133,6 +157,12 @@ export async function ensureCodexMultiAgent(
 
   if (containsMultiAgentSetting(existingContent)) {
     return { action: "already-set", path: configFile };
+  }
+
+  const contentWithRootFeature = addMultiAgentToRootFeaturesSection(existingContent);
+  if (contentWithRootFeature !== null) {
+    await writeFile(configFile, contentWithRootFeature, "utf8");
+    return { action: "appended", path: configFile };
   }
 
   const separator = existingContent.endsWith("\n") ? "\n" : "\n\n";

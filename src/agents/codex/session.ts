@@ -4,9 +4,6 @@ import path from "node:path";
 import { CodexClient } from "@ratley/codex-client";
 import type {
   CompletedTurn,
-  RequestId,
-  ToolRequestUserInputParams,
-  ToolRequestUserInputResponse,
 } from "@ratley/codex-client";
 
 import type {
@@ -24,6 +21,8 @@ import {
   buildQuestionHookMessage,
   createPendingQuestion,
   parseQuestionAnswerInput,
+  type ToolRequestUserInputParams,
+  type ToolRequestUserInputResponse,
 } from "../../core/question-flow.js";
 import { TaskGraphReviewPayloadSchema } from "../../core/task-graph-review.js";
 import { RunStore } from "../../state/store.js";
@@ -33,6 +32,8 @@ import { logger } from "../../utils/logger.js";
 import { resolveCodexPath } from "./codex-path.js";
 
 export type { PlanResult, TaskExecutionResult };
+
+type RequestId = string | number;
 
 function getCodeSimplifierGuidance(): string[] {
   return [
@@ -374,6 +375,7 @@ const DEFAULT_THINKING_BY_STEP: Record<ThinkingStep, CodexEffort> = {
 };
 
 const ANSWER_FILE_POLL_MS = 500;
+const runUserInputQueues = new Map<string, Promise<void>>();
 
 function getEffort(config: OrcaConfig | undefined, step: ThinkingStep): CodexEffort {
   const explicitThinkingLevel = config?.codex?.thinkingLevel?.[step];
@@ -408,6 +410,22 @@ function buildTurnInput(text: string, skills: LoadedSkill[]): Array<{ type: "tex
       skillContext,
     ].join("\n\n"),
   }];
+}
+
+function enqueueRunUserInput(runId: RunId, handleRequest: () => Promise<void>): Promise<void> {
+  const key = String(runId);
+  const previous = runUserInputQueues.get(key) ?? Promise.resolve();
+  const current = previous.catch(() => undefined).then(handleRequest);
+  const guarded = current.catch(() => undefined);
+
+  runUserInputQueues.set(key, guarded);
+  void guarded.finally(() => {
+    if (runUserInputQueues.get(key) === guarded) {
+      runUserInputQueues.delete(key);
+    }
+  });
+
+  return current;
 }
 
 interface RawSkill {
@@ -777,12 +795,23 @@ export async function createCodexSession(
       client,
       "request:userInput",
       (request: { requestId: RequestId } & ToolRequestUserInputParams) => {
-        void (async () => {
+        const handleRequest = async (): Promise<void> => {
           if (!interactionContext) {
             rejectUserInputRequest(
               request.requestId,
               "Orca cannot answer Codex requestUserInput prompts without an interactive run context.",
             );
+            return;
+          }
+
+          const runBeforePrompt = await interactionContext.store.getRun(interactionContext.runId);
+          if (!runBeforePrompt) {
+            rejectUserInputRequest(request.requestId, `Run not found while waiting for answer: ${interactionContext.runId}`);
+            return;
+          }
+
+          if (runBeforePrompt.overallStatus === "cancelled") {
+            rejectUserInputRequest(request.requestId, `Run ${interactionContext.runId} was cancelled while waiting for input.`);
             return;
           }
 
@@ -858,7 +887,13 @@ export async function createCodexSession(
               await clearAnswerFile(interactionContext.store, interactionContext.runId);
             }
           }
-        })().catch(async (error) => {
+        };
+
+        const queuedRequest = interactionContext
+          ? enqueueRunUserInput(interactionContext.runId, handleRequest)
+          : handleRequest();
+
+        void queuedRequest.catch(async (error) => {
           const message = error instanceof Error ? error.message : String(error);
           logger.warn(`Failed while handling Codex requestUserInput: ${message}`);
           if (interactionContext) {

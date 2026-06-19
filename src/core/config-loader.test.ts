@@ -144,6 +144,41 @@ describe("config-loader", () => {
     ).rejects.toThrow("Config.review.onInvalid must be 'fail' or 'warn_skip'");
   });
 
+  test("resolveConfigFromPaths validates task review config", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(cliPath, "export default { review: { task: { maxCycles: 0 } } };\n", "utf8");
+
+    await expect(
+      resolveConfigFromPaths(
+        path.join(tempDir, "missing-global.js"),
+        path.join(tempDir, "missing-project.js"),
+        cliPath
+      )
+    ).rejects.toThrow("Config.review.task.maxCycles must be an integer >= 1");
+  });
+
+  test("resolveConfigFromPaths accepts task review config", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(
+      cliPath,
+      "export default { review: { task: { enabled: true, maxCycles: 3, onFindings: 'report_only', prompt: 'stay narrow' } } };\n",
+      "utf8"
+    );
+
+    const resolved = await resolveConfigFromPaths(
+      path.join(tempDir, "missing-global.js"),
+      path.join(tempDir, "missing-project.js"),
+      cliPath
+    );
+
+    expect(resolved?.review?.task).toEqual({
+      enabled: true,
+      maxCycles: 3,
+      onFindings: "report_only",
+      prompt: "stay narrow",
+    });
+  });
+
   test("resolveConfigFromPaths accepts executor 'codex'", async () => {
     const cliPath = path.join(tempDir, "cli.config.js");
     await fs.writeFile(cliPath, "export default { executor: 'codex' };\n", "utf8");
@@ -205,6 +240,32 @@ describe("config-loader", () => {
     });
   });
 
+  test("resolveConfigFromPaths validates codex.maxParallelTasks", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(cliPath, "export default { codex: { maxParallelTasks: 0 } };\n", "utf8");
+
+    await expect(
+      resolveConfigFromPaths(
+        path.join(tempDir, "missing-global.js"),
+        path.join(tempDir, "missing-project.js"),
+        cliPath
+      )
+    ).rejects.toThrow("Config.codex.maxParallelTasks must be an integer >= 1");
+  });
+
+  test("resolveConfigFromPaths accepts codex.maxParallelTasks", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(cliPath, "export default { codex: { multiAgent: true, maxParallelTasks: 2 } };\n", "utf8");
+
+    const resolved = await resolveConfigFromPaths(
+      path.join(tempDir, "missing-global.js"),
+      path.join(tempDir, "missing-project.js"),
+      cliPath
+    );
+
+    expect(resolved?.codex?.maxParallelTasks).toBe(2);
+  });
+
   test("resolveConfigFromPaths rejects removed codex.thinking", async () => {
     const cliPath = path.join(tempDir, "cli.config.js");
     await fs.writeFile(
@@ -256,6 +317,140 @@ describe("config-loader", () => {
     expect(resolved?.codex?.perCwdExtraUserRoots).toEqual([
       { cwd: "/repo", extraUserRoots: ["/tmp/skills"] },
     ]);
+  });
+
+  test("resolveConfigFromPaths accepts flow presets", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(
+      cliPath,
+      [
+        "export default {",
+        "  flow: {",
+        "    default: 'orchestrate',",
+        "    presets: {",
+        "      orchestrate: {",
+        "        description: 'Coordinate review slices',",
+        "        baseline: { prompt: 'Check the dirty tree first.', skills: ['./.orca/skills/orchestrate'] },",
+        "        execution: { codex: { effort: 'medium', maxParallelTasks: 2 }, review: { onFindings: 'report_only' } },",
+        "        review: { execution: { validator: { auto: false, commands: ['bun test src'] } } },",
+        "        overrides: { skills: ['./.orca/skills/review'], hookCommands: { onComplete: 'echo done' } },",
+        "        summary: { prompt: 'Return files, checks, and integration notes.' }",
+        "      }",
+        "    }",
+        "  }",
+        "};",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+
+    const resolved = await resolveConfigFromPaths(
+      path.join(tempDir, "missing-global.js"),
+      path.join(tempDir, "missing-project.js"),
+      cliPath
+    );
+
+    const preset = resolved?.flow?.presets?.orchestrate;
+    expect(resolved?.flow?.default).toBe("orchestrate");
+    expect(preset?.description).toBe("Coordinate review slices");
+    expect(preset?.baseline?.skills).toEqual(["./.orca/skills/orchestrate"]);
+    expect(preset?.execution?.codex?.effort).toBe("medium");
+    expect(preset?.execution?.codex?.maxParallelTasks).toBe(2);
+    expect(preset?.review?.execution?.validator?.commands).toEqual(["bun test src"]);
+    expect(preset?.overrides?.hookCommands?.onComplete).toBe("echo done");
+    expect(preset?.summary?.prompt).toContain("integration notes");
+  });
+
+  test("resolveConfigFromPaths rejects unsupported flow preset section keys", async () => {
+    const cases = [
+      {
+        name: "flow",
+        config: "export default { flow: { preset: { review: {} } } };\n",
+        error: "Config.flow.preset is not supported",
+      },
+      {
+        name: "preset",
+        config: "export default { flow: { presets: { review: { promtp: 'typo' } } } };\n",
+        error: "Config.flow.presets.review.promtp is not supported",
+      },
+      {
+        name: "baseline",
+        config: "export default { flow: { presets: { review: { baseline: { promtp: 'typo' } } } } };\n",
+        error: "Config.flow.presets.review.baseline.promtp is not supported",
+      },
+      {
+        name: "planning",
+        config: "export default { flow: { presets: { review: { planning: { promtp: 'typo' } } } } };\n",
+        error: "Config.flow.presets.review.planning.promtp is not supported",
+      },
+      {
+        name: "execution",
+        config: "export default { flow: { presets: { review: { execution: { codx: { effort: 'medium' } } } } } };\n",
+        error: "Config.flow.presets.review.execution.codx is not supported",
+      },
+      {
+        name: "execution-review",
+        config: "export default { flow: { presets: { review: { execution: { review: { onFinding: 'fail' } } } } } };\n",
+        error: "Config.flow.presets.review.execution.review: Config.review.task.onFinding is not supported",
+      },
+      {
+        name: "execution-codex",
+        config: "export default { flow: { presets: { review: { execution: { codex: { maxParallelTask: 2 } } } } } };\n",
+        error: "Config.flow.presets.review.execution.codex: Config.codex.maxParallelTask is not supported",
+      },
+      {
+        name: "summary",
+        config: "export default { flow: { presets: { review: { summary: { promtp: 'typo' } } } } };\n",
+        error: "Config.flow.presets.review.summary.promtp is not supported",
+      },
+    ];
+
+    for (const testCase of cases) {
+      const cliPath = path.join(tempDir, `${testCase.name}.config.js`);
+      await fs.writeFile(cliPath, testCase.config, "utf8");
+
+      await expect(
+        resolveConfigFromPaths(
+          path.join(tempDir, "missing-global.js"),
+          path.join(tempDir, "missing-project.js"),
+          cliPath
+        )
+      ).rejects.toThrow(testCase.error);
+    }
+  });
+
+  test("resolveConfigFromPaths validates flow nested config", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(
+      cliPath,
+      "export default { flow: { presets: { review: { execution: { review: { maxCycles: 0 } } } } } };\n",
+      "utf8"
+    );
+
+    await expect(
+      resolveConfigFromPaths(
+        path.join(tempDir, "missing-global.js"),
+        path.join(tempDir, "missing-project.js"),
+        cliPath
+      )
+    ).rejects.toThrow("Config.flow.presets.review.execution.review");
+  });
+
+  test("resolveConfigFromPaths rejects unknown default flow", async () => {
+    const cliPath = path.join(tempDir, "cli.config.js");
+    await fs.writeFile(
+      cliPath,
+      "export default { flow: { default: 'missing', presets: { review: { description: 'Review only' } } } };\n",
+      "utf8"
+    );
+
+    await expect(
+      resolveConfigFromPaths(
+        path.join(tempDir, "missing-global.js"),
+        path.join(tempDir, "missing-project.js"),
+        cliPath
+      )
+    ).rejects.toThrow('Config.flow.default references unknown flow preset "missing"');
   });
 
   test("resolveConfigFromPaths merges global and project", async () => {
@@ -414,5 +609,54 @@ describe("config-loader", () => {
         }
       }
     });
+  });
+
+  test("mergeConfigs merges flow defaults and presets", () => {
+    const globalConfig = {
+      flow: {
+        default: "review",
+        presets: {
+          review: {
+            description: "Review changes",
+            baseline: { skills: ["global-review"] },
+            execution: { codex: { thinkingLevel: { planning: "medium" as const } } },
+          },
+        },
+      },
+    };
+    const projectConfig = {
+      flow: {
+        presets: {
+          review: {
+            baseline: { skills: ["project-review"] },
+            execution: { codex: { maxParallelTasks: 2 } },
+            overrides: { skills: ["project-skill"] },
+          },
+          orchestrate: {
+            description: "Coordinate implementation slices",
+          },
+        },
+      },
+    };
+    const cliConfig = {
+      flow: {
+        default: "orchestrate",
+      },
+    };
+
+    const merged = mergeConfigs(globalConfig, projectConfig, cliConfig);
+
+    expect(merged?.flow?.default).toBe("orchestrate");
+    expect(merged?.flow?.presets?.review?.description).toBe("Review changes");
+    expect(merged?.flow?.presets?.review?.baseline?.skills).toEqual([
+      "global-review",
+      "project-review",
+    ]);
+    expect(merged?.flow?.presets?.review?.execution?.codex).toEqual({
+      thinkingLevel: { planning: "medium" },
+      maxParallelTasks: 2,
+    });
+    expect(merged?.flow?.presets?.review?.overrides?.skills).toEqual(["project-skill"]);
+    expect(merged?.flow?.presets?.orchestrate?.description).toBe("Coordinate implementation slices");
   });
 });

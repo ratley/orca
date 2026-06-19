@@ -19,9 +19,10 @@
   "scripts": {
     "build": "tsc",
     "dev": "bun run src/cli/index.ts",
-    "lint": "oxlint src/",
+    "lint": "oxlint src/ __tests__/",
     "typecheck": "node ./scripts/typecheck.mjs",
-    "test": "bun test src",
+    "test": "bun test src ./__tests__",
+    "test:integration": "bun test ./__tests__/integration",
     "test:setup": "bash scripts/test-setup.sh",
     "test:postexec-json": "bun test src/cli/commands/run.postexec-json.integration.test.ts",
     "start": "bun run src/cli/index.ts",
@@ -48,11 +49,13 @@
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.17.4",
     "@types/bun": "^1.2.21",
+    "@types/node": "^25.8.0",
     "@typescript/native-preview": "^7.0.0-dev.20260219.1",
     "husky": "^9.1.7",
     "lint-staged": "^16.2.0",
-    "oxlint": "^1.49.0",
-    "oxlint-tsgolint": "^0.14.1",
+    "oxfmt": "^0.49.0",
+    "oxlint": "^1.64.0",
+    "oxlint-tsgolint": "^0.22.1",
     "publint": "^0.3.15",
     "typescript": "^5.8.2"
   },

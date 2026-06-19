@@ -1,9 +1,22 @@
-import type {
-  ToolRequestUserInputParams,
-  ToolRequestUserInputResponse,
-} from "@ratley/codex-client";
-
 import type { PendingQuestion, PendingQuestionPrompt } from "../types/index.js";
+
+export type ToolRequestUserInputParams = {
+  threadId: string;
+  turnId: string;
+  itemId: string;
+  questions: Array<{
+    header: string;
+    id: string;
+    question: string;
+    isOther?: boolean;
+    isSecret?: boolean;
+    options?: Array<{ label: string; description: string }> | null;
+  }>;
+};
+
+export type ToolRequestUserInputResponse = {
+  answers: Record<string, { answers: string[] }>;
+};
 
 function normalizeQuestionPrompt(question: ToolRequestUserInputParams["questions"][number]): PendingQuestionPrompt {
   return {

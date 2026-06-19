@@ -55,11 +55,27 @@ export class RunStore {
       throw new Error(`Run not found: ${runId}`);
     }
 
-    const next = RunStatusSchema.parse({
-      ...existing,
-      ...patch,
-      updatedAt: new Date().toISOString()
-    }) as RunStatus;
+    const next = this.mergeRunPatch(existing, patch);
+
+    await this.writeJsonAtomic(this.getStatusPath(runId), next);
+    return next;
+  }
+
+  async updateRunIfActive(runId: string, patch: Partial<RunStatus>): Promise<RunStatus> {
+    const existing = await this.getRun(runId);
+    if (!existing) {
+      throw new Error(`Run not found: ${runId}`);
+    }
+
+    if (
+      existing.overallStatus === "cancelled"
+      || existing.overallStatus === "failed"
+      || existing.overallStatus === "completed"
+    ) {
+      return existing;
+    }
+
+    const next = this.mergeRunPatch(existing, patch);
 
     await this.writeJsonAtomic(this.getStatusPath(runId), next);
     return next;
@@ -100,6 +116,14 @@ export class RunStore {
 
   private getStatusPath(runId: string): string {
     return path.join(this.getRunDir(runId), "status.json");
+  }
+
+  private mergeRunPatch(existing: RunStatus, patch: Partial<RunStatus>): RunStatus {
+    return RunStatusSchema.parse({
+      ...existing,
+      ...patch,
+      updatedAt: new Date().toISOString()
+    }) as RunStatus;
   }
 
   private async writeJsonAtomic(filePath: string, data: unknown): Promise<void> {

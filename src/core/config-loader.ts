@@ -5,7 +5,12 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { parseCodexEffort } from "../types/effort.js";
-import type { HookName, OrcaConfig } from "../types/index.js";
+import type {
+  HookName,
+  OrcaConfig,
+  OrcaFlowConfig,
+  OrcaFlowOverridesConfig
+} from "../types/index.js";
 
 const KNOWN_HOOK_NAMES: HookName[] = [
   "onMilestone",
@@ -34,6 +39,176 @@ function describeType(value: unknown): string {
   }
 
   return typeof value;
+}
+
+function requireConfigObject(value: unknown, pathLabel: string): Record<string, unknown> {
+  if (!isObject(value) || Array.isArray(value)) {
+    throw new Error(`${pathLabel} must be an object, got ${describeType(value)}`);
+  }
+
+  return value;
+}
+
+function assertAllowedKeys(
+  object: Record<string, unknown>,
+  pathLabel: string,
+  allowedKeys: readonly string[]
+): void {
+  const allowed = new Set(allowedKeys);
+
+  for (const key of Object.keys(object)) {
+    if (!allowed.has(key)) {
+      throw new Error(
+        `${pathLabel}.${key} is not supported. Allowed keys: ${allowedKeys.join(", ")}`
+      );
+    }
+  }
+}
+
+function assertOptionalString(
+  object: Record<string, unknown>,
+  key: string,
+  pathLabel: string
+): void {
+  const value = object[key];
+  if (value !== undefined && typeof value !== "string") {
+    throw new Error(`${pathLabel} must be a string, got ${describeType(value)}`);
+  }
+}
+
+function assertOptionalStringArray(
+  object: Record<string, unknown>,
+  key: string,
+  pathLabel: string
+): void {
+  const value = object[key];
+  if (value === undefined) {
+    return;
+  }
+
+  if (!Array.isArray(value)) {
+    throw new Error(`${pathLabel} must be an array, got ${describeType(value)}`);
+  }
+
+  for (const entry of value) {
+    if (typeof entry !== "string") {
+      throw new Error(`${pathLabel} entries must be strings, got ${describeType(entry)}`);
+    }
+  }
+}
+
+function coerceNestedFlowConfig(
+  pathLabel: string,
+  partialConfig: Record<string, unknown>
+): void {
+  try {
+    coerceConfig(partialConfig);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${pathLabel}: ${message}`);
+  }
+}
+
+function validatePromptSection(
+  section: unknown,
+  pathLabel: string,
+  allowedKeys: readonly string[]
+): Record<string, unknown> {
+  const sectionObject = requireConfigObject(section, pathLabel);
+  assertAllowedKeys(sectionObject, pathLabel, allowedKeys);
+  assertOptionalString(sectionObject, "prompt", `${pathLabel}.prompt`);
+  return sectionObject;
+}
+
+function validateFlowOverrides(overrides: unknown, pathLabel: string): void {
+  const overridesObject = requireConfigObject(overrides, pathLabel);
+  const allowedKeys = new Set(["skills", "maxRetries", "codex", "review", "hookCommands", "pr"]);
+
+  for (const key of Object.keys(overridesObject)) {
+    if (!allowedKeys.has(key)) {
+      throw new Error(`${pathLabel}.${key} is not supported`);
+    }
+  }
+
+  coerceNestedFlowConfig(pathLabel, overridesObject);
+}
+
+function validateFlowPreset(preset: unknown, pathLabel: string): void {
+  const flow = requireConfigObject(preset, pathLabel);
+  assertAllowedKeys(flow, pathLabel, [
+    "description",
+    "baseline",
+    "planning",
+    "execution",
+    "review",
+    "overrides",
+    "summary"
+  ]);
+
+  assertOptionalString(flow, "description", `${pathLabel}.description`);
+
+  if ("baseline" in flow && flow.baseline !== undefined) {
+    const baseline = validatePromptSection(flow.baseline, `${pathLabel}.baseline`, ["prompt", "skills"]);
+    assertOptionalStringArray(baseline, "skills", `${pathLabel}.baseline.skills`);
+  }
+
+  if ("planning" in flow && flow.planning !== undefined) {
+    const planning = validatePromptSection(flow.planning, `${pathLabel}.planning`, ["prompt", "review"]);
+    if ("review" in planning && planning.review !== undefined) {
+      coerceNestedFlowConfig(`${pathLabel}.planning.review`, {
+        review: { plan: planning.review }
+      });
+    }
+  }
+
+  if ("execution" in flow && flow.execution !== undefined) {
+    const execution = validatePromptSection(flow.execution, `${pathLabel}.execution`, [
+      "prompt",
+      "codex",
+      "review"
+    ]);
+    if ("codex" in execution && execution.codex !== undefined) {
+      coerceNestedFlowConfig(`${pathLabel}.execution.codex`, { codex: execution.codex });
+    }
+    if ("review" in execution && execution.review !== undefined) {
+      coerceNestedFlowConfig(`${pathLabel}.execution.review`, {
+        review: { task: execution.review }
+      });
+    }
+  }
+
+  if ("review" in flow && flow.review !== undefined) {
+    coerceNestedFlowConfig(`${pathLabel}.review`, { review: flow.review });
+  }
+
+  if ("overrides" in flow && flow.overrides !== undefined) {
+    validateFlowOverrides(flow.overrides, `${pathLabel}.overrides`);
+  }
+
+  if ("summary" in flow && flow.summary !== undefined) {
+    validatePromptSection(flow.summary, `${pathLabel}.summary`, ["prompt"]);
+  }
+}
+
+function validateFlowConfig(flow: unknown): void {
+  const flowObject = requireConfigObject(flow, "Config.flow");
+  assertAllowedKeys(flowObject, "Config.flow", ["default", "presets"]);
+
+  if ("default" in flowObject && flowObject.default !== undefined) {
+    if (typeof flowObject.default !== "string" || flowObject.default.trim().length === 0) {
+      throw new Error(`Config.flow.default must be a non-empty string, got ${describeType(flowObject.default)}`);
+    }
+  }
+
+  if ("presets" in flowObject && flowObject.presets !== undefined) {
+    const presets = requireConfigObject(flowObject.presets, "Config.flow.presets");
+    for (const [presetName, preset] of Object.entries(presets)) {
+      if (presetName.trim().length === 0) {
+        throw new Error("Config.flow.presets keys must be non-empty strings");
+      }
+      validateFlowPreset(preset, `Config.flow.presets.${presetName}`);
+    }
+  }
 }
 
 function coerceConfig(candidate: unknown): OrcaConfig {
@@ -105,6 +280,18 @@ function coerceConfig(candidate: unknown): OrcaConfig {
     if (!isObject(candidate.codex)) {
       throw new Error(`Config.codex must be an object, got ${describeType(candidate.codex)}`);
     }
+    assertAllowedKeys(candidate.codex, "Config.codex", [
+      "enabled",
+      "model",
+      "effort",
+      "thinkingLevel",
+      "command",
+      "timeoutMs",
+      "multiAgent",
+      "maxParallelTasks",
+      "perCwdExtraUserRoots",
+      "thinking"
+    ]);
 
     if ("effort" in candidate.codex && candidate.codex.effort !== undefined) {
       if (typeof candidate.codex.effort !== "string") {
@@ -120,6 +307,12 @@ function coerceConfig(candidate: unknown): OrcaConfig {
       if (!isObject(candidate.codex.thinkingLevel)) {
         throw new Error(`Config.codex.thinkingLevel must be an object, got ${describeType(candidate.codex.thinkingLevel)}`);
       }
+      assertAllowedKeys(candidate.codex.thinkingLevel, "Config.codex.thinkingLevel", [
+        "decision",
+        "planning",
+        "review",
+        "execution"
+      ]);
 
       for (const key of ["decision", "planning", "review", "execution"] as const) {
         const value = candidate.codex.thinkingLevel[key];
@@ -134,6 +327,15 @@ function coerceConfig(candidate: unknown): OrcaConfig {
 
     if ("thinking" in candidate.codex && candidate.codex.thinking !== undefined) {
       throw new Error("Config.codex.thinking is no longer supported. Use Config.codex.thinkingLevel instead.");
+    }
+
+    if ("maxParallelTasks" in candidate.codex && candidate.codex.maxParallelTasks !== undefined) {
+      if (typeof candidate.codex.maxParallelTasks !== "number" || !Number.isInteger(candidate.codex.maxParallelTasks) || candidate.codex.maxParallelTasks < 1) {
+        const maxParallelTasksDisplay = typeof candidate.codex.maxParallelTasks === "number"
+          ? candidate.codex.maxParallelTasks
+          : (JSON.stringify(candidate.codex.maxParallelTasks) ?? describeType(candidate.codex.maxParallelTasks));
+        throw new Error(`Config.codex.maxParallelTasks must be an integer >= 1, got ${maxParallelTasksDisplay}`);
+      }
     }
 
     if ("perCwdExtraUserRoots" in candidate.codex && candidate.codex.perCwdExtraUserRoots !== undefined) {
@@ -177,6 +379,13 @@ function coerceConfig(candidate: unknown): OrcaConfig {
     if (!isObject(candidate.review)) {
       throw new Error(`Config.review must be an object, got ${describeType(candidate.review)}`);
     }
+    assertAllowedKeys(candidate.review, "Config.review", [
+      "enabled",
+      "onInvalid",
+      "plan",
+      "task",
+      "execution"
+    ]);
 
     // legacy compatibility: allow top-level review.enabled / review.onInvalid
     if ("enabled" in candidate.review && candidate.review.enabled !== undefined && typeof candidate.review.enabled !== "boolean") {
@@ -197,6 +406,7 @@ function coerceConfig(candidate: unknown): OrcaConfig {
       if (!isObject(candidate.review.plan)) {
         throw new Error(`Config.review.plan must be an object, got ${describeType(candidate.review.plan)}`);
       }
+      assertAllowedKeys(candidate.review.plan, "Config.review.plan", ["enabled", "onInvalid"]);
 
       if ("enabled" in candidate.review.plan && candidate.review.plan.enabled !== undefined && typeof candidate.review.plan.enabled !== "boolean") {
         throw new Error(`Config.review.plan.enabled must be a boolean, got ${describeType(candidate.review.plan.enabled)}`);
@@ -213,10 +423,55 @@ function coerceConfig(candidate: unknown): OrcaConfig {
       }
     }
 
+    if ("task" in candidate.review && candidate.review.task !== undefined) {
+      if (!isObject(candidate.review.task)) {
+        throw new Error(`Config.review.task must be an object, got ${describeType(candidate.review.task)}`);
+      }
+      assertAllowedKeys(candidate.review.task, "Config.review.task", [
+        "enabled",
+        "maxCycles",
+        "onFindings",
+        "prompt"
+      ]);
+
+      if ("enabled" in candidate.review.task && candidate.review.task.enabled !== undefined && typeof candidate.review.task.enabled !== "boolean") {
+        throw new Error(`Config.review.task.enabled must be a boolean, got ${describeType(candidate.review.task.enabled)}`);
+      }
+
+      if ("maxCycles" in candidate.review.task && candidate.review.task.maxCycles !== undefined) {
+        if (typeof candidate.review.task.maxCycles !== "number" || !Number.isInteger(candidate.review.task.maxCycles) || candidate.review.task.maxCycles < 1) {
+          const maxCyclesDisplay = typeof candidate.review.task.maxCycles === "number"
+            ? candidate.review.task.maxCycles
+            : (JSON.stringify(candidate.review.task.maxCycles) ?? describeType(candidate.review.task.maxCycles));
+          throw new Error(`Config.review.task.maxCycles must be an integer >= 1, got ${maxCyclesDisplay}`);
+        }
+      }
+
+      if ("onFindings" in candidate.review.task && candidate.review.task.onFindings !== undefined) {
+        if (candidate.review.task.onFindings !== "auto_fix" && candidate.review.task.onFindings !== "report_only" && candidate.review.task.onFindings !== "fail") {
+          const display = typeof candidate.review.task.onFindings === "string"
+            ? candidate.review.task.onFindings
+            : (JSON.stringify(candidate.review.task.onFindings) ?? describeType(candidate.review.task.onFindings));
+          throw new Error(`Config.review.task.onFindings must be 'auto_fix', 'report_only', or 'fail', got ${display}`);
+        }
+      }
+
+      if ("prompt" in candidate.review.task && candidate.review.task.prompt !== undefined && typeof candidate.review.task.prompt !== "string") {
+        throw new Error(`Config.review.task.prompt must be a string, got ${describeType(candidate.review.task.prompt)}`);
+      }
+    }
+
     if ("execution" in candidate.review && candidate.review.execution !== undefined) {
       if (!isObject(candidate.review.execution)) {
         throw new Error(`Config.review.execution must be an object, got ${describeType(candidate.review.execution)}`);
       }
+      assertAllowedKeys(candidate.review.execution, "Config.review.execution", [
+        "enabled",
+        "maxCycles",
+        "onFindings",
+        "validator",
+        "prompt"
+      ]);
 
       if ("enabled" in candidate.review.execution && candidate.review.execution.enabled !== undefined && typeof candidate.review.execution.enabled !== "boolean") {
         throw new Error(`Config.review.execution.enabled must be a boolean, got ${describeType(candidate.review.execution.enabled)}`);
@@ -248,6 +503,10 @@ function coerceConfig(candidate: unknown): OrcaConfig {
         if (!isObject(candidate.review.execution.validator)) {
           throw new Error(`Config.review.execution.validator must be an object, got ${describeType(candidate.review.execution.validator)}`);
         }
+        assertAllowedKeys(candidate.review.execution.validator, "Config.review.execution.validator", [
+          "auto",
+          "commands"
+        ]);
 
         if ("auto" in candidate.review.execution.validator && candidate.review.execution.validator.auto !== undefined && typeof candidate.review.execution.validator.auto !== "boolean") {
           throw new Error(`Config.review.execution.validator.auto must be a boolean, got ${describeType(candidate.review.execution.validator.auto)}`);
@@ -266,6 +525,10 @@ function coerceConfig(candidate: unknown): OrcaConfig {
         }
       }
     }
+  }
+
+  if ("flow" in candidate && candidate.flow !== undefined) {
+    validateFlowConfig(candidate.flow);
   }
 
   return candidate as OrcaConfig;
@@ -290,6 +553,141 @@ const TOP_LEVEL_SCALARS: Array<keyof Pick<
   OrcaConfig,
   "runsDir" | "sessionLogs" | "maxRetries" | "openaiApiKey" | "executor"
 >> = ["runsDir", "sessionLogs", "maxRetries", "openaiApiKey", "executor"];
+
+function mergeStringArrays(
+  previous: string[] | undefined,
+  next: string[] | undefined
+): string[] | undefined {
+  if (previous === undefined && next === undefined) {
+    return undefined;
+  }
+
+  return [...new Set([...(previous ?? []), ...(next ?? [])])];
+}
+
+function mergeCodexConfig(
+  previous: OrcaConfig["codex"] | undefined,
+  next: OrcaConfig["codex"] | undefined
+): OrcaConfig["codex"] | undefined {
+  return mergeConfigs(
+    previous !== undefined ? { codex: previous } : undefined,
+    next !== undefined ? { codex: next } : undefined
+  )?.codex;
+}
+
+function mergeReviewConfig(
+  previous: OrcaConfig["review"] | undefined,
+  next: OrcaConfig["review"] | undefined
+): OrcaConfig["review"] | undefined {
+  return mergeConfigs(
+    previous !== undefined ? { review: previous } : undefined,
+    next !== undefined ? { review: next } : undefined
+  )?.review;
+}
+
+function mergeFlowOverridesConfig(
+  previous: OrcaFlowOverridesConfig | undefined,
+  next: OrcaFlowOverridesConfig | undefined
+): OrcaFlowOverridesConfig | undefined {
+  return mergeConfigs(previous, next) as OrcaFlowOverridesConfig | undefined;
+}
+
+function mergeFlowPresetConfigs(
+  previous: OrcaFlowConfig | undefined,
+  next: OrcaFlowConfig
+): OrcaFlowConfig {
+  if (previous === undefined) {
+    return next;
+  }
+
+  const baselineSkills = mergeStringArrays(previous.baseline?.skills, next.baseline?.skills);
+  const baseline = previous.baseline !== undefined || next.baseline !== undefined
+    ? {
+        ...previous.baseline,
+        ...next.baseline,
+        ...(baselineSkills !== undefined ? { skills: baselineSkills } : {})
+      }
+    : undefined;
+
+  const planningReview = mergeReviewConfig(
+    previous.planning?.review !== undefined ? { plan: previous.planning.review } : undefined,
+    next.planning?.review !== undefined ? { plan: next.planning.review } : undefined
+  )?.plan;
+  const planning = previous.planning !== undefined || next.planning !== undefined
+    ? {
+        ...previous.planning,
+        ...next.planning,
+        ...(planningReview !== undefined ? { review: planningReview } : {})
+      }
+    : undefined;
+
+  const executionCodex = mergeCodexConfig(previous.execution?.codex, next.execution?.codex);
+  const executionReview = mergeReviewConfig(
+    previous.execution?.review !== undefined ? { task: previous.execution.review } : undefined,
+    next.execution?.review !== undefined ? { task: next.execution.review } : undefined
+  )?.task;
+  const execution = previous.execution !== undefined || next.execution !== undefined
+    ? {
+        ...previous.execution,
+        ...next.execution,
+        ...(executionCodex !== undefined ? { codex: executionCodex } : {}),
+        ...(executionReview !== undefined ? { review: executionReview } : {})
+      }
+    : undefined;
+  const review = mergeReviewConfig(previous.review, next.review);
+  const overrides = mergeFlowOverridesConfig(previous.overrides, next.overrides);
+
+  return {
+    ...previous,
+    ...next,
+    ...(baseline !== undefined ? { baseline } : {}),
+    ...(planning !== undefined ? { planning } : {}),
+    ...(execution !== undefined ? { execution } : {}),
+    ...(review !== undefined ? { review } : {}),
+    ...(overrides !== undefined ? { overrides } : {}),
+    ...(previous.summary !== undefined || next.summary !== undefined
+      ? { summary: { ...previous.summary, ...next.summary } }
+      : {})
+  };
+}
+
+function mergeFlowConfig(
+  previous: OrcaConfig["flow"] | undefined,
+  next: OrcaConfig["flow"] | undefined
+): OrcaConfig["flow"] | undefined {
+  if (previous === undefined && next === undefined) {
+    return undefined;
+  }
+
+  const presets: Record<string, OrcaFlowConfig> = { ...previous?.presets };
+  for (const [name, preset] of Object.entries(next?.presets ?? {})) {
+    presets[name] = mergeFlowPresetConfigs(presets[name], preset);
+  }
+
+  return {
+    ...previous,
+    ...next,
+    ...(Object.keys(presets).length > 0 ? { presets } : {})
+  };
+}
+
+function validateResolvedFlowReferences(config: OrcaConfig): void {
+  const defaultFlow = config.flow?.default;
+  if (defaultFlow === undefined) {
+    return;
+  }
+
+  const presets = config.flow?.presets ?? {};
+  if (presets[defaultFlow] !== undefined) {
+    return;
+  }
+
+  const available = Object.keys(presets);
+  const suffix = available.length > 0
+    ? ` Available flows: ${available.join(", ")}.`
+    : " No flow presets are configured.";
+  throw new Error(`Config.flow.default references unknown flow preset "${defaultFlow}".${suffix}`);
+}
 
 export function mergeConfigs(...configs: Array<OrcaConfig | undefined>): OrcaConfig | undefined {
   const presentConfigs = configs.filter((config): config is OrcaConfig => config !== undefined);
@@ -325,7 +723,21 @@ export function mergeConfigs(...configs: Array<OrcaConfig | undefined>): OrcaCon
       merged.pr = { ...merged.pr, ...config.pr };
     }
 
+    if (merged.flow !== undefined || config.flow !== undefined) {
+      const mergedFlow = mergeFlowConfig(merged.flow, config.flow);
+      if (mergedFlow !== undefined) {
+        merged.flow = mergedFlow;
+      }
+    }
+
     if (merged.review !== undefined || config.review !== undefined) {
+      const mergedTaskReview = (merged.review?.task !== undefined || config.review?.task !== undefined)
+        ? {
+          ...merged.review?.task,
+          ...config.review?.task
+        }
+        : undefined;
+
       merged.review = {
         ...merged.review,
         ...config.review,
@@ -333,6 +745,7 @@ export function mergeConfigs(...configs: Array<OrcaConfig | undefined>): OrcaCon
           ...merged.review?.plan,
           ...config.review?.plan
         },
+        ...(mergedTaskReview !== undefined ? { task: mergedTaskReview } : {}),
         execution: {
           ...merged.review?.execution,
           ...config.review?.execution,
@@ -357,6 +770,7 @@ export function mergeConfigs(...configs: Array<OrcaConfig | undefined>): OrcaCon
     }
   }
 
+  validateResolvedFlowReferences(merged);
   return merged;
 }
 

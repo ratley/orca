@@ -77,6 +77,30 @@ describe("ensureCodexMultiAgent", () => {
     expect(content).toContain("multi_agent = true");
   });
 
+  it("adds multi_agent to an existing root features section without duplicating the table", async () => {
+    const fs = await import("node:fs/promises");
+    await fs.writeFile(
+      tmpConfigFile,
+      [
+        "[features]",
+        "multi_agent_v2 = true",
+        "computer_use = true",
+        "",
+        "[mcp_servers.context7]",
+        "command = \"npx\"",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+
+    const result = await ensureCodexMultiAgent({ codex: { multiAgent: true } }, tmpConfigFile);
+    expect(result.action).toBe("appended");
+
+    const content = await readFile(tmpConfigFile, "utf8");
+    expect(content.match(/^\[features\]$/gum)).toHaveLength(1);
+    expect(content).toContain("[features]\nmulti_agent_v2 = true\ncomputer_use = true\n\nmulti_agent = true\n[mcp_servers.context7]");
+  });
+
   it("appended block is separated from existing content with no trailing newline", async () => {
     const fs = await import("node:fs/promises");
     await fs.writeFile(tmpConfigFile, "[section]\nkey = \"value\"", "utf8");

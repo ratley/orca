@@ -64,6 +64,7 @@ export const RunStatusSchema = z.object({
   runId: z.string(),
   mode: z.enum(["plan", "run"]),
   specPath: z.string(),
+  flowName: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   overallStatus: z.enum([

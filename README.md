@@ -108,7 +108,35 @@ Stale executor values from older configs are ignored and coerced to `codex`. Orc
 
 ```ts
 // orca.config.ts
-import { defineOrcaConfig } from "orcastrator";
+import { defineOrcaConfig, defineOrcaFlow } from "orcastrator";
+
+const reviewFlow = defineOrcaFlow({
+  description: "Coordinate review slices and report the integrated result.",
+  baseline: {
+    prompt: "Inspect the dirty tree and current test surface before planning.",
+    skills: ["./.orca/skills/review"],
+  },
+  planning: {
+    prompt: "Split independent review, fix, and verification work into separate tasks.",
+    review: { enabled: true, onInvalid: "fail" },
+  },
+  execution: {
+    prompt: "Keep task ownership narrow and run the relevant checks before completion.",
+    codex: { multiAgent: true, maxParallelTasks: 2 },
+    review: { enabled: true, onFindings: "auto_fix" },
+  },
+  review: {
+    execution: {
+      validator: { auto: false, commands: ["npm test"] },
+    },
+  },
+  overrides: {
+    maxRetries: 1,
+  },
+  summary: {
+    prompt: "Report files changed, checks run, and integration notes.",
+  },
+});
 
 export default defineOrcaConfig({
   executor: "codex",              // only supported value
@@ -116,6 +144,13 @@ export default defineOrcaConfig({
   sessionLogs: "./session-logs",
   skills: ["./.orca/skills"],
   maxRetries: 1,
+
+  flow: {
+    default: "review-cycle",
+    presets: {
+      "review-cycle": reviewFlow,
+    },
+  },
 
   codex: {
     model: "gpt-5.3-codex",
@@ -128,6 +163,7 @@ export default defineOrcaConfig({
     },
     timeoutMs: 300000,
     multiAgent: false,      // see Multi-agent section
+    maxParallelTasks: 4,    // runner-level concurrency when multi-agent is active
     perCwdExtraUserRoots: [
       { cwd: process.cwd(), extraUserRoots: ["/tmp/shared-skills"] }
     ],
@@ -137,6 +173,12 @@ export default defineOrcaConfig({
     plan: {
       enabled: true,
       onInvalid: "fail",    // "fail" | "warn_skip"
+    },
+    task: {
+      enabled: true,
+      maxCycles: 2,
+      onFindings: "auto_fix",  // "auto_fix" | "report_only" | "fail"
+      // prompt: "Check each completed task against the original spec"
     },
     execution: {
       enabled: true,
@@ -170,9 +212,30 @@ export default defineOrcaConfig({
 });
 ```
 
+### Flows
+
+Flows are named presets for common run shapes. Configure them with `flow.presets`, optionally set `flow.default`, list them with `orca flows`, and select one per run with `--flow`:
+
+```bash
+orca flows
+orca --flow review-cycle "audit the auth changes"
+orca plan --spec ./specs/auth-review.md --flow review-cycle
+```
+
+Use `defineOrcaFlow(...)` for typed presets in `orca.config.ts`.
+
+- `baseline` - shared starting instructions and extra skills for the run.
+- `planning` - planner instructions plus pre-execution plan-review settings.
+- `execution` - execution instructions plus Codex and per-task review settings.
+- `review` - full review config overrides, including post-execution validators.
+- `overrides` - final config overrides such as skills, retries, Codex, hooks, and PR settings.
+- `summary` - instructions for summary/reporting output.
+
 ### Review cycle
 
 After planning, Orca runs a pre-execution review that can edit the task graph (add/remove tasks, update fields, adjust dependencies) before execution starts.
+
+During execution, Orca carries the original spec and current task graph into every task prompt. After each task, `review.task` asks Codex to check the completed work against the original spec, task graph, and acceptance criteria. With `onFindings: "auto_fix"`, Orca lets the reviewer fix issues and reruns the check up to `maxCycles`; unresolved findings fail that task instead of silently drifting forward.
 
 After execution, Orca runs validation commands and asks Codex to review findings. With `onFindings: "auto_fix"`, it applies fixes and retries up to `maxCycles` times, then reports. Set `ORCA_SKIP_VALIDATORS=1` to skip validator auto-detection at runtime.
 
@@ -180,7 +243,9 @@ Use `codex.thinkingLevel` when you want different reasoning levels for different
 
 ### Multi-agent mode
 
-Set `codex.multiAgent: true` to spawn parallel Codex agents per task. Faster for large refactors with independent subtasks; higher token cost. **Note:** this writes `multi_agent = true` to your global `~/.codex/config.toml`.
+Set `codex.multiAgent: true` to spawn parallel Codex agents for independent runnable tasks in the dependency graph. Orca runs each dependency-ready wave concurrently, keeps per-task review inside each task lifecycle, and only unlocks downstream tasks after their dependencies are reviewed and marked done. This is faster for large refactors with independent subtasks and costs more tokens. **Note:** this writes `multi_agent = true` to your global `~/.codex/config.toml`.
+
+Orca runs up to `codex.maxParallelTasks` independent runnable tasks at once when multi-agent mode is active. The default is `4`; set it to `1` to keep execution sequential while leaving Codex multi-agent prompting enabled.
 
 If `~/.codex/config.toml` already enables `[features].multi_agent = true`, Orca also treats the run as multi-agent-aware for planning, review, consultation, and execution prompts even when `codex.multiAgent` is not set in Orca config.
 
@@ -208,7 +273,9 @@ Inject additional app-server-visible skills via `codex.perCwdExtraUserRoots`.
 ```
 orca <task>                              Start a run
 orca --spec <path>                       Run from a spec file
+orca --flow <name> <task>                Run with a flow preset
 orca plan --spec <path>                  Plan only, no execution
+orca plan --spec <path> --flow <name>    Plan with a flow preset
 
 orca status [--last | --run <id>]        Run status
 orca list                                List all runs
@@ -222,6 +289,7 @@ orca pr publish [--last | --run <id>]    Un-draft an existing PR
 orca pr status [--last | --run <id>]     PR and CI status
                                          (non-TTY: --run or --last required)
 
+orca flows [--json]                      List configured flow presets
 orca skills                              List loaded skills
 orca setup                               Interactive setup wizard
 ```
@@ -231,7 +299,13 @@ orca setup                               Interactive setup wizard
 - `--codex-only` — force Codex executor
 - `--codex-effort <low|medium|high>` — override effort for this run
 - `--config <path>` — explicit config file
+- `--flow <name>` — use a configured flow preset instead of `flow.default`
 - `--on-complete <cmd>`, `--on-error <cmd>`, `--on-task-complete <cmd>`, `--on-findings <cmd>`, etc.
+
+**Key flags for `orca plan`:**
+
+- `--config <path>` — explicit config file
+- `--flow <name>` — use a configured flow preset for planning
 
 **Key flags for `orca resume`:**
 
@@ -274,7 +348,9 @@ Orca injects `AGENTS.md` into planning context when found at the project root.
 ```bash
 npm install        # canonical install (use npm for deps)
 bun run src/cli/index.ts "task"   # local dev
-bun test src
+npm test           # package script: bun test src ./__tests__
+bun test src ./__tests__
+npm run test:integration
 npm run test:postexec-json
 ```
 

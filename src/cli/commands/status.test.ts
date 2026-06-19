@@ -43,6 +43,18 @@ afterEach(async () => {
 });
 
 describe("status command", () => {
+  test("prints selected flow for detailed run status", async () => {
+    const runId = "run-1000-abcd";
+    const store = new RunStore(runsDir);
+    await store.createRun(runId, "/tmp/spec.md");
+    await store.updateRun(runId, { flowName: "review-cycle" });
+
+    const statusModule = await loadStatusModule();
+    await statusModule.statusCommandHandler({ run: runId });
+
+    expect(logs.join("\n")).toContain("Flow: review-cycle");
+  });
+
   test("prints pending question details for runs waiting for input", async () => {
     const runId = "run-1000-abcd";
     const store = new RunStore(runsDir);

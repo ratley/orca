@@ -141,6 +141,104 @@ describe("run command executor flags", () => {
     expect(runnerArg?.config?.codex?.effort).toBe("medium");
   });
 
+  test("applies selected flow and passes flow prompts to planner and runner", async () => {
+    const { runModule, runPlannerMock, runTaskRunnerMock } = await loadRunModule();
+    const configPath = path.join(getTempDir(), "orca.config.js");
+    await writeFile(
+      configPath,
+      [
+        "export default {",
+        "  flow: {",
+        "    default: 'review-cycle',",
+        "    presets: {",
+        "      'review-cycle': {",
+        "        description: 'Custom review cycle',",
+        "        baseline: { prompt: 'Inspect the existing review flow first.' },",
+        "        planning: { prompt: 'Plan review tasks separately from repair tasks.' },",
+        "        execution: {",
+        "          prompt: 'Run the project review command before completion.',",
+        "          codex: { maxParallelTasks: 2 }",
+        "        },",
+        "        review: { task: { enabled: false }, execution: { enabled: false } }",
+        "      }",
+        "    }",
+        "  }",
+        "};",
+        "",
+      ].join("\n"),
+      "utf8"
+    );
+
+    await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
+
+    const plannerConfig = runPlannerMock.mock.calls[0]?.[3] as
+      | { codex?: { maxParallelTasks?: number } }
+      | undefined;
+    const plannerOptions = runPlannerMock.mock.calls[0]?.[4] as
+      | { systemContextSections?: string[] }
+      | undefined;
+    const runnerArg = runTaskRunnerMock.mock.calls[0]?.[0] as
+      | { config?: { codex?: { maxParallelTasks?: number } }; systemContextSections?: string[] }
+      | undefined;
+    const statusPath = path.join(getTempDir(), "runs", "run-test-1000-abcd", "status.json");
+    const status = JSON.parse(await readFile(statusPath, "utf8")) as { flowName?: string };
+
+    expect(status.flowName).toBe("review-cycle");
+    expect(plannerConfig?.codex?.maxParallelTasks).toBe(2);
+    expect(plannerOptions?.systemContextSections?.[0]).toContain("Inspect the existing review flow first.");
+    expect(plannerOptions?.systemContextSections?.[0]).toContain("Plan review tasks separately from repair tasks.");
+    expect(plannerOptions?.systemContextSections?.[0]).not.toContain("Run the project review command before completion.");
+    expect(runnerArg?.systemContextSections?.[0]).toContain("Inspect the existing review flow first.");
+    expect(runnerArg?.systemContextSections?.[0]).toContain("Run the project review command before completion.");
+  });
+
+  test("passes flow summary prompt to post-execution review", async () => {
+    const { runModule, createCodexSessionMock } = await loadRunModule();
+    const prompts: string[] = [];
+    createCodexSessionMock.mockImplementationOnce(async () => ({
+      consultTaskGraph: async () => ({ issues: [], ok: true }),
+      executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
+      runPrompt: async (prompt: string) => {
+        prompts.push(prompt);
+        return '{"summary":"clean","findings":[],"fixed":false}';
+      },
+      reviewChanges: async () => "review",
+      disconnect: async () => {}
+    }));
+
+    const configPath = path.join(getTempDir(), "orca.config.js");
+    await writeFile(
+      configPath,
+      [
+        "export default {",
+        "  flow: {",
+        "    default: 'final-report',",
+        "    presets: {",
+        "      'final-report': {",
+        "        baseline: { prompt: 'Keep scope tied to the original request.' },",
+        "        summary: { prompt: 'Return files changed, validation run, and integration notes.' },",
+        "        review: {",
+        "          task: { enabled: false },",
+        "          execution: { prompt: 'Mention validation confidence.', validator: { auto: false } }",
+        "        }",
+        "      }",
+        "    }",
+        "  }",
+        "};",
+        "",
+      ].join("\n"),
+      "utf8"
+    );
+
+    await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
+
+    expect(prompts[0]).toContain("Mention validation confidence.");
+    expect(prompts[0]).toContain("Selected flow: final-report");
+    expect(prompts[0]).toContain("Keep scope tied to the original request.");
+    expect(prompts[0]).toContain("Summary Instructions");
+    expect(prompts[0]).toContain("Return files changed, validation run, and integration notes.");
+  });
+
   test("rejects removed codex effort alias extra-high", async () => {
     const { runModule } = await loadRunModule();
     await expect(parseRun(runModule, ["run", "--task", "x", "--codex-effort", "extra-high"])).rejects.toThrow(
@@ -180,6 +278,195 @@ describe("run command executor flags", () => {
     await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
     expect(runPromptMock).not.toHaveBeenCalled();
     expect(reviewChangesMock).not.toHaveBeenCalled();
+  });
+
+  test("skips post-execution review when task execution failed", async () => {
+    const { runModule, createCodexSessionMock, runTaskRunnerMock } = await loadRunModule();
+    const runPromptMock = mock(async () => '{"summary":"mutated","findings":["fix"],"fixed":true}');
+    const reviewChangesMock = mock(async () => "review");
+    createCodexSessionMock.mockImplementationOnce(async () => ({
+      consultTaskGraph: async () => ({ issues: [], ok: true }),
+      executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
+      runPrompt: runPromptMock,
+      reviewChanges: reviewChangesMock,
+      disconnect: async () => {}
+    }));
+    runTaskRunnerMock.mockImplementationOnce(async (options: {
+      runId: string;
+      store: {
+        updateRun: (runId: string, patch: unknown) => Promise<void>;
+      };
+    }) => {
+      await options.store.updateRun(options.runId, {
+        overallStatus: "failed",
+        tasks: [
+          {
+            id: "t1",
+            name: "task",
+            description: "task",
+            dependencies: [],
+            acceptance_criteria: ["done"],
+            status: "failed",
+            retries: 0,
+            maxRetries: 3,
+            startedAt: new Date().toISOString(),
+            finishedAt: new Date().toISOString(),
+            lastError: "per-task review failed"
+          }
+        ],
+        errors: [
+          {
+            at: new Date().toISOString(),
+            message: "per-task review failed",
+            taskId: "t1"
+          }
+        ]
+      });
+    });
+
+    await parseRun(runModule, ["run", "--task", "x"]);
+
+    expect(runPromptMock).not.toHaveBeenCalled();
+    expect(reviewChangesMock).not.toHaveBeenCalled();
+  });
+
+  test("wires per-task spec review with auto-fix loop", async () => {
+    const { runModule, createCodexSessionMock, runTaskRunnerMock, hookDispatchMock } = await loadRunModule();
+    const runPromptMock = mock(async () => '{"summary":"clean","findings":[],"fixed":false}');
+    runPromptMock.mockImplementationOnce(async () => '{"summary":"fixed drift","findings":["missed spec"],"fixed":true}');
+    createCodexSessionMock.mockImplementationOnce(async () => ({
+      consultTaskGraph: async () => ({ issues: [], ok: true }),
+      executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
+      runPrompt: runPromptMock,
+      reviewChanges: async () => "review",
+      disconnect: async () => {}
+    }));
+
+    const configPath = path.join(getTempDir(), "orca.config.js");
+    await writeFile(configPath, "export default { review: { execution: { enabled: false }, task: { maxCycles: 3 } } };\n", "utf8");
+
+    await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
+
+    const runnerArg = runTaskRunnerMock.mock.calls[0]?.[0] as
+      | {
+        reviewCompletedTask?: (context: {
+          task: {
+            id: string;
+            name: string;
+            description: string;
+            acceptance_criteria: string[];
+          };
+          run: { tasks: unknown[] };
+          spec: string | null;
+        }) => Promise<{ outcome: string; summary: string }>;
+      }
+      | undefined;
+
+    const result = await runnerArg?.reviewCompletedTask?.({
+      task: {
+        id: "t1",
+        name: "task",
+        description: "task",
+        acceptance_criteria: ["done"]
+      },
+      run: { tasks: [] },
+      spec: "Original spec text"
+    });
+
+    expect(result?.outcome).toBe("accepted");
+    expect(result?.summary).toBe("clean");
+    expect(runPromptMock).toHaveBeenCalledTimes(2);
+
+    const findingsEvent = hookDispatchMock.mock.calls.find(
+      (call) => (call[0] as { metadata?: { taskReview?: boolean } })?.metadata?.taskReview === true
+    )?.[0] as { taskId?: string; metadata?: { findingsCount?: number } } | undefined;
+
+    expect(findingsEvent?.taskId).toBe("t1");
+    expect(findingsEvent?.metadata?.findingsCount).toBe(1);
+  });
+
+  test("lets task runner own Codex execution when parallelism is greater than one", async () => {
+    const { runModule, runTaskRunnerMock } = await loadRunModule();
+    const configPath = path.join(getTempDir(), "orca.config.js");
+    await writeFile(
+      configPath,
+      "export default { codex: { multiAgent: true, maxParallelTasks: 2 }, review: { task: { enabled: false }, execution: { enabled: false } } };\n",
+      "utf8"
+    );
+
+    await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
+
+    const runnerArg = runTaskRunnerMock.mock.calls[0]?.[0] as
+      | { config?: { codex?: { maxParallelTasks?: number } }; executeTask?: unknown }
+      | undefined;
+
+    expect(runnerArg?.config?.codex?.maxParallelTasks).toBe(2);
+    expect(runnerArg?.executeTask).toBeUndefined();
+  });
+
+  test("review.task.enabled=false skips per-task review callback", async () => {
+    const { runModule, runTaskRunnerMock } = await loadRunModule();
+    const configPath = path.join(getTempDir(), "orca.config.js");
+    await writeFile(configPath, "export default { review: { task: { enabled: false } } };\n", "utf8");
+
+    await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
+
+    const runnerArg = runTaskRunnerMock.mock.calls[0]?.[0] as { reviewCompletedTask?: unknown } | undefined;
+    expect(runnerArg?.reviewCompletedTask).toBeUndefined();
+  });
+
+  test("multi-agent runs let task runner own per-task Codex sessions", async () => {
+    const { runModule, createCodexSessionMock, runTaskRunnerMock } = await loadRunModule();
+    const runPromptMock = mock(async () => '{"summary":"clean","findings":[],"fixed":false}');
+    createCodexSessionMock.mockImplementation(async () => ({
+      consultTaskGraph: async () => ({ issues: [], ok: true }),
+      executeTask: async () => ({ outcome: "done" as const, rawResponse: '{"outcome":"done"}' }),
+      runPrompt: runPromptMock,
+      reviewChanges: async () => "review",
+      disconnect: async () => {}
+    }));
+
+    const configPath = path.join(getTempDir(), "orca.config.js");
+    await writeFile(
+      configPath,
+      "export default { codex: { multiAgent: true }, review: { execution: { enabled: false }, task: { enabled: true } } };\n",
+      "utf8"
+    );
+
+    await parseRun(runModule, ["run", "--task", "x", "--config", configPath]);
+
+    const runnerArg = runTaskRunnerMock.mock.calls[0]?.[0] as
+      | {
+        executeTask?: unknown;
+        reviewCompletedTask?: (context: {
+          task: {
+            id: string;
+            name: string;
+            description: string;
+            acceptance_criteria: string[];
+          };
+          run: { tasks: unknown[] };
+          spec: string | null;
+        }) => Promise<{ outcome: string; summary: string }>;
+      }
+      | undefined;
+
+    expect(runnerArg?.executeTask).toBeUndefined();
+
+    const result = await runnerArg?.reviewCompletedTask?.({
+      task: {
+        id: "t1",
+        name: "task",
+        description: "task",
+        acceptance_criteria: ["done"]
+      },
+      run: { tasks: [] },
+      spec: "Original spec text"
+    });
+
+    expect(result?.outcome).toBe("accepted");
+    expect(createCodexSessionMock).toHaveBeenCalledTimes(2);
+    expect(runPromptMock).toHaveBeenCalledTimes(1);
   });
 
   test("dispatches onFindings hook when post-execution review reports findings", async () => {

@@ -60,6 +60,21 @@ describe("runPlanner task graph validation", () => {
     expect(captured).not.toContain("## Project Instructions");
   });
 
+  test("adds flow system context sections when provided", async () => {
+    let captured = "";
+    setPlanSpecForTests(async (_spec, systemContext) => {
+      captured = systemContext;
+      return { tasks: [...baseTasks], rawResponse: "[]" };
+    });
+
+    await runPlanner(specPath, store, runId, undefined, {
+      systemContextSections: ["## Orca Flow\n\nSelected flow: review-cycle"],
+    });
+
+    expect(captured).toContain("## Orca Flow");
+    expect(captured).toContain("Selected flow: review-cycle");
+  });
+
   test("can skip heavy planning when decision step says no plan needed", async () => {
     setDecidePlanningNeedForTests(async () => ({ needsPlan: false, reason: "single step" }));
     let calledPlanSpec = false;
