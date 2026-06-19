@@ -1,10 +1,43 @@
 import { mergeConfigs } from "./config-loader.js";
+import { getExecutionReviewConfig, getTaskReviewConfig, type FindingsMode } from "./review-cycle.js";
 import type { OrcaConfig, OrcaFlowConfig } from "../types/index.js";
+
+export interface FlowPresetUsage {
+  run: string;
+  spec: string;
+  plan: string;
+}
+
+export interface FlowPresetEffects {
+  agents: {
+    multiAgent: boolean;
+    maxParallelTasks: number;
+  };
+  skills: string[];
+  planReview: {
+    enabled: boolean;
+    onInvalid: "fail" | "warn_skip";
+  };
+  taskReview: {
+    enabled: boolean;
+    maxCycles: number;
+    onFindings: FindingsMode;
+  };
+  executionReview: {
+    enabled: boolean;
+    maxCycles: number;
+    onFindings: FindingsMode;
+    validators: "auto" | "configured" | "disabled";
+    commands?: string[];
+  };
+}
 
 export interface FlowPresetSummary {
   name: string;
   default: boolean;
   description?: string;
+  usage: FlowPresetUsage;
+  effects: FlowPresetEffects;
   flow: OrcaFlowConfig;
 }
 
@@ -16,16 +49,88 @@ export interface ResolvedFlowConfig {
 
 export type FlowInstructionStage = "planning" | "execution" | "summary";
 
+function buildFlowUsage(name: string): FlowPresetUsage {
+  const flowName = shellQuote(name);
+  return {
+    run: `orca --flow ${flowName} "<task>"`,
+    spec: `orca --flow ${flowName} --spec <path>`,
+    plan: `orca plan --spec <path> --flow ${flowName}`
+  };
+}
+
+function shellQuote(value: string): string {
+  if (/^[A-Za-z0-9._:/-]+$/.test(value)) {
+    return value;
+  }
+
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function getPlanReviewSummary(config?: OrcaConfig): FlowPresetEffects["planReview"] {
+  const review = (config?.review ?? {}) as OrcaConfig["review"] & { enabled?: boolean };
+  return {
+    enabled: review.plan?.enabled ?? review.enabled ?? true,
+    onInvalid: review.plan?.onInvalid ?? review.onInvalid ?? "fail"
+  };
+}
+
+function getValidatorSummary(
+  executionReview: ReturnType<typeof getExecutionReviewConfig>
+): Pick<FlowPresetEffects["executionReview"], "validators" | "commands"> {
+  if (!executionReview.enabled) {
+    return { validators: "disabled" };
+  }
+
+  const commands = executionReview.validatorCommands?.filter((command) => command.trim().length > 0);
+  if (commands !== undefined && commands.length > 0) {
+    return { validators: "configured", commands };
+  }
+
+  return { validators: executionReview.validatorAuto ? "auto" : "disabled" };
+}
+
+function getFlowEffects(config?: OrcaConfig): FlowPresetEffects {
+  const multiAgent = config?.codex?.multiAgent === true;
+  const taskReview = getTaskReviewConfig(config);
+  const executionReview = getExecutionReviewConfig(config, {});
+  const validatorSummary = getValidatorSummary(executionReview);
+
+  return {
+    agents: {
+      multiAgent,
+      maxParallelTasks: multiAgent ? config?.codex?.maxParallelTasks ?? 4 : 1
+    },
+    skills: config?.skills ?? [],
+    planReview: getPlanReviewSummary(config),
+    taskReview: {
+      enabled: taskReview.enabled,
+      maxCycles: taskReview.maxCycles,
+      onFindings: taskReview.onFindings
+    },
+    executionReview: {
+      enabled: executionReview.enabled,
+      maxCycles: executionReview.maxCycles,
+      onFindings: executionReview.onFindings,
+      ...validatorSummary
+    }
+  };
+}
+
 export function listFlowPresets(config?: OrcaConfig): FlowPresetSummary[] {
   const presets = config?.flow?.presets ?? {};
   const defaultFlow = config?.flow?.default;
 
-  return Object.entries(presets).map(([name, flow]) => ({
-    name,
-    default: name === defaultFlow,
-    ...(flow.description !== undefined ? { description: flow.description } : {}),
-    flow
-  }));
+  return Object.entries(presets).map(([name, flow]) => {
+    const selected = resolveSelectedFlowConfig(config, name);
+    return {
+      name,
+      default: name === defaultFlow,
+      ...(flow.description !== undefined ? { description: flow.description } : {}),
+      usage: buildFlowUsage(name),
+      effects: getFlowEffects(selected.config),
+      flow
+    };
+  });
 }
 
 function formatFlowNames(config?: OrcaConfig): string {

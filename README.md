@@ -110,31 +110,39 @@ Stale executor values from older configs are ignored and coerced to `codex`. Orc
 // orca.config.ts
 import { defineOrcaConfig, defineOrcaFlow } from "orcastrator";
 
-const reviewFlow = defineOrcaFlow({
-  description: "Coordinate review slices and report the integrated result.",
+const linearTicketFlow = defineOrcaFlow({
+  description: "Implement a ticket with parallel task lanes, per-task review, and final validation.",
   baseline: {
-    prompt: "Inspect the dirty tree and current test surface before planning.",
-    skills: ["./.orca/skills/review"],
+    prompt: [
+      "Treat the ticket/spec as the source of truth.",
+      "Inspect AGENTS.md, git status, and the relevant files before planning.",
+      "Keep edits scoped and preserve unrelated user work."
+    ].join("\n"),
+    // Add project-local skill roots here when they exist, for example:
+    // skills: ["./.orca/skills/orchestrate", "./.orca/skills/critique"],
   },
   planning: {
-    prompt: "Split independent review, fix, and verification work into separate tasks.",
+    prompt: "Turn the ticket into independent implementation, test, docs, and review tasks. Make dependencies explicit.",
     review: { enabled: true, onInvalid: "fail" },
   },
   execution: {
-    prompt: "Keep task ownership narrow and run the relevant checks before completion.",
-    codex: { multiAgent: true, maxParallelTasks: 2 },
-    review: { enabled: true, onFindings: "auto_fix" },
+    prompt: "Own the smallest file set that completes the task. Leave clear verification evidence before marking work done.",
+    codex: { multiAgent: true, maxParallelTasks: 3 },
+    review: { enabled: true, maxCycles: 2, onFindings: "auto_fix" },
   },
   review: {
     execution: {
-      validator: { auto: false, commands: ["npm test"] },
+      enabled: true,
+      maxCycles: 2,
+      onFindings: "auto_fix",
+      validator: { auto: true },
     },
   },
   overrides: {
     maxRetries: 1,
   },
   summary: {
-    prompt: "Report files changed, checks run, and integration notes.",
+    prompt: "Write a PR-style handoff: changes, checks run, risks, and follow-ups.",
   },
 });
 
@@ -146,9 +154,9 @@ export default defineOrcaConfig({
   maxRetries: 1,
 
   flow: {
-    default: "review-cycle",
+    default: "linear-ticket",
     presets: {
-      "review-cycle": reviewFlow,
+      "linear-ticket": linearTicketFlow,
     },
   },
 
@@ -218,11 +226,27 @@ Flows are named presets for common run shapes. Configure them with `flow.presets
 
 ```bash
 orca flows
-orca --flow review-cycle "audit the auth changes"
-orca plan --spec ./specs/auth-review.md --flow review-cycle
+orca flows --json
+orca --flow linear-ticket "audit the auth changes"
+orca plan --spec ./specs/auth-review.md --flow linear-ticket
 ```
 
-Use `defineOrcaFlow(...)` for typed presets in `orca.config.ts`.
+Use `defineOrcaFlow(...)` for typed presets in `orca.config.ts`. `orca flows --json` is intended for agents and automation: each entry includes copyable `usage` commands plus resolved `effects` for parallel agents, skills, task review, final review, and validators.
+
+For a Linear ticket or similar issue handoff, the shortest agent loop is:
+
+```bash
+mkdir -p specs
+# Save the ticket title/body and acceptance criteria here.
+$EDITOR specs/PROJ-123.md
+
+orca flows --json                         # choose the right preset
+orca --flow linear-ticket --spec specs/PROJ-123.md
+orca status --last                         # copy the run id if it asks a question
+orca answer <run-id> "scope answer here"   # only when status is waiting_for_answer
+orca resume --last                         # retry after fixing an external blocker
+orca pr draft --last
+```
 
 - `baseline` - shared starting instructions and extra skills for the run.
 - `planning` - planner instructions plus pre-execution plan-review settings.
@@ -289,7 +313,7 @@ orca pr publish [--last | --run <id>]    Un-draft an existing PR
 orca pr status [--last | --run <id>]     PR and CI status
                                          (non-TTY: --run or --last required)
 
-orca flows [--json]                      List configured flow presets
+orca flows [--json]                      List configured flow presets and resolved effects
 orca skills                              List loaded skills
 orca setup                               Interactive setup wizard
 ```

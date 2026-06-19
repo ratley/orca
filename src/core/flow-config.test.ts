@@ -3,6 +3,29 @@ import { describe, expect, test } from "bun:test";
 import { formatFlowInstructions, listFlowPresets, resolveSelectedFlowConfig } from "./flow-config.js";
 import type { OrcaConfig } from "../types/index.js";
 
+const defaultFlowEffects = {
+  agents: {
+    multiAgent: false,
+    maxParallelTasks: 1,
+  },
+  skills: [],
+  planReview: {
+    enabled: true,
+    onInvalid: "fail",
+  },
+  taskReview: {
+    enabled: true,
+    maxCycles: 2,
+    onFindings: "auto_fix",
+  },
+  executionReview: {
+    enabled: true,
+    maxCycles: 2,
+    onFindings: "auto_fix",
+    validators: "auto",
+  },
+} as const;
+
 describe("flow-config", () => {
   test("returns the original config when no flow is selected", () => {
     const config: OrcaConfig = { executor: "codex" };
@@ -26,15 +49,97 @@ describe("flow-config", () => {
         name: "review",
         default: true,
         description: "Review focused",
+        usage: {
+          run: 'orca --flow review "<task>"',
+          spec: "orca --flow review --spec <path>",
+          plan: "orca plan --spec <path> --flow review",
+        },
+        effects: defaultFlowEffects,
         flow: { description: "Review focused" },
       },
       {
         name: "orchestrate",
         default: false,
         description: "Coordinate slices",
+        usage: {
+          run: 'orca --flow orchestrate "<task>"',
+          spec: "orca --flow orchestrate --spec <path>",
+          plan: "orca plan --spec <path> --flow orchestrate",
+        },
+        effects: defaultFlowEffects,
         flow: { description: "Coordinate slices" },
       },
     ]);
+  });
+
+  test("lists resolved effects for agents choosing a flow", () => {
+    const config: OrcaConfig = {
+      skills: ["base-skill"],
+      review: {
+        task: { onFindings: "fail" },
+        execution: { validator: { commands: ["npm test"] } },
+      },
+      flow: {
+        default: "linear-ticket",
+        presets: {
+          "linear-ticket": {
+            baseline: { skills: ["ticket-skill"] },
+            planning: { review: { enabled: true, onInvalid: "warn_skip" } },
+            execution: {
+              codex: { multiAgent: true, maxParallelTasks: 3 },
+              review: { maxCycles: 3, onFindings: "auto_fix" },
+            },
+            review: {
+              execution: {
+                enabled: true,
+                maxCycles: 4,
+                onFindings: "report_only",
+              },
+            },
+          },
+        },
+      },
+    };
+
+    expect(listFlowPresets(config)[0]?.effects).toEqual({
+      agents: {
+        multiAgent: true,
+        maxParallelTasks: 3,
+      },
+      skills: ["base-skill", "ticket-skill"],
+      planReview: {
+        enabled: true,
+        onInvalid: "warn_skip",
+      },
+      taskReview: {
+        enabled: true,
+        maxCycles: 3,
+        onFindings: "auto_fix",
+      },
+      executionReview: {
+        enabled: true,
+        maxCycles: 4,
+        onFindings: "report_only",
+        validators: "configured",
+        commands: ["npm test"],
+      },
+    });
+  });
+
+  test("quotes flow names in generated usage commands when needed", () => {
+    const config: OrcaConfig = {
+      flow: {
+        presets: {
+          "review cycle": { description: "Review with a spaced name" },
+        },
+      },
+    };
+
+    expect(listFlowPresets(config)[0]?.usage).toEqual({
+      run: 'orca --flow \'review cycle\' "<task>"',
+      spec: "orca --flow 'review cycle' --spec <path>",
+      plan: "orca plan --spec <path> --flow 'review cycle'",
+    });
   });
 
   test("selects default flow and applies config-like sections", () => {

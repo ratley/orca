@@ -63,9 +63,12 @@ describe("flows command", () => {
     const output = logs[0] ?? "";
     expect(output).toContain("Name");
     expect(output).toContain("Default");
+    expect(output).toContain("Agents");
+    expect(output).toContain("Review");
+    expect(output).toContain("Validators");
     expect(output).toContain("Description");
-    expect(output).toMatch(/orchestrate\s+yes\s+Coordinate slices/);
-    expect(output).toMatch(/review\s+Review only/);
+    expect(output).toMatch(/orchestrate\s+yes\s+1\s+plan:fail task:auto_fix final:auto_fix\s+auto\s+Coordinate slices/);
+    expect(output).toMatch(/review\s+1\s+plan:fail task:auto_fix final:auto_fix\s+auto\s+Review only/);
   });
 
   test("prints JSON for configured flows", async () => {
@@ -89,6 +92,33 @@ describe("flows command", () => {
         name: "review",
         default: true,
         description: "Review only",
+        usage: {
+          run: 'orca --flow review "<task>"',
+          spec: "orca --flow review --spec <path>",
+          plan: "orca plan --spec <path> --flow review",
+        },
+        effects: {
+          agents: {
+            multiAgent: false,
+            maxParallelTasks: 1,
+          },
+          skills: [],
+          planReview: {
+            enabled: true,
+            onInvalid: "fail",
+          },
+          taskReview: {
+            enabled: true,
+            maxCycles: 2,
+            onFindings: "auto_fix",
+          },
+          executionReview: {
+            enabled: true,
+            maxCycles: 2,
+            onFindings: "auto_fix",
+            validators: "auto",
+          },
+        },
         flow: { description: "Review only" },
       },
     ]);

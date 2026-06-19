@@ -1,15 +1,16 @@
 # Session Log
 
-- Timestamp: 2026-06-19T12:28:26Z
-- Scope: Add reusable Orca review flows so projects can define named review presets, select them at run/plan/resume time, and reuse shared task-level and post-execution review behavior.
+- Timestamp: 2026-06-19T12:33:54Z
+- Scope: Improve review-flow AX so agents can discover configured flows, choose the right preset from a JSON manifest, and follow a Linear-ticket-style orchestration loop without reverse-engineering config internals.
 - Verification:
-  - `bun test src/core/task-runner.test.ts src/agents/codex/session.unit.test.ts`
+  - `bun test src/core/flow-config.test.ts src/cli/commands/flows.test.ts`
+  - `bun test src/core/flow-config.test.ts src/core/config-loader.test.ts src/cli/commands/flows.test.ts src/cli/commands/run.test.ts src/cli/commands/resume.test.ts`
   - `npm run lint`
   - `npm run lint:type-aware`
   - `npm run typecheck`
   - `npm run build`
-  - `bun test $(rg --files src __tests__ -g '*.test.ts' -g '!src/agents/codex/session.test.ts')`
+  - Manual `bun run src/cli/index.ts flows --config <temp-config>` and `flows --json --config <temp-config>` smoke check
   - `git diff --check`
 - Notes:
-  - Full `npm run validate` reached the live Codex adapter integration test, then `src/agents/codex/session.test.ts` timed out after 300s; the deterministic suite above excludes only that live integration.
-  - Multiple critique/review passes found and then cleared issues around resume flow replay, task-review retry semantics, parallel session user-input isolation, failed-run post-review, and cancellation races.
+  - The previous commit `f670a51` contains the reusable review-flow implementation and full deterministic-suite verification.
+  - `orca-web` was already dirty on `codex/docs-sync`, so this pass leaves public docs-site sync as a separate follow-up instead of touching unrelated work.

@@ -27,10 +27,17 @@ function formatTable(headers: string[], rows: string[][]): string {
 
 function formatFlowsTable(flows: FlowPresetSummary[]): string {
   return formatTable(
-    ["Name", "Default", "Description"],
+    ["Name", "Default", "Agents", "Review", "Validators", "Description"],
     flows.map((flow) => [
       flow.name,
       flow.default ? "yes" : "",
+      flow.effects.agents.multiAgent ? `${flow.effects.agents.maxParallelTasks} max` : "1",
+      [
+        flow.effects.planReview.enabled ? `plan:${flow.effects.planReview.onInvalid}` : "plan:off",
+        flow.effects.taskReview.enabled ? `task:${flow.effects.taskReview.onFindings}` : "task:off",
+        flow.effects.executionReview.enabled ? `final:${flow.effects.executionReview.onFindings}` : "final:off"
+      ].join(" "),
+      flow.effects.executionReview.validators,
       flow.description ?? ""
     ])
   );
@@ -56,7 +63,7 @@ export async function flowsCommandHandler(options: FlowsCommandOptions): Promise
 export function registerFlowsCommand(program: Command): void {
   program
     .command("flows")
-    .description("List configured flow presets")
+    .description("List configured flow presets and resolved effects")
     .option("--config <path>", "Path to orca config file")
     .option("--json", "Output flow presets as JSON")
     .action(async (options: FlowsCommandOptions) => flowsCommandHandler(options));
