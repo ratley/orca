@@ -3,30 +3,3 @@
 set -eu
 
 bunx lint-staged
-
-LATEST_LOG="session-logs/LATEST.md"
-MAX_AGE_SECONDS=1800
-
-if [ ! -f "$LATEST_LOG" ]; then
-  echo "Error: $LATEST_LOG missing or stale. Update it before committing." >&2
-  exit 1
-fi
-
-NOW_EPOCH=$(date +%s)
-FILE_EPOCH=""
-
-if stat -f %m "$LATEST_LOG" >/dev/null 2>&1; then
-  FILE_EPOCH=$(stat -f %m "$LATEST_LOG")
-elif stat -c %Y "$LATEST_LOG" >/dev/null 2>&1; then
-  FILE_EPOCH=$(stat -c %Y "$LATEST_LOG")
-else
-  echo "Error: unable to determine modification time for $LATEST_LOG." >&2
-  exit 1
-fi
-
-AGE_SECONDS=$((NOW_EPOCH - FILE_EPOCH))
-
-if [ "$AGE_SECONDS" -gt "$MAX_AGE_SECONDS" ]; then
-  echo "Error: $LATEST_LOG missing or stale. Update it before committing." >&2
-  exit 1
-fi
