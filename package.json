@@ -71,7 +71,8 @@
     "dist/**/*.d.ts.map",
     "!dist/**/*.test.js",
     "README.md",
-    ".orca/skills/**/SKILL.md"
+    ".orca/skills/**/SKILL.md",
+    "skills/**/SKILL.md"
   ],
   "description": "Coordinated agent run harness",
   "author": "ratley",
