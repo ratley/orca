@@ -6,7 +6,7 @@
 
 # Orca
 
-Coordinated agent run harness. Breaks a task into a graph, then executes it end-to-end via a persistent [Codex](https://github.com/ratley/codex-client) session.
+Coordinated agent run harness. Breaks a task into a graph, then executes it end-to-end via a persistent [Codex](https://github.com/happycatlabs/codex-client) session.
 
 ## Install
 
@@ -34,6 +34,14 @@ orca pr create --last
 
 - Bad: `"fix the bug"`
 - Good: `"Fix the TypeError thrown on logout with an expired token in src/auth/session.ts. Ensure existing tests pass and add a regression test."`
+
+---
+
+## For agents
+
+Orca's lane primitive is a machine-readable substrate for delegating work to other agents. Run `orca contract` to get the full orca/v1 contract — JSON Schemas for the envelope, event, and manifest shapes, plus exit codes and verb synopses. Every lane command prints exactly one JSON envelope as its final stdout line (success and failure alike) and never exits 0 on failure; the one documented exemption is `--help`/`-h`, which stays human-readable and prints no envelope. Lane ids look like `lane_a3f81c02` and are validated against `^lane_[0-9a-f]{8}$` before any filesystem path is built from them. `dispatch` and `resume` accept `--timeout <ms>`.
+
+Follow each envelope's literal `next[]` commands, especially after answering a question: a live native turn continues inside the original dispatch, while a parked question requires `resume`. Resume accepts blocked lanes (a parked question, or a live question whose recorded poller process is dead), completed lanes (the documented terminal carve-out — a resume is a new user turn), and running lanes whose recorded resumer pid is dead; `failed`/`killed`/`lost` lanes are never reopened — dispatch a new lane instead. All three built-in adapter manifests declare `kill:true`; process-group kill is explicitly POSIX-only in v0. Codex emits its detached app-server `pid`/`pgid` in `agent_started`; the lane CLI persists that process identity and owns process-group signaling and termination verification. Design doc and AX rules: [docs/LANES.md](./docs/LANES.md).
 
 ---
 

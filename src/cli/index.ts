@@ -6,6 +6,7 @@ import { Command } from "commander";
 const require = createRequire(import.meta.url);
 const { version } = require("../../package.json") as { version: string };
 
+import { attachLaneHelp, runLaneCli } from "./lane-commands.js";
 import { registerAnswerCommand } from "./commands/answer.js";
 import { registerCancelCommand } from "./commands/cancel.js";
 import { registerFlowsCommand } from "./commands/flows.js";
@@ -38,4 +39,14 @@ registerPrFinalizeCommand(program);
 registerSetupCommand(program);
 registerHelpCommand(program);
 
-await program.parseAsync(process.argv);
+attachLaneHelp(program);
+
+// Lane verbs (orca/v1 agent contract) run on their own program; "answer" and
+// "resume" only route there when the id starts with "lane_", so the legacy
+// commands above keep their behavior.
+const laneCliExitCode = await runLaneCli(process.argv.slice(2));
+if (laneCliExitCode === null) {
+  await program.parseAsync(process.argv);
+} else {
+  process.exitCode = laneCliExitCode;
+}
