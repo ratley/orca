@@ -67,9 +67,29 @@ export interface CodexAdapterOptions {
   cleanupGraceMs?: number;
   /** Test seam: builds the client (e.g. over a fake transport). */
   clientFactory?: (options: CodexClientLaunchOptions) => CodexClient;
+  /**
+   * developerInstructions injected on thread start AND resume, steering the
+   * model to raise mid-task questions through the request-user-input tool
+   * instead of parking them in result prose (which would settle the lane as
+   * completed rather than blocked). Defaults to
+   * CODEX_DEVELOPER_INSTRUCTIONS; pass a replacement to override, or an
+   * empty string to disable injection entirely. Best-effort: the model can
+   * still answer in prose (manifest caveat "questions_best_effort").
+   */
+  developerInstructions?: string;
 }
 
 const DEFAULT_ANSWER_POLL_MS = 500;
+
+/**
+ * Default developerInstructions (see CodexAdapterOptions.developerInstructions).
+ * Without this steer, natural "ask the user" prompts produce the question as
+ * result prose and the lane completes instead of blocking.
+ */
+export const CODEX_DEVELOPER_INSTRUCTIONS =
+  "When you need input or a decision from the user mid-task, call the " +
+  "request-user-input tool and wait for the answer. Never write the question " +
+  "as your final message.";
 
 /**
  * AgentAdapter for codex over the app-server protocol. Spawns one app-server
@@ -87,11 +107,15 @@ export class CodexAdapter implements AgentAdapter {
   private readonly answerPollMs: number;
   private readonly cleanupGraceMs: number;
   private readonly clientFactory: (options: CodexClientLaunchOptions) => CodexClient;
+  /** Injected on thread start/resume; undefined when disabled ("" option). */
+  private readonly developerInstructions: string | undefined;
 
   constructor(options: CodexAdapterOptions = {}) {
     this.answerReader = options.store ?? new LaneStore();
     this.answerPollMs = options.answerPollMs ?? DEFAULT_ANSWER_POLL_MS;
     this.cleanupGraceMs = options.cleanupGraceMs ?? DEFAULT_CLEANUP_GRACE_MS;
+    const developerInstructions = options.developerInstructions ?? CODEX_DEVELOPER_INSTRUCTIONS;
+    this.developerInstructions = developerInstructions === "" ? undefined : developerInstructions;
 
     const codexPath = options.codexPath;
     this.clientFactory =
@@ -106,6 +130,13 @@ export class CodexAdapter implements AgentAdapter {
           approvalPolicy: launch.approvalPolicy,
           sandbox: launch.sandbox,
           detached: launch.detached,
+          // request_user_input is feature-gated off in Default mode (verified
+          // live 2026-07-11: the tool call is rejected with "unavailable in
+          // Default mode" and the model falls back to asking in prose, which
+          // defeats question parking). Enable the under-development flag so
+          // parked questions can actually occur; see manifest caveat
+          // questions_best_effort.
+          spawnArgs: ["-c", "features.default_mode_request_user_input=true"],
           ...(codexPath !== undefined ? { codexPath } : {}),
         }));
   }
@@ -178,7 +209,13 @@ export class CodexAdapter implements AgentAdapter {
       return {
         ...outcome,
         agentSessionId: thread.id,
-        timing: { wallMs: Date.now() - startedAt, startupMs },
+        // wallMs/startupMs are harness-measured; apiMs is protocol-reported
+        // (turn.durationMs) and travels through the turn outcome when present.
+        timing: {
+          wallMs: Date.now() - startedAt,
+          startupMs,
+          ...(outcome.timing?.apiMs !== undefined ? { apiMs: outcome.timing.apiMs } : {}),
+        },
       };
     });
   }
@@ -273,7 +310,11 @@ export class CodexAdapter implements AgentAdapter {
           method: "thread-id-match",
           detail: `thread/resume returned ${thread.id}`,
         },
-        timing: { wallMs: Date.now() - startedAt, startupMs },
+        timing: {
+          wallMs: Date.now() - startedAt,
+          startupMs,
+          ...(outcome.timing?.apiMs !== undefined ? { apiMs: outcome.timing.apiMs } : {}),
+        },
       };
     });
   }
@@ -332,7 +373,11 @@ export class CodexAdapter implements AgentAdapter {
 
   private async startThread(client: CodexClient): Promise<Thread> {
     try {
-      return await client.startThread();
+      return await client.startThread(
+        this.developerInstructions !== undefined
+          ? { developerInstructions: this.developerInstructions }
+          : {},
+      );
     } catch (error) {
       throw new AdapterError("adapter_error", `codex thread/start failed: ${messageOf(error)}`, {
         cause: error,
@@ -342,7 +387,12 @@ export class CodexAdapter implements AgentAdapter {
 
   private async resumeThread(client: CodexClient, threadId: string, cwd: string): Promise<Thread> {
     try {
-      return await client.resumeThread(threadId, { cwd });
+      return await client.resumeThread(threadId, {
+        cwd,
+        ...(this.developerInstructions !== undefined
+          ? { developerInstructions: this.developerInstructions }
+          : {}),
+      });
     } catch (error) {
       throw new ContinuityError(`unable to resume codex thread ${threadId}: ${messageOf(error)}`, {
         detail: "thread/resume failed, so native-session continuity cannot be verified",

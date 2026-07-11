@@ -6,6 +6,7 @@ import type { CursorAdapterOptions } from "./adapter.js";
 export {
   buildCursorManifest,
   CURSOR_AGENT_NAME,
+  CURSOR_KNOWN_MODELS,
   CursorAdapter,
   DEFAULT_CURSOR_BIN,
 } from "./adapter.js";

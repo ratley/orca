@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import { LaneEventKindSchema, LaneEventSchema, LaneRecordSchema } from "./lane";
+import {
+  AgentCapabilitiesSchema,
+  LaneEventKindSchema,
+  LaneEventSchema,
+  LaneRecordSchema,
+} from "./lane";
 
 const baseRecord = {
   id: "lane_a3f8b901",
@@ -40,6 +45,22 @@ describe("lane schema additions", () => {
     expect(LaneRecordSchema.parse(baseRecord).usage).toBeUndefined();
     expect(LaneRecordSchema.parse(baseRecord).timing).toBeUndefined();
     expect(() => LaneRecordSchema.parse({ ...baseRecord, timing: { wallMs: -1 } })).toThrow();
+  });
+
+  test("capabilities.browserUse accepts boolean or string and stays optional", () => {
+    const base = {
+      resume: true,
+      kill: true,
+      questions: false,
+      continuityMethods: [],
+    };
+
+    expect(AgentCapabilitiesSchema.parse(base).browserUse).toBeUndefined();
+    expect(AgentCapabilitiesSchema.parse({ ...base, browserUse: true }).browserUse).toBe(true);
+    expect(
+      AgentCapabilitiesSchema.parse({ ...base, browserUse: "available via config" }).browserUse,
+    ).toBe("available via config");
+    expect(() => AgentCapabilitiesSchema.parse({ ...base, browserUse: 1 })).toThrow();
   });
 
   test("resume_started is a valid event kind and round-trips through JSON", () => {

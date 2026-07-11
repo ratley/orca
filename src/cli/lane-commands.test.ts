@@ -236,6 +236,59 @@ describe("lane-commands CLI", () => {
       expect(events.map((event) => event.event)).toEqual(["created", "result"]);
     });
 
+    test("an empty or whitespace-only completed result carries an empty-result warning", async () => {
+      for (const text of ["", "   \n\t"]) {
+        const registry = new AdapterRegistry();
+        registry.register(stubAdapter({ dispatch: () => Promise.resolve(completedOutcome(text)) }));
+
+        const { exitCode, stdout } = await run(["dispatch", "--agent", "stub", "task"], {
+          registry,
+        });
+
+        // The warning never changes status or exit code.
+        expect(exitCode).toBe(0);
+        const envelope = stdout.lastJson();
+        expect(envelope.ok).toBe(true);
+        expect(envelope.status).toBe("completed");
+        expect(envelope.warnings).toEqual([
+          "agent returned an empty result; semanticOutcome is unknown and the " +
+            "response may not have addressed the prompt",
+        ]);
+      }
+    });
+
+    test("a non-empty completed result carries no empty-result warning", async () => {
+      const registry = new AdapterRegistry();
+      registry.register(stubAdapter());
+
+      const { exitCode, stdout } = await run(["dispatch", "--agent", "stub", "task"], { registry });
+
+      expect(exitCode).toBe(0);
+      expect(stdout.lastJson().warnings).toBeUndefined();
+    });
+
+    test("resume settlement carries the same empty-result warning", async () => {
+      const registry = new AdapterRegistry();
+      registry.register(
+        stubAdapter({
+          resume: () => Promise.resolve(completedOutcome("  ")),
+        }),
+      );
+
+      const dispatched = await run(["dispatch", "--agent", "stub", "task"], { registry });
+      const laneId = dispatched.stdout.json(0).laneId as string;
+
+      const { exitCode, stdout } = await run(["resume", laneId, "follow up"], { registry });
+
+      expect(exitCode).toBe(0);
+      const envelope = stdout.lastJson();
+      expect(envelope.status).toBe("completed");
+      expect(envelope.warnings).toEqual([
+        "agent returned an empty result; semanticOutcome is unknown and the " +
+          "response may not have addressed the prompt",
+      ]);
+    });
+
     test("adapter onEvent streams into the lane event log", async () => {
       const registry = new AdapterRegistry();
       registry.register(

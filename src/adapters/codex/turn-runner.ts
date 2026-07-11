@@ -81,6 +81,7 @@ type StartCause =
 export async function runLaneTurn(options: RunLaneTurnOptions): Promise<DispatchOutcome> {
   const { client, answerReader, laneId, threadId, answerPollMs } = options;
   const cleanupGraceMs = options.cleanupGraceMs ?? DEFAULT_CLEANUP_GRACE_MS;
+  const turnStartedAt = Date.now();
 
   let delivery: Delivery = "not_sent";
   let usage: UsageInfo | undefined;
@@ -409,6 +410,10 @@ export async function runLaneTurn(options: RunLaneTurnOptions): Promise<Dispatch
     }
 
     const turn = cause.turn;
+    // Protocol-reported turn duration (Rule 6: apiMs appears only when the
+    // agent's protocol actually reports it). The caller overwrites wallMs and
+    // startupMs with its own harness-measured values but preserves apiMs.
+    const timing = turnTiming(turn, turnStartedAt);
     if (turn.status === "completed") {
       const text = collectAgentMessage(turn, finalTextByItem, deltaTextByItem);
       return {
@@ -418,6 +423,7 @@ export async function runLaneTurn(options: RunLaneTurnOptions): Promise<Dispatch
         semanticOutcome: "unknown",
         result: { text },
         ...(usage !== undefined ? { usage } : {}),
+        ...(timing !== undefined ? { timing } : {}),
       };
     }
 
@@ -428,6 +434,7 @@ export async function runLaneTurn(options: RunLaneTurnOptions): Promise<Dispatch
         nativeStatus: "interrupted",
         semanticOutcome: "unknown",
         ...(usage !== undefined ? { usage } : {}),
+        ...(timing !== undefined ? { timing } : {}),
       };
     }
 
@@ -441,6 +448,7 @@ export async function runLaneTurn(options: RunLaneTurnOptions): Promise<Dispatch
       code: "agent_failed",
       error: { message },
       ...(usage !== undefined ? { usage } : {}),
+      ...(timing !== undefined ? { timing } : {}),
     };
   } finally {
     cancelled = true;
@@ -556,6 +564,26 @@ async function interruptBounded(
     client.interruptTurn(threadId, turnId).catch(() => undefined),
     startDeadline(graceMs),
   );
+}
+
+/**
+ * Timing evidence from a terminal protocol turn: turn.durationMs is the
+ * app-server's own report of how long the turn took, mapped onto
+ * timing.apiMs. wallMs here is the turn-runner's local measurement and is a
+ * placeholder only — the adapter overwrites it with the verb-level wall
+ * clock. Returns undefined (no timing claim at all) when the protocol did
+ * not report a usable duration; apiMs is never fabricated.
+ */
+function turnTiming(
+  turn: Turn,
+  turnStartedAt: number,
+): { wallMs: number; apiMs: number } | undefined {
+  const durationMs = turn.durationMs;
+  if (typeof durationMs !== "number" || !Number.isFinite(durationMs) || durationMs < 0) {
+    return undefined;
+  }
+
+  return { wallMs: Date.now() - turnStartedAt, apiMs: durationMs };
 }
 
 /** Sleep that can be interrupted early by signal() (used for cancellation). */

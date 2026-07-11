@@ -302,7 +302,7 @@ describe("CursorAdapter dispatch", () => {
     expect(outcome.agentSessionId).toBe(SUCCESS_SESSION_ID);
   });
 
-  test("bogus model: exit 1 with EMPTY stdout maps to usage_error / not_sent", async () => {
+  test("bogus model: exit 1 with EMPTY stdout maps to agent_failed / not_sent", async () => {
     const { exec } = createFakeExec(() =>
       execResult({ exitCode: 1, stdout: "", stderr: BOGUS_MODEL_STDERR }),
     );
@@ -317,11 +317,16 @@ describe("CursorAdapter dispatch", () => {
 
     DispatchOutcomeSchema.parse(outcome);
     expect(outcome.status).toBe("failed");
-    expect(outcome.code).toBe("usage_error");
+    // The AGENT refused a well-formed request: agent_failed (exit 3), never
+    // usage_error — that code is reserved for a malformed orca command line.
+    expect(outcome.code).toBe("agent_failed");
     expect(outcome.delivery).toBe("not_sent");
     expect(outcome.nativeStatus).toBe("failed");
     expect(outcome.error?.message).toContain("Cannot use this model: totally-bogus-model-xyz");
     expect(outcome.error?.message).toContain("Available models:");
+    // Remediation is orca-native, pointing at the manifest's declared.models.
+    expect(outcome.error?.remediation).toContain("orca agents");
+    expect(outcome.error?.remediation).toContain("declared.models");
   });
 
   test("missing trust: exit 1 with EMPTY stdout maps to adapter_error / not_sent", async () => {
@@ -639,6 +644,22 @@ describe("CursorAdapter manifest and registration", () => {
     expect(manifest.worktrees).toBe(true);
     expect(manifest.caveats.map((caveat) => caveat.code)).toContain("silent_resume_rebind");
     expect(manifest.declared.outputFormat).toBe("json");
+
+    // declared.models: the known-good snapshot from the CLI's own
+    // unknown-model diagnostic (verified 2026-07-11), with an honest note
+    // that the live list is larger.
+    expect(manifest.declared.models).toEqual([
+      "auto",
+      "gpt-5.3-codex",
+      "gpt-5.2",
+      "composer-2.5",
+      "claude-fable-5-high",
+      "gemini-3.1-pro",
+      "gpt-5-mini",
+      "glm-5.2-max",
+    ]);
+    expect(manifest.declared.modelsNote).toContain("2026-07-11");
+    expect(manifest.declared.modelsNote).toContain("not exhaustive");
   });
 
   test("kill capability is platform-aware: POSIX true with caveat, win32 false (P-POSIX)", () => {

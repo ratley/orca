@@ -6,6 +6,7 @@ import { AgentManifestSchema } from "../../../types/lane";
 import { parseAnswerInput, toBlockedQuestions } from "../answers";
 import {
   buildCodexManifest,
+  CODEX_BROWSER_USE,
   CODEX_CAVEATS,
   CODEX_DECLARED_FACTS,
   CODEX_POSIX_KILL_CAVEAT,
@@ -118,6 +119,7 @@ describe("codex manifest", () => {
       kill: true,
       questions: true,
       continuityMethods: ["thread-id-match"],
+      browserUse: CODEX_BROWSER_USE,
     });
     expect(manifest.overhead).toEqual({
       startupMsP50: CODEX_DECLARED_FACTS.startupMs,
@@ -144,6 +146,21 @@ describe("codex manifest", () => {
     const codes = buildCodexManifest().caveats?.map((caveat) => caveat.code);
     expect(codes).toContain("process_identity_spawn_window");
     expect(codes).toContain("process_group_signalling_cli_owned");
+  });
+
+  test("declares tool-mediated questions as best-effort", () => {
+    const caveat = buildCodexManifest().caveats?.find(
+      (candidate) => candidate.code === "questions_best_effort",
+    );
+    expect(caveat).toBeDefined();
+    expect(caveat?.note).toContain("request-user-input");
+    expect(caveat?.note).toContain("prose");
+  });
+
+  test("browser use is a first-class capability, not a declared extra", () => {
+    const manifest = buildCodexManifest();
+    expect(manifest.capabilities.browserUse).toBe(CODEX_BROWSER_USE);
+    expect(manifest.declared).not.toHaveProperty("browserUse");
   });
 
   test("declared facts pin the measurement source", () => {

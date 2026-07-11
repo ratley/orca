@@ -76,7 +76,9 @@ const VERBS: ReadonlyArray<ContractVerb> = [
     example: "orca inspect lane_a3f81c02 --since 7",
     description:
       "Report lane state and events. --since returns events with seq greater " +
-      "than the given value; --wait-for blocks until the lane is blocked or done.",
+      "than the given value; --wait-for blocks until the lane is blocked or done. " +
+      "Terminal states also satisfy --wait-for blocked, so the wait never hangs " +
+      "on a lane that finishes without blocking.",
   },
   {
     verb: "answer",
@@ -135,7 +137,12 @@ const NOTES: ReadonlyArray<string> = [
   "A command NEVER exits 0 with ok:false.",
   'code "usage_error" (exit 2) means the command LINE was malformed; a well-formed command against a lane in the wrong state reports "invalid_state" (exit 4).',
   "delivery, nativeStatus, and semanticOutcome are independent axes and are never conflated.",
+  'delivery:"confirmed" means the native agent acknowledged receiving the turn (a protocol ack, or a result bound to the session) — NOT that the user\'s intent was fulfilled.',
   "semanticOutcome is set only by an explicit validator (none in v0); it is never inferred from agent prose.",
+  "stderr is not contractual: harness diagnostics (e.g. MCP auth noise) may appear on stderr during successful runs; only stdout carries the envelope.",
+  "usage and timing cover the single turn the envelope settles (one dispatch or one resume), not the lane's cumulative history.",
+  'lane.process (persisted in lane.json, surfaced by kind:"list") is historical spawn identity, not a liveness claim; liveness evidence surfaces as a stale-running warning on inspect.',
+  "The manifest's capabilities slot includes optional browserUse (boolean, or a descriptive string when availability is conditional) declaring whether the agent can drive a browser.",
   'The verbs "answer" and "resume" share their names with legacy orca commands: lane handling engages when the first argument starts with "lane_" (all lane ids do), or when the next argument is --help/-h; other values fall through to the legacy commands.',
 ];
 

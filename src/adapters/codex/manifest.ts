@@ -5,9 +5,10 @@ export const CODEX_ADAPTER_VERSION = "0.1.0";
 
 /**
  * Declared/measured facts about the codex agent that have no slot in
- * AgentManifestSchema (v0 schema gap): structured output support, browser use,
- * sandbox modes, and prompt token overhead. Measured 2026-07-11 against
- * codex-cli 0.144.1 (app-server protocol).
+ * AgentManifestSchema (v0 schema gap): structured output support, sandbox
+ * modes, and prompt token overhead. Measured 2026-07-11 against codex-cli
+ * 0.144.1 (app-server protocol). Browser use graduated to the first-class
+ * capabilities.browserUse slot (CODEX_BROWSER_USE).
  */
 export const CODEX_DECLARED_FACTS = {
   measuredAt: "2026-07-11",
@@ -18,11 +19,12 @@ export const CODEX_DECLARED_FACTS = {
   inputTokenOverhead: 24000,
   /** turn/start accepts an outputSchema for structured output. */
   structuredOutput: true,
-  /** Browser use is available when enabled via codex config. */
-  browserUse: "available via config",
   sandboxModes: ["read-only", "workspace-write", "danger-full-access"],
   processIdentity: "detached app-server pid/pgid, emitted at spawn",
 } as const;
+
+/** Browser use is available when enabled via codex config (capabilities slot). */
+export const CODEX_BROWSER_USE = "available via config";
 
 /** Known adapter limitations surfaced by `orca agents`. */
 export const CODEX_CAVEATS: AgentCaveat[] = [
@@ -41,6 +43,10 @@ export const CODEX_CAVEATS: AgentCaveat[] = [
   {
     code: "semantic_outcome_unknown",
     note: "The adapter reports native protocol status only; without an explicit validator, semanticOutcome remains unknown.",
+  },
+  {
+    code: "questions_best_effort",
+    note: "Blocking questions are tool-mediated and best-effort: the adapter injects developerInstructions steering the model to raise mid-task questions through the request-user-input tool, but a model can still answer in prose, in which case the lane completes instead of blocking.",
   },
 ];
 
@@ -68,6 +74,7 @@ export function buildCodexManifest(platform: NodeJS.Platform = process.platform)
       kill: posixKill,
       questions: true,
       continuityMethods: ["thread-id-match"],
+      browserUse: CODEX_BROWSER_USE,
     },
     overhead: {
       startupMsP50: CODEX_DECLARED_FACTS.startupMs,

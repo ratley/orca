@@ -482,17 +482,21 @@ export class CursorAdapter implements AgentAdapter {
       };
     }
 
+    // A rejected --model is the AGENT refusing a well-formed request, not a
+    // malformed orca command line: usage_error (exit 2) is reserved for the
+    // latter, so this is agent_failed (exit 3). The prompt was never sent.
     if (UNKNOWN_MODEL_PATTERN.test(stderrText)) {
       return {
         status: "failed",
-        code: "usage_error",
+        code: "agent_failed",
         delivery: "not_sent",
         nativeStatus: "failed",
         semanticOutcome: "unknown",
         timing,
         error: {
           message: truncate(firstLine(stderrText), MAX_ERROR_MESSAGE_LENGTH),
-          remediation: 'Pick a model from "agent --list-models".',
+          remediation:
+            'Run "orca agents" and check the cursor manifest\'s declared.models for known-good model ids.',
         },
       };
     }
@@ -598,6 +602,23 @@ export class CursorAdapter implements AgentAdapter {
   }
 }
 
+/**
+ * Known-good model ids for the manifest's declared.models slot. Snapshot
+ * recorded 2026-07-11 from the real CLI's unknown-model stderr diagnostic
+ * (cursor-agent 2026.07.09-a3815c0); the live (much larger) list comes from
+ * `agent --list-models`.
+ */
+export const CURSOR_KNOWN_MODELS: readonly string[] = [
+  "auto",
+  "gpt-5.3-codex",
+  "gpt-5.2",
+  "composer-2.5",
+  "claude-fable-5-high",
+  "gemini-3.1-pro",
+  "gpt-5-mini",
+  "glm-5.2-max",
+];
+
 const CURSOR_BASE_CAVEATS: AgentCaveat[] = [
   {
     code: "cold_start",
@@ -665,6 +686,14 @@ export function buildCursorManifest(
       outputFormat: "json",
       promptDelivery: "argv",
       nativeSessionStore: "~/.cursor/chats/<md5(realpath(cwd))>/<session_id>",
+      // Snapshot of known-good model ids, verified 2026-07-11 from the CLI's
+      // own unknown-model diagnostic ("Cannot use this model: ... Available
+      // models: ..."). NOT exhaustive: the live list comes from
+      // `agent --list-models` and is much larger.
+      models: CURSOR_KNOWN_MODELS,
+      modelsNote:
+        "snapshot verified 2026-07-11 against cursor-agent 2026.07.09-a3815c0; " +
+        'not exhaustive — the live list comes from "agent --list-models"',
     },
   };
 }

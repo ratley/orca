@@ -49,7 +49,13 @@ earlier in-process seq cache).
 process identity persisted by the dispatching CLI when an adapter reports it
 (§3 Rule 12). `process` is persisted-only: it never appears in the envelope's
 `lane` summary, but `kind:"list"` envelopes carry it because `lanes` returns
-full records.
+full records. `process` is **historical spawn identity, not a liveness
+claim**: it records which process was spawned for the lane (so `kill` has
+something real to signal), and it is never updated to say whether that
+process is still alive. Wound (2026-07 cold-consumer desktop tests): a
+consumer read a settled lane's `process` as "this lane still has a live
+agent". Liveness evidence surfaces separately, as the stale-running
+`warnings` entry on inspect (§2.3), never through `process` itself.
 
 **Immediate process identity and the kill-before-spawn race.** Wound
 (2026-07 review, finding 15): adapters reported `{pid, pgid}` only after
@@ -245,6 +251,13 @@ FIRST**, immediately after lane creation and before any agent work:
 Nothing else is promised on stdout. Parse the first line for the handle (on
 dispatch) and the last line for the result; ignore everything between.
 
+**stderr is not contractual.** Wound (2026-07 cold-consumer desktop tests): a
+consumer treated stderr output during a successful run as a failure signal.
+Harness diagnostics — adapter-load complaints, native-CLI tracing lines, MCP
+auth noise — may appear on stderr during perfectly successful runs; only
+stdout carries the envelope, and only the envelope (plus its exit code)
+carries the outcome.
+
 The single DOCUMENTED exemption to one-envelope-per-command is `--help`/`-h`:
 help output stays human-readable and prints no envelope (also noted in the
 `orca contract` payload). `orca answer --help` and `orca resume --help` route
@@ -299,6 +312,23 @@ reports the evidence and points at `resume` (the ownerless-running reclaim,
 leader pid does not prove the whole process tree (or a reattached resumer)
 is gone.
 
+A second warning comes from settlement: a lane that settles `completed` with
+an empty or whitespace-only `result.text` carries `"agent returned an empty
+result; semanticOutcome is unknown and the response may not have addressed
+the prompt"`. Wound (2026-07 cold-consumer desktop tests): a consumer took
+`status:"completed"` with an empty result as a successful no-op answer.
+Protocol completion proves only that the turn ended; with no text there is
+nothing for the caller to act on, and the warning says so without changing
+status or exit code.
+
+`usage` and `timing` are **per-turn, not cumulative over the lane**: they
+cover the single dispatch or resume the envelope settles. Wound (2026-07
+cold-consumer desktop tests): a consumer read a resume envelope's numbers as
+lane-lifetime totals. Each envelope's `timing.wallMs` is the harness-measured
+wall clock of that one verb invocation, `startupMs`/`apiMs` decompose that
+same invocation, and `usage` is what the agent's protocol reported during
+that run — orca never aggregates usage or timing across turns.
+
 Event lines in `events.ndjson`:
 
 ```
@@ -351,6 +381,15 @@ orca contract [--schema envelope|event|manifest]
 `orca contract` prints the whole machine-readable contract — JSON Schemas for
 envelope, event, manifest, and handle, plus the exit-code table and verb
 synopses. It is the only document a cold agent should need (see §7).
+
+**Wait semantics.** `inspect --wait-for` waits for the lane to reach the
+named state — and terminal states also satisfy `--wait-for blocked`, so the
+wait never hangs on a lane that finishes without blocking. Wound (2026-07
+cold-consumer desktop tests): a consumer expected `--wait-for blocked` to
+wait forever (or time out) on a lane that completed without asking anything,
+and treated the early return as a bug. The waits are ordered, not exclusive:
+`blocked` means "blocked or done", `done` means terminal only, and the
+envelope's `status` says which state actually ended the wait.
 
 **Resume semantics.** `LaneStore.beginResume` is the locked CAS entry point
 for `orca resume`: under one lane lease it admits the lane, appends
@@ -606,7 +645,9 @@ interface AgentAdapter {
   (`nativeStatus`, `agentSessionId?`, `lastActivityAt?`, `detail?`) when the
   agent exposes one.
 - `capabilities` returns the static manifest: declared capabilities
-  (`resume`, `kill`, `questions`, `continuityMethods`, `models?`) plus
+  (`resume`, `kill`, `questions`, `continuityMethods`, `models?`, and
+  `browserUse?` — a boolean, or a descriptive string when availability is
+  conditional, e.g. codex's `"available via config"`) plus
   measured overhead (`startupMsP50/P95`, `measuredAt`). The manifest also has
   three declared-extras slots — `caveats?: {code, note}[]` for known,
   machine-readable limitations, `worktrees?: boolean` for git-worktree
@@ -654,6 +695,15 @@ source. They are separate fields and no code path may conflate them:
 | `delivery`        | Did the prompt reach the agent?          | Transport acknowledgment only (`not_sent` / `confirmed` / `unknown`).                                 |
 | `nativeStatus`    | What did the agent's own runtime report? | Protocol events and exit codes only (`running` / `completed` / `failed` / `interrupted` / `unknown`). |
 | `semanticOutcome` | Did the task actually succeed?           | An explicit validator only. **None exists in v0**, so lane CLI output is always `"unknown"`.          |
+
+**`delivery` defined precisely.** `confirmed` means the native agent
+acknowledged receiving the turn — a protocol acknowledgment (e.g. codex's
+turn/start response or a matching terminal turn notification) or a result
+bound to the session (e.g. cursor's `type:"result"` line carrying the
+session id). It does NOT mean the user's intent was fulfilled, the prompt
+was understood, or the work was done — those live on the other two axes.
+Wound (2026-07 cold-consumer desktop tests): a consumer read
+`delivery:"confirmed"` as "the agent did what I asked".
 
 This structure exists to prevent **success laundering**: the failure mode
 where "the process exited 0" plus "the agent said it's done" gets collapsed

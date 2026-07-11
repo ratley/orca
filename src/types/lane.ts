@@ -218,6 +218,12 @@ export const AgentCapabilitiesSchema = z.object({
   questions: z.boolean(),
   continuityMethods: z.array(ContinuityMethodSchema),
   models: z.array(z.string()).optional(),
+  /**
+   * Browser-use support: true/false when the adapter knows definitively, or a
+   * short string when availability is conditional (e.g. "available via
+   * config"). Absent means undeclared.
+   */
+  browserUse: z.union([z.boolean(), z.string()]).optional(),
 });
 export type AgentCapabilities = z.infer<typeof AgentCapabilitiesSchema>;
 

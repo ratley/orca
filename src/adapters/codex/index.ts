@@ -1,4 +1,4 @@
-export { CodexAdapter, registerCodexAdapter } from "./adapter.js";
+export { CodexAdapter, CODEX_DEVELOPER_INSTRUCTIONS, registerCodexAdapter } from "./adapter.js";
 export type {
   CodexAdapterOptions,
   CodexClientLaunchOptions,
@@ -9,6 +9,7 @@ export {
   buildCodexManifest,
   CODEX_ADAPTER_VERSION,
   CODEX_AGENT_NAME,
+  CODEX_BROWSER_USE,
   CODEX_CAVEATS,
   CODEX_DECLARED_FACTS,
 } from "./manifest.js";

@@ -91,6 +91,15 @@ const TERMINAL_LANE_STATUSES: ReadonlySet<LaneStatus> = new Set([
   "lost",
 ]);
 
+/**
+ * Warning appended when a lane settles completed with an empty/whitespace
+ * result text: nativeStatus "completed" only proves the protocol turn ended,
+ * and with no result text there is nothing for the caller to act on.
+ */
+const EMPTY_RESULT_WARNING =
+  "agent returned an empty result; semanticOutcome is unknown and the " +
+  "response may not have addressed the prompt";
+
 const EXIT_CODE_HELP =
   "Exit codes: 0 ok (blocked is ok), 2 usage (malformed command line), " +
   "3 adapter/agent failure, 4 not-found/continuity/invalid-state, 5 timeout.";
@@ -342,7 +351,9 @@ function createLaneProgram(ctx: LaneCliContext, setExit: (code: number) => void)
     .addOption(
       new Option(
         "--wait-for <state>",
-        "wait until the lane is blocked or done (terminal) before printing the envelope",
+        "wait until the lane is blocked or done (terminal) before printing the envelope; " +
+          "terminal states also satisfy --wait-for blocked, so it never hangs on a lane " +
+          "that finishes without blocking",
       ).choices(["blocked", "done"]),
     )
     .option(
@@ -365,8 +376,7 @@ function createLaneProgram(ctx: LaneCliContext, setExit: (code: number) => void)
   program
     .command("answer")
     .description(
-      "Deliver an answer to a blocked lane's pending question. " +
-        `${LANE_ROUTING_HELP}`,
+      "Deliver an answer to a blocked lane's pending question. " + `${LANE_ROUTING_HELP}`,
     )
     .argument("<laneId>", 'lane id (matches "lane_" plus 8 hex digits)', parseLaneId)
     .argument("<text>", "answer text; stored until the live or resumed agent consumes it")
@@ -1273,6 +1283,12 @@ async function settleOutcome(
   }
 
   const next = nextForLane(lane, lane.status === "blocked" ? await store.readEvents(laneId) : []);
+  // An empty completed result is settled honestly but flagged: the turn ended
+  // per protocol evidence, yet there is no response text to act on.
+  const warnings =
+    lane.status === "completed" && (outcome.result?.text ?? "").trim() === ""
+      ? [EMPTY_RESULT_WARNING]
+      : undefined;
   return printEnvelope(
     ctx.stdout,
     okEnvelope({
@@ -1288,6 +1304,7 @@ async function settleOutcome(
       ...(outcome.usage !== undefined ? { usage: outcome.usage } : {}),
       ...(outcome.continuity !== undefined ? { continuity: outcome.continuity } : {}),
       ...(next !== undefined ? { next } : {}),
+      ...(warnings !== undefined ? { warnings } : {}),
     }),
   );
 }

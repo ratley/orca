@@ -16,7 +16,7 @@ import { AdapterError, ContinuityError } from "../../../lane/adapter";
 import { LaneStore } from "../../../lane/store";
 import { AgentManifestSchema } from "../../../types/lane";
 import type { LaneEventInput, LaneRecord } from "../../../types/lane";
-import { CodexAdapter } from "../adapter";
+import { CodexAdapter, CODEX_DEVELOPER_INSTRUCTIONS } from "../adapter";
 import type {
   CodexAdapterOptions,
   CodexClientLaunchOptions,
@@ -1222,6 +1222,91 @@ describe("CodexAdapter resume", () => {
   });
 });
 
+describe("CodexAdapter developer instructions", () => {
+  test("dispatch injects the default question-steering developerInstructions on thread/start", async () => {
+    const { lane, transport, adapter } = await createFixture();
+    scriptCompletedTurn(transport, "done");
+
+    await adapter.dispatch({ laneId: lane.id, prompt: "hi", cwd: "/tmp/project" });
+
+    const start = transport.requests.find((request) => request.method === "thread/start");
+    expect(start?.params).toMatchObject({
+      developerInstructions: CODEX_DEVELOPER_INSTRUCTIONS,
+    });
+  });
+
+  test("resume injects the same developerInstructions on thread/resume", async () => {
+    const { store, lane, transport, adapter } = await createFixture();
+    await store.updateLane(lane.id, { agentSessionId: THREAD_ID });
+    transport.setResponder("thread/resume", () => ({ thread: { id: THREAD_ID } }));
+    scriptCompletedTurn(transport, "resumed");
+
+    const record = await store.loadLane(lane.id);
+    await adapter.resume(record as LaneRecord, "continue");
+
+    const resume = transport.requests.find((request) => request.method === "thread/resume");
+    expect(resume?.params).toMatchObject({
+      threadId: THREAD_ID,
+      developerInstructions: CODEX_DEVELOPER_INSTRUCTIONS,
+    });
+  });
+
+  test("callers can override the developerInstructions text", async () => {
+    const { lane, transport, adapter } = await createFixture({
+      developerInstructions: "Always answer in French.",
+    });
+    scriptCompletedTurn(transport, "done");
+
+    await adapter.dispatch({ laneId: lane.id, prompt: "hi", cwd: "/tmp/project" });
+
+    const start = transport.requests.find((request) => request.method === "thread/start");
+    expect(start?.params).toMatchObject({ developerInstructions: "Always answer in French." });
+  });
+
+  test("an empty-string option disables injection entirely", async () => {
+    const { lane, transport, adapter } = await createFixture({ developerInstructions: "" });
+    scriptCompletedTurn(transport, "done");
+
+    await adapter.dispatch({ laneId: lane.id, prompt: "hi", cwd: "/tmp/project" });
+
+    const start = transport.requests.find((request) => request.method === "thread/start");
+    expect(start?.params).not.toHaveProperty("developerInstructions");
+  });
+});
+
+describe("CodexAdapter protocol timing", () => {
+  test("a protocol-reported turn duration surfaces as timing.apiMs", async () => {
+    const { lane, transport, adapter } = await createFixture();
+    transport.setResponder("turn/start", () => {
+      queueMicrotask(() => {
+        transport.emitNotification("turn/completed", {
+          threadId: THREAD_ID,
+          turn: { id: TURN_ID, status: "completed", items: [], durationMs: 1234 },
+        });
+      });
+      return { turn: { id: TURN_ID, status: "inProgress", items: [] } };
+    });
+
+    const outcome = await adapter.dispatch({ laneId: lane.id, prompt: "hi", cwd: "/tmp/project" });
+
+    expect(outcome.status).toBe("completed");
+    expect(outcome.timing?.apiMs).toBe(1234);
+    // Harness-measured fields are still the adapter's own.
+    expect(outcome.timing?.wallMs).toBeGreaterThanOrEqual(0);
+    expect(outcome.timing?.startupMs).toBeGreaterThanOrEqual(0);
+  });
+
+  test("apiMs is never fabricated when the protocol reports no duration", async () => {
+    const { lane, transport, adapter } = await createFixture();
+    scriptCompletedTurn(transport, "done");
+
+    const outcome = await adapter.dispatch({ laneId: lane.id, prompt: "hi", cwd: "/tmp/project" });
+
+    expect(outcome.status).toBe("completed");
+    expect(outcome.timing?.apiMs).toBeUndefined();
+  });
+});
+
 describe("CodexAdapter inspect", () => {
   test("returns unknown when the lane has no bound session", async () => {
     const { lane, adapter } = await createFixture();
@@ -1299,10 +1384,12 @@ describe("CodexAdapter manifest", () => {
     expect(manifest.capabilities.continuityMethods).toEqual(["thread-id-match"]);
     expect(manifest.overhead?.startupMsP50).toBe(7500);
     expect(manifest.overhead?.measuredAt).toBe("2026-07-11");
+    expect(manifest.capabilities.browserUse).toBe("available via config");
     expect(manifest.declared).toEqual(expect.objectContaining(CODEX_DECLARED_FACTS));
     expect(manifest.caveats?.map((caveat) => caveat.code)).toContain(
       "process_group_signalling_cli_owned",
     );
+    expect(manifest.caveats?.map((caveat) => caveat.code)).toContain("questions_best_effort");
     expect(manifest.caveats?.map((caveat) => caveat.code)).not.toContain(
       "process_identity_unavailable",
     );
