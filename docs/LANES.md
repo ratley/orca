@@ -343,7 +343,11 @@ data records the resuming process's pid — the pid the ownerless-running
 reclaim (§2.5) probes — and crash replay reads it as `running`. Answer
 events share the `answered` kind: a submission carries `{text, generation}`,
 while adapter-confirmed consumption is stamped `data.consumed:true` and
-echoes the consumed generation (§2.1).
+echoes the consumed generation (§2.1). `heartbeat` is a non-terminal liveness
+signal: the cursor adapter emits one (`data.source` ∈ `stdout | stderr`) on the
+first native output of a run, so a driver can distinguish a live cold start
+from a pre-output hang. It is liveness only — never delivery evidence — and,
+like all non-terminal events, appends without a status transition.
 
 ### 2.4 Exit codes
 

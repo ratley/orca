@@ -65,6 +65,15 @@ export interface ExecRequest {
   signal?: AbortSignal | undefined;
   /** Called once the child process has spawned, with a live kill handle. */
   onSpawn?: ((handle: ExecHandle) => void) | undefined;
+  /**
+   * Called at most once, when the FIRST byte arrives on either stream. This is
+   * a liveness signal only: it proves the child moved past bare spawn into
+   * producing output, NOT that the prompt was received or understood. The
+   * cursor CLI emits a `cursor-retrieval: tracing` stderr line within ~1s of
+   * spawn (verified 2026-07-11), so this fires early even during a long cold
+   * start and lets a driver distinguish "initializing" from a pre-output hang.
+   */
+  onFirstOutput?: ((source: "stdout" | "stderr") => void) | undefined;
   /** Stdout tail-window override (tests use tiny caps). Default 4MB. */
   maxStdoutBytes?: number | undefined;
   /** Stderr tail-window override. Default 256KB. */
@@ -188,8 +197,17 @@ export const spawnExec: ExecFn = (req) =>
     let overCapSource: "stdout" | "stderr" | undefined;
     let exited = false;
     let closed = false;
+    let firstOutputSeen = false;
     let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
     let terminationPromise: Promise<boolean> | undefined;
+
+    const noteFirstOutput = (source: "stdout" | "stderr"): void => {
+      if (firstOutputSeen) {
+        return;
+      }
+      firstOutputSeen = true;
+      req.onFirstOutput?.(source);
+    };
 
     const clearTimers = () => {
       if (timeoutTimer !== undefined) {
@@ -265,6 +283,7 @@ export const spawnExec: ExecFn = (req) =>
     }
 
     child.stdout?.on("data", (chunk: Buffer) => {
+      noteFirstOutput("stdout");
       stdout.push(chunk);
       if (!overCap && stdout.total > (req.maxStdoutBytes ?? MAX_STDOUT_BYTES)) {
         overCap = true;
@@ -273,6 +292,7 @@ export const spawnExec: ExecFn = (req) =>
       }
     });
     child.stderr?.on("data", (chunk: Buffer) => {
+      noteFirstOutput("stderr");
       stderr.push(chunk);
       if (!overCap && stderr.total > (req.maxStderrBytes ?? MAX_STDERR_BYTES)) {
         overCap = true;

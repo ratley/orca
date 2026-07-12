@@ -76,6 +76,7 @@ Resumable: completed lanes (documented carve-out — a resume is a new user turn
 
 - `orca lanes` before assuming state; lane store lives at `~/.orca/lanes/` (override with `ORCA_HOME` for isolated experiments).
 - A `stale running` warning on inspect means the dispatching process died: `orca kill <laneId>` then re-dispatch. Kill of an already-killed lane is idempotent.
+- Cursor cold start takes 30–100s before any output. A `heartbeat` event (seen via `inspect --since`) fires on cursor's first native output (~1s after it truly starts working), so a live cold start is distinguishable from a hang — don't kill a cursor lane during the cold-start window just because the last event is `agent_started`; wait for the heartbeat or the window to elapse.
 - `usage` and `timing` in the envelope cover the single settled turn, not the lane's history. Use them to budget follow-ups.
 - stderr is not contractual — harness noise may appear there on successful runs; parse stdout only.
 - When orca confuses you or an agent misuses it, that's a contract/AX defect worth recording, not something to route around silently.

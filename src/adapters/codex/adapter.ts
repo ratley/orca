@@ -446,7 +446,7 @@ export class CodexAdapter implements AgentAdapter {
    */
   private async disconnectBounded(
     client: CodexClient,
-    hook?: ((event: LaneEventInput) => void | Promise<void>) | undefined,
+    hook?: (event: LaneEventInput) => void | Promise<void>,
   ): Promise<AppServerTermination | undefined> {
     // disconnect() drops the transport reference (and with it processInfo)
     // before awaiting process exit; capture the identity first.

@@ -101,6 +101,40 @@ describe("CursorAdapter dispatch", () => {
     ]);
   });
 
+  test("emits a liveness heartbeat on first native output, before the process-exited progress", async () => {
+    // Cursor's early stderr tracing line (verified ~0.67s after spawn) reaches
+    // the driver as a heartbeat, so a long cold start is distinguishable from a
+    // pre-output hang. The heartbeat is liveness only, never delivery evidence.
+    // The exec layer de-dups to a single onFirstOutput call (asserted in
+    // exec.test.ts); the fake mirrors that contract with one call.
+    const exec: ExecFn = async (req) => {
+      req.onSpawn?.({ pid: 1234, pgid: 1234, kill: async () => true });
+      req.onFirstOutput?.("stderr");
+      return execResult();
+    };
+    const adapter = new CursorAdapter({ exec, cursorHome });
+
+    const events: LaneEventInput[] = [];
+    const outcome = await adapter.dispatch({
+      laneId: "lane_0000001f",
+      prompt: "hi",
+      cwd: "/tmp/fake-project",
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+
+    expect(outcome.status).toBe("completed");
+    // Heartbeat lands between spawn identity and the terminal-adjacent progress.
+    expect(events.map((event) => event.event)).toEqual(["agent_started", "heartbeat", "progress"]);
+    expect(events[1]).toEqual({
+      event: "heartbeat",
+      data: { source: "stderr", note: "native output started; process is live" },
+    });
+    // Liveness must not be conflated with delivery acknowledgement.
+    expect(outcome.delivery).toBe("confirmed");
+  });
+
   test("rejected agent_started persistence kills the live process and fails the lane", async () => {
     let killed = false;
     const exec: ExecFn = (req) =>

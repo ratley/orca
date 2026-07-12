@@ -313,6 +313,19 @@ export class CursorAdapter implements AgentAdapter {
             data: { pid: handle.pid, pgid: handle.pgid, startedAt: new Date().toISOString() },
           });
         },
+        onFirstOutput: (source) => {
+          // Liveness heartbeat: cursor's `--output-format json` emits the
+          // result as one final stdout object, so agent_started was previously
+          // the last event a driver saw for the whole 30-100s cold start —
+          // indistinguishable from a hang. cursor's early stderr tracing line
+          // lets this fire within ~1s, so an inspecting driver can tell
+          // "initializing" from "spawned then silent". NOT a delivery signal:
+          // producing output does not prove the turn was received.
+          emit({
+            event: "heartbeat",
+            data: { source, note: "native output started; process is live" },
+          });
+        },
       });
     } catch (error) {
       if (error instanceof ExecUnavailableError) {
@@ -622,7 +635,7 @@ export const CURSOR_KNOWN_MODELS: readonly string[] = [
 const CURSOR_BASE_CAVEATS: AgentCaveat[] = [
   {
     code: "cold_start",
-    note: "Client startup adds 30-100s cold (~5s warm). duration_ms in the result JSON excludes it; timing.startupMs = wallMs - apiMs.",
+    note: "Client startup adds 30-100s cold (~5s warm). duration_ms in the result JSON excludes it; timing.startupMs = wallMs - apiMs. A 'heartbeat' lane event fires on the first native output (cursor's early stderr line, ~1s post-spawn) so a driver can tell a live cold start from a pre-output hang; its absence long past the cold-start window is the real stall signal.",
   },
   {
     code: "silent_resume_rebind",

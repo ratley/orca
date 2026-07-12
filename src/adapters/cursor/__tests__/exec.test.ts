@@ -33,6 +33,30 @@ describe("cursor spawnExec process boundary", () => {
     expect(result.termination).toBe("verified_gone");
   });
 
+  test("onFirstOutput fires exactly once, on the earliest stream, across many chunks", async () => {
+    // Mirrors cursor: an early stderr line (its retrieval tracing) precedes the
+    // final stdout result. onFirstOutput must fire once, naming stderr.
+    const script = [
+      'process.stderr.write("trace-1\\n");',
+      'process.stderr.write("trace-2\\n");',
+      'process.stdout.write("result-line\\n");',
+    ].join("\n");
+    const firstOutputs: Array<"stdout" | "stderr"> = [];
+
+    const result = await spawnExec({
+      bin: process.execPath,
+      args: ["-e", script],
+      cwd: process.cwd(),
+      timeoutMs: 2_000,
+      onFirstOutput: (source) => {
+        firstOutputs.push(source);
+      },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(firstOutputs).toEqual(["stderr"]);
+  });
+
   test("direct-child exit beats a timeout while inherited stdout is still draining", async () => {
     const descendant = "setInterval(() => {}, 1000)";
     const parent = [
