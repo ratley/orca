@@ -358,14 +358,22 @@ export class CodexAdapter implements AgentAdapter {
    */
   private startConnect(client: CodexClient): Promise<void> {
     const connecting = client.connect().catch((error: unknown) => {
-      throw new AdapterError(
-        "agent_unavailable",
-        `unable to start codex app-server: ${messageOf(error)}`,
-        {
-          remediation: "Ensure the codex CLI (0.144+) is installed and on PATH.",
+      const message = messageOf(error);
+      // A transport runtime-support failure is orca's own environment problem,
+      // not a missing codex CLI. Label it honestly so drivers don't chase the
+      // wrong remediation (a node-run CLI once hit the Bun-only transport and
+      // was told to reinstall codex).
+      if (message.includes("StdioTransport.spawn requires")) {
+        throw new AdapterError("adapter_error", `unable to start codex app-server: ${message}`, {
+          remediation:
+            "orca's runtime cannot spawn the codex transport. Run orca under Node.js 20.16+ or Bun.",
           cause: error,
-        },
-      );
+        });
+      }
+      throw new AdapterError("agent_unavailable", `unable to start codex app-server: ${message}`, {
+        remediation: "Ensure the codex CLI (0.144+) is installed and on PATH.",
+        cause: error,
+      });
     });
     swallowLateRejection(connecting);
     return connecting;

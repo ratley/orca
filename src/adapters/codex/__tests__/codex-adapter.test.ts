@@ -635,6 +635,25 @@ describe("CodexAdapter dispatch", () => {
       expect((error as AdapterError).code).toBe("agent_unavailable");
     }
   });
+
+  test("transport runtime-support failure is adapter_error with runtime remediation", async () => {
+    const { lane, transport, adapter } = await createFixture();
+    transport.setResponder("initialize", () => {
+      throw new Error(
+        "StdioTransport.spawn requires Bun or Node.js 20.16+ (process.getBuiltinModule). React Native clients should use WebSocketTransport.",
+      );
+    });
+
+    try {
+      await adapter.dispatch({ laneId: lane.id, prompt: "hi", cwd: "/tmp/project" });
+      throw new Error("expected dispatch to throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(AdapterError);
+      expect((error as AdapterError).code).toBe("adapter_error");
+      expect((error as AdapterError).remediation).toContain("Run orca under Node.js 20.16+ or Bun");
+      expect((error as AdapterError).remediation).not.toContain("installed and on PATH");
+    }
+  });
 });
 
 describe("CodexAdapter abandoned-disconnect force-kill", () => {

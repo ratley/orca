@@ -5,7 +5,7 @@
     "": {
       "name": "orca",
       "dependencies": {
-        "@happycatlabs/codex-client": "^0.2.0",
+        "@happycatlabs/codex-client": "^0.2.1",
         "@inquirer/prompts": "^8.2.1",
         "@ratley/codex-client": "^0.1.4",
         "chalk": "^5.3.0",
@@ -38,7 +38,7 @@
 
     "@colors/colors": ["@colors/colors@1.5.0", "", {}, "sha512-ooWCrlZP11i8GImSjTHYHLkvFDP48nS4+204nGb1RiX/WXYHmJA2III9/e2DWVabCESdW7hBAEzHRqUn9OUVvQ=="],
 
-    "@happycatlabs/codex-client": ["@happycatlabs/codex-client@0.2.0", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-ZpdIm1piEZ95Coc6Qow5DrNnyu3mio+VtRh9n4cIiFLlohq/Ssok7uXQPF2ltwlZamIZtwhnJxm0YPcoLAEMMQ=="],
+    "@happycatlabs/codex-client": ["@happycatlabs/codex-client@0.2.1", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-A4+X2+kcDms7kc/b94vjEPM9r8gvF3OSHSUB5smR5pD2+CMKBzCg1IHpxiyDbSW+9XVzCwqIrAUJZ5xuMwps8Q=="],
 
     "@inquirer/ansi": ["@inquirer/ansi@2.0.3", "", {}, "sha512-g44zhR3NIKVs0zUesa4iMzExmZpLUdTLRMCStqX3GE5NT6VkPcxQGJ+uC8tDgBUC/vB1rUhUd55cOf++4NZcmw=="],
 
