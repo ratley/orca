@@ -11,22 +11,25 @@ on:
         required: false
         type: string
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   publish:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
+          package-manager-cache: false
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -96,7 +99,12 @@ jobs:
         run: npm ci
 
       - name: Validate
-        run: npm run validate
+        run: |
+          bun run typecheck
+          bun run lint
+          bun run build
+          bun test src/lane src/types/lane.test.ts src/cli/lane-commands.test.ts src/adapters
+          npm run validate:package-types
 
       - name: Check npm for existing version
         id: npm_check
@@ -124,9 +132,7 @@ jobs:
 
       - name: Publish to npm
         if: steps.npm_check.outputs.exists != 'true'
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish
+        run: npm publish --access public --provenance
 
       - name: Publish skipped
         if: steps.npm_check.outputs.exists == 'true'
