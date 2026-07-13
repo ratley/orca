@@ -180,18 +180,42 @@ export class CodexAdapter implements AgentAdapter {
         );
       }
 
-      const started = await awaitWithin(this.startThread(client), deadline);
+      const started = await awaitWithin(this.startThread(client, req), deadline);
       if (started.timedOut) {
         return setupTimeoutOutcome("codex thread/start did not complete", req.timeoutMs, startedAt);
       }
       const thread = started.value;
       const startupMs = Date.now() - startedAt;
+      const threadName = req.surface === "task" ? req.label : undefined;
+
+      if (threadName !== undefined) {
+        try {
+          await client.setThreadName(thread.id, threadName);
+        } catch (error) {
+          // Naming is control-plane polish, not prompt delivery. Preserve the
+          // runnable durable thread and surface the failure as lane evidence
+          // instead of abandoning an otherwise valid task.
+          await emitLaneEvent(req.onEvent, {
+            event: "progress",
+            data: {
+              type: "thread_name_failed",
+              threadId: thread.id,
+              message: messageOf(error),
+            },
+          });
+        }
+      }
 
       // Session metadata is protocol evidence and only exists post-connect;
       // it travels separately from the spawn-time identity above.
       await emitLaneEvent(req.onEvent, {
         event: "progress",
-        data: { type: "thread_bound", threadId: thread.id },
+        data: {
+          type: "thread_bound",
+          threadId: thread.id,
+          surface: req.surface ?? "lane",
+          ...(threadName !== undefined ? { name: threadName } : {}),
+        },
       });
 
       const outcome = await runLaneTurn({
@@ -379,13 +403,18 @@ export class CodexAdapter implements AgentAdapter {
     return connecting;
   }
 
-  private async startThread(client: CodexClient): Promise<Thread> {
+  private async startThread(client: CodexClient, req: DispatchRequest): Promise<Thread> {
     try {
-      return await client.startThread(
-        this.developerInstructions !== undefined
+      return await client.startThread({
+        // Persist both surfaces so continuity-verified resume survives the
+        // short-lived app-server process. threadSource expresses Orca's
+        // ownership intent, but hosts may normalize or ignore the hint.
+        ephemeral: false,
+        threadSource: req.surface === "task" ? "user" : "subagent",
+        ...(this.developerInstructions !== undefined
           ? { developerInstructions: this.developerInstructions }
-          : {},
-      );
+          : {}),
+      });
     } catch (error) {
       throw new AdapterError("adapter_error", `codex thread/start failed: ${messageOf(error)}`, {
         cause: error,

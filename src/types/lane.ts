@@ -26,6 +26,10 @@ export const LaneStatusSchema = z.enum([
 ]);
 export type LaneStatus = z.infer<typeof LaneStatusSchema>;
 
+/** Whether a dispatch is an internal worker lane or a user-owned task. */
+export const LaneSurfaceSchema = z.enum(["lane", "task"]);
+export type LaneSurface = z.infer<typeof LaneSurfaceSchema>;
+
 /**
  * Terminal lane statuses are immutable: once a lane reaches one of these, no
  * status transition away from it may succeed (see LaneStore.transitionLane),
@@ -128,6 +132,8 @@ export type TimingInfo = z.infer<typeof TimingInfoSchema>;
 export const LaneSummarySchema = z.object({
   id: z.string(),
   agent: z.string(),
+  /** Absent on pre-surface records; new dispatches always persist this field. */
+  surface: LaneSurfaceSchema.optional(),
   model: z.string().optional(),
   cwd: z.string(),
   label: z.string().optional(),

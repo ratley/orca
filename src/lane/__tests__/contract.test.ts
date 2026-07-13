@@ -101,6 +101,15 @@ describe("contract payload", () => {
     expect(synopses.get("resume")).toContain("[--timeout <ms>]");
   });
 
+  test("dispatch documents lane-vs-task ownership", () => {
+    const dispatch = payload.verbs.find((verb) => verb.verb === "dispatch");
+
+    expect(dispatch?.synopsis).toContain("[--surface lane|task]");
+    expect(dispatch?.description).toContain("internal worker");
+    expect(dispatch?.description).toContain("durable user-followable thread");
+    expect(payload.notes.some((note) => note.includes("does not provision"))).toBe(true);
+  });
+
   test("notes document the --help human-readable exemption", () => {
     const helpNote = payload.notes.find((note) => note.includes("--help"));
 

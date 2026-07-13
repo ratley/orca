@@ -41,6 +41,13 @@ orca pr create --last
 
 Orca's lane primitive is a machine-readable substrate for delegating work to other agents. Run `orca contract` to get the full orca/v1 contract — JSON Schemas for the envelope, event, and manifest shapes, plus exit codes and verb synopses. Every lane command prints exactly one JSON envelope as its final stdout line (success and failure alike) and never exits 0 on failure; the one documented exemption is `--help`/`-h`, which stays human-readable and prints no envelope. Lane ids look like `lane_a3f81c02` and are validated against `^lane_[0-9a-f]{8}$` before any filesystem path is built from them. `dispatch` and `resume` accept `--timeout <ms>`.
 
+`dispatch` defaults to `--surface lane`: an internal worker thread intended to report back to its coordinator. Codex can also create a durable user-followable task with `--surface task --label "<title>"`; Orca sets the native Codex thread name so it is recognizable in clients that share the same `CODEX_HOME`. Codex Desktop may also index persistent lane threads—the requested `user`/`subagent` source is a host-normalized hint, not a visibility filter. Task surface does not create a Codex Desktop-managed project or worktree; pass the intended existing checkout or worktree via `--cwd`.
+
+```bash
+orca dispatch --agent codex --cwd . "Review the current diff"
+orca dispatch --agent codex --surface task --label "HAPPY-123 — Fix API" --cwd . "Implement HAPPY-123"
+```
+
 Follow each envelope's literal `next[]` commands, especially after answering a question: a live native turn continues inside the original dispatch, while a parked question requires `resume`. Resume accepts blocked lanes (a parked question, or a live question whose recorded poller process is dead), completed lanes (the documented terminal carve-out — a resume is a new user turn), and running lanes whose recorded resumer pid is dead; `failed`/`killed`/`lost` lanes are never reopened — dispatch a new lane instead. All three built-in adapter manifests declare `kill:true`; process-group kill is explicitly POSIX-only in v0. Codex emits its detached app-server `pid`/`pgid` in `agent_started`; the lane CLI persists that process identity and owns process-group signaling and termination verification. Design doc and AX rules: [docs/LANES.md](./docs/LANES.md).
 
 ---

@@ -186,6 +186,7 @@ async function createFixture(
   const transport = new MockTransport();
   transport.setResponder("initialize", () => ({ userAgent: "codex-test" }));
   transport.setResponder("thread/start", () => ({ thread: { id: THREAD_ID } }));
+  transport.setResponder("thread/name/set", () => ({}));
 
   const launches: CodexClientLaunchOptions[] = [];
   const adapter = new CodexAdapter({
@@ -1251,6 +1252,89 @@ describe("CodexAdapter developer instructions", () => {
     const start = transport.requests.find((request) => request.method === "thread/start");
     expect(start?.params).toMatchObject({
       developerInstructions: CODEX_DEVELOPER_INSTRUCTIONS,
+      ephemeral: false,
+      threadSource: "subagent",
+    });
+  });
+
+  test("task surfaces create named user threads before starting the turn", async () => {
+    const { lane, transport, adapter } = await createFixture();
+    scriptCompletedTurn(transport, "done");
+
+    const outcome = await adapter.dispatch({
+      laneId: lane.id,
+      prompt: "hi",
+      cwd: "/tmp/project",
+      surface: "task",
+      label: "HAPPY-123 — Fix API",
+    });
+
+    expect(outcome.status).toBe("completed");
+    const start = transport.requests.find((request) => request.method === "thread/start");
+    expect(start?.params).toMatchObject({ ephemeral: false, threadSource: "user" });
+
+    const nameIndex = transport.requests.findIndex(
+      (request) => request.method === "thread/name/set",
+    );
+    const turnIndex = transport.requests.findIndex((request) => request.method === "turn/start");
+    expect(nameIndex).toBeGreaterThanOrEqual(0);
+    expect(nameIndex).toBeLessThan(turnIndex);
+    expect(transport.requests[nameIndex]?.params).toEqual({
+      threadId: THREAD_ID,
+      name: "HAPPY-123 — Fix API",
+    });
+  });
+
+  test("lane labels remain Orca-local and do not rename the native worker thread", async () => {
+    const { lane, transport, adapter } = await createFixture();
+    scriptCompletedTurn(transport, "done");
+
+    await adapter.dispatch({
+      laneId: lane.id,
+      prompt: "hi",
+      cwd: "/tmp/project",
+      label: "Internal worker",
+    });
+
+    expect(transport.requests.some((request) => request.method === "thread/name/set")).toBe(false);
+  });
+
+  test("a task naming failure is non-fatal and surfaces as progress evidence", async () => {
+    const { lane, transport, adapter } = await createFixture();
+    const received: LaneEventInput[] = [];
+    transport.setResponder("thread/name/set", () => {
+      throw new Error("name rejected");
+    });
+    scriptCompletedTurn(transport, "done");
+
+    const outcome = await adapter.dispatch({
+      laneId: lane.id,
+      prompt: "hi",
+      cwd: "/tmp/project",
+      surface: "task",
+      label: "Named task",
+      onEvent: (event) => {
+        received.push(event);
+      },
+    });
+
+    expect(outcome.status).toBe("completed");
+    expect(received).toContainEqual({
+      event: "progress",
+      data: {
+        type: "thread_name_failed",
+        threadId: THREAD_ID,
+        message: "name rejected",
+      },
+    });
+    expect(received).toContainEqual({
+      event: "progress",
+      data: {
+        type: "thread_bound",
+        threadId: THREAD_ID,
+        surface: "task",
+        name: "Named task",
+      },
     });
   });
 

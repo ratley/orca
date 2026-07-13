@@ -63,12 +63,14 @@ describe("LaneStore", () => {
     const lane = await store.createLane({
       agent: "codex",
       cwd: "/tmp/project",
+      surface: "task",
       model: "gpt-5.5",
       label: "fix-tests",
     });
 
     expect(lane.id).toMatch(/^lane_[0-9a-f]{8}$/);
     expect(lane.status).toBe("queued");
+    expect(lane.surface).toBe("task");
     expect(lane.seq).toBe(1);
     expect(lane.model).toBe("gpt-5.5");
     expect(lane.label).toBe("fix-tests");
@@ -78,6 +80,7 @@ describe("LaneStore", () => {
     expect(events[0]?.event).toBe("created");
     expect(events[0]?.seq).toBe(1);
     expect(events[0]?.laneId).toBe(lane.id);
+    expect(events[0]?.data.surface).toBe("task");
   });
 
   test("loadLane returns null for an unknown lane", async () => {

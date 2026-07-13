@@ -12,7 +12,7 @@ Orca wraps agent CLIs (codex, claude, cursor) behind one contract: every command
 ## Verbs
 
 ```sh
-orca dispatch --agent <agent> [--model <m>] [--cwd <dir>] [--label <l>] [--timeout <ms>] <prompt>
+orca dispatch --agent <agent> [--surface lane|task] [--model <m>] [--cwd <dir>] [--label <l>] [--timeout <ms>] <prompt>
 orca inspect <laneId> [--follow] [--since <seq>] [--wait-for blocked|done] [--timeout <ms>]
 orca answer <laneId> <text>
 orca resume <laneId> [--timeout <ms>] <prompt>
@@ -35,9 +35,14 @@ orca contract [--schema envelope|event|manifest]
 
 ## Dispatch patterns
 
+`--surface lane` is the default: an internal worker that reports back to its coordinator. With Codex, `--surface task --label "<title>"` creates and names a durable user-followable thread that clients sharing the same `CODEX_HOME` can surface. Codex Desktop may also index persistent lane threads; the requested `user`/`subagent` source is a host-normalized hint, not a visibility filter. Task surface uses the supplied `--cwd`; it does not create a Codex Desktop-managed project worktree.
+
 ```sh
 # Deep engineering work → codex (brief it thoroughly; it rewards detailed prompts)
 orca dispatch --agent codex --cwd /path/to/repo --timeout 600000 "<detailed brief>"
+
+# Durable user-followable Codex task in an existing checkout/worktree
+orca dispatch --agent codex --surface task --label "HAPPY-123 — Fix API" --cwd /path/to/worktree "<brief>"
 
 # Scoped implementation → cursor (30–100s startup before any work; budget timeouts accordingly)
 orca dispatch --agent cursor --cwd /path/to/repo "<scoped change>"

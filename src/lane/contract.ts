@@ -61,13 +61,15 @@ const VERBS: ReadonlyArray<ContractVerb> = [
   {
     verb: "dispatch",
     synopsis:
-      "orca dispatch --agent <agent> [--model <model>] [--cwd <dir>] [--label <label>] " +
-      "[--timeout <ms>] <prompt>",
+      "orca dispatch --agent <agent> [--surface lane|task] [--model <model>] [--cwd <dir>] " +
+      "[--label <label>] [--timeout <ms>] <prompt>",
     example: 'orca dispatch --agent codex --cwd . "Fix the flaky store test"',
     description:
       "Create a lane and hand the prompt to the agent. Prints a handle line " +
       '({"v":1,"kind":"handle",...}) immediately after lane creation, ' +
-      "then one final envelope when the run reaches a terminal or blocked state.",
+      "then one final envelope when the run reaches a terminal or blocked state. " +
+      "The default lane surface is an internal worker; Codex-only task surface creates " +
+      "a named, durable user-followable thread at the caller-supplied cwd.",
   },
   {
     verb: "inspect",
@@ -134,6 +136,7 @@ const NOTES: ReadonlyArray<string> = [
   "Every command prints exactly one JSON envelope as the FINAL stdout line, success and failure alike.",
   "--help/-h output is human-readable usage text, not an envelope; it is the DOCUMENTED exemption to the one-envelope-per-command rule.",
   "dispatch additionally prints a handle line FIRST, immediately after lane creation and before any agent work.",
+  "dispatch defaults to --surface lane (an internal worker). --surface task is Codex-only, requires --label, creates a named durable user-followable thread, and does not provision a Codex Desktop-managed worktree; --cwd remains caller-owned. Persistent lane threads may also be indexed by Codex Desktop because threadSource is a host-normalized hint, not a visibility filter.",
   "A command NEVER exits 0 with ok:false.",
   'code "usage_error" (exit 2) means the command LINE was malformed; a well-formed command against a lane in the wrong state reports "invalid_state" (exit 4).',
   "delivery, nativeStatus, and semanticOutcome are independent axes and are never conflated.",

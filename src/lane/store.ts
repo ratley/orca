@@ -15,6 +15,7 @@ import type {
   LaneEventInput,
   LaneProcessInfo,
   LaneRecord,
+  LaneSurface,
   LaneStatus,
 } from "../types/lane.js";
 import { assertValidLaneId, isValidLaneId } from "./lane-id.js";
@@ -102,6 +103,7 @@ export class TransitionConflictError extends Error {
 export interface CreateLaneInput {
   agent: string;
   cwd: string;
+  surface?: LaneSurface;
   model?: string;
   label?: string;
 }
@@ -214,6 +216,7 @@ export class LaneStore {
     const lane = LaneRecordSchema.parse({
       id: generateLaneId(),
       agent: input.agent,
+      surface: input.surface ?? "lane",
       cwd: input.cwd,
       model: input.model,
       label: input.label,
@@ -228,7 +231,7 @@ export class LaneStore {
 
     await this.appendEvent(lane.id, {
       event: "created",
-      data: { agent: lane.agent, cwd: lane.cwd },
+      data: { agent: lane.agent, surface: lane.surface, cwd: lane.cwd },
     });
 
     const created = await this.loadLane(lane.id);

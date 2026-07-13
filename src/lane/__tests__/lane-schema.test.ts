@@ -14,6 +14,7 @@ import type { AgentManifest, Envelope, LaneRecord } from "../../types/lane";
 const sampleLane: LaneRecord = {
   id: "lane_a3f8b901",
   agent: "codex",
+  surface: "task",
   model: "gpt-5.5",
   cwd: "/tmp/project",
   label: "fix-tests",
@@ -77,6 +78,7 @@ describe("lane contract schemas", () => {
     expect(envelope.lane).toBeDefined();
     expect(envelope.lane).not.toHaveProperty("status");
     expect(envelope.lane?.id).toBe(sampleLane.id);
+    expect(envelope.lane?.surface).toBe("task");
     expect(envelope.lane?.seq).toBe(sampleLane.seq);
   });
 
@@ -143,6 +145,11 @@ describe("lane contract schemas", () => {
   test("lane record round-trips and rejects unknown status", () => {
     expect(LaneRecordSchema.parse(JSON.parse(JSON.stringify(sampleLane)))).toEqual(sampleLane);
     expect(() => LaneRecordSchema.parse({ ...sampleLane, status: "done" })).toThrow();
+    expect(() => LaneRecordSchema.parse({ ...sampleLane, surface: "sidebar" })).toThrow();
+
+    // Records created before surfaces were introduced remain readable.
+    const { surface: _surface, ...legacyLane } = sampleLane;
+    expect(LaneRecordSchema.parse(legacyLane)).not.toHaveProperty("surface");
   });
 
   test("lane record round-trips the optional process identity", () => {

@@ -274,7 +274,7 @@ no `lane_`/run positional disambiguates.
   code?: "usage_error"|"invalid_state"|"lane_not_found"
         |"continuity_unverified"|"agent_unavailable"|"adapter_error"
         |"agent_failed"|"timeout",
-  lane?: { id, agent, model?, cwd, label?, agentSessionId?,
+  lane?: { id, agent, surface?: "lane"|"task", model?, cwd, label?, agentSessionId?,
            createdAt, updatedAt, seq },
   delivery: "not_sent" | "confirmed" | "unknown",
   nativeStatus: "running" | "completed" | "failed" | "interrupted" | "unknown",
@@ -372,7 +372,7 @@ place (`exitCodeForEnvelope` in `src/lane/envelope.ts`, via
 ### 2.5 Verbs (v0)
 
 ```
-orca dispatch --agent <agent> [--model <model>] [--cwd <dir>] [--label <label>] [--timeout <ms>] <prompt>
+orca dispatch --agent <agent> [--surface lane|task] [--model <model>] [--cwd <dir>] [--label <label>] [--timeout <ms>] <prompt>
 orca inspect <laneId> [--follow] [--since <seq>] [--wait-for blocked|done] [--timeout <ms>]
 orca answer <laneId> <text>
 orca resume <laneId> [--timeout <ms>] <prompt>
@@ -385,6 +385,24 @@ orca contract [--schema envelope|event|manifest]
 `orca contract` prints the whole machine-readable contract — JSON Schemas for
 envelope, event, manifest, and handle, plus the exit-code table and verb
 synopses. It is the only document a cold agent should need (see §7).
+
+**Dispatch surfaces.** `--surface lane` is the default: it creates an internal
+worker lane. `--surface task` instead creates a durable, user-followable Codex
+thread and names it from the required non-empty `--label`. Task surfaces are
+Codex-only. Both surfaces retain an Orca lane record and native thread ID for
+inspection and continuity-verified resume.
+
+The adapter requests `threadSource:"subagent"` for lanes and
+`threadSource:"user"` for tasks as an ownership hint. Hosts may normalize or
+ignore it. Live Codex Desktop verification on 2026-07-13 stored both as
+`source:"vscode"` / `threadSource:null` and indexed both in the sidebar, so
+`--surface lane` is not a visibility filter. The enforceable task distinction
+is Orca's persisted surface plus the required native thread name.
+
+The task surface deliberately stops at the App Server thread boundary. It uses
+the caller-supplied `--cwd`; Orca does not create a Codex Desktop-managed
+project, worktree, or handoff environment. Use Desktop's native task/worktree
+flow when that app-owned isolation is required.
 
 **Wait semantics.** `inspect --wait-for` waits for the lane to reach the
 named state — and terminal states also satisfy `--wait-for blocked`, so the
@@ -635,7 +653,8 @@ interface AgentAdapter {
 
 - `dispatch` binds a native session, streams `LaneEventInput`s through
   `req.onEvent` (the store assigns `v/seq/ts/laneId`), and returns a terminal
-  or blocked `DispatchOutcome`. `req.timeoutMs` carries the caller's
+  or blocked `DispatchOutcome`. `req.surface` distinguishes an internal
+  `lane` worker from a user-owned `task`; `req.timeoutMs` carries the caller's
   `--timeout` (§2.5).
 - `resume` MUST verify continuity or throw `ContinuityError`
   (`code: "continuity_unverified"`, exit 4). Never silently rebind.

@@ -228,12 +228,65 @@ describe("lane-commands CLI", () => {
 
       expect(received?.prompt).toBe("do the thing");
       expect(received?.cwd).toBe(path.resolve("/tmp"));
+      expect(received?.surface).toBe("lane");
 
       const store = new LaneStore();
       const lane = await store.loadLane(handle.laneId as string);
       expect(lane?.status).toBe("completed");
+      expect(lane?.surface).toBe("lane");
       const events = await store.readEvents(handle.laneId as string);
       expect(events.map((event) => event.event)).toEqual(["created", "result"]);
+      expect(events[0]?.data.surface).toBe("lane");
+    });
+
+    test("task surface is Codex-only, requires a title, and persists its ownership", async () => {
+      const registry = new AdapterRegistry();
+      let received: DispatchRequest | undefined;
+      registry.register(
+        stubAdapter({
+          agent: "codex",
+          dispatch: (req) => {
+            received = req;
+            return Promise.resolve(completedOutcome("done"));
+          },
+        }),
+      );
+
+      const dispatched = await run(
+        [
+          "dispatch",
+          "--agent",
+          "codex",
+          "--surface",
+          "task",
+          "--label",
+          "  HAPPY-123 — Fix API  ",
+          "do the thing",
+        ],
+        { registry },
+      );
+
+      expect(dispatched.exitCode).toBe(0);
+      expect(received?.surface).toBe("task");
+      expect(received?.label).toBe("HAPPY-123 — Fix API");
+
+      const laneId = dispatched.stdout.json(0).laneId as string;
+      const store = new LaneStore();
+      const lane = await store.loadLane(laneId);
+      expect(lane?.surface).toBe("task");
+      expect(lane?.label).toBe("HAPPY-123 — Fix API");
+      expect((await store.readEvents(laneId))[0]?.data.surface).toBe("task");
+
+      for (const args of [
+        ["dispatch", "--agent", "stub", "--surface", "task", "--label", "Title", "work"],
+        ["dispatch", "--agent", "codex", "--surface", "task", "work"],
+        ["dispatch", "--agent", "codex", "--surface", "task", "--label", "   ", "work"],
+      ]) {
+        const rejected = await run(args, { registry });
+        expect(rejected.exitCode).toBe(2);
+        expect(rejected.stdout.lines()).toHaveLength(1);
+        expect(rejected.stdout.lastJson().code).toBe("usage_error");
+      }
     });
 
     test("an empty or whitespace-only completed result carries an empty-result warning", async () => {

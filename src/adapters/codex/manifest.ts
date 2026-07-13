@@ -21,6 +21,11 @@ export const CODEX_DECLARED_FACTS = {
   structuredOutput: true,
   sandboxModes: ["read-only", "workspace-write", "danger-full-access"],
   processIdentity: "detached app-server pid/pgid, emitted at spawn",
+  threadSurfaces: ["lane", "task"],
+  requestedLaneThreadSource: "subagent",
+  requestedTaskThreadSource: "user",
+  taskVisibility: "durable named thread discoverable by Codex Desktop clients sharing CODEX_HOME",
+  taskWorkspace: "caller-supplied cwd; Orca does not provision a Codex-managed worktree",
 } as const;
 
 /** Browser use is available when enabled via codex config (capabilities slot). */
@@ -47,6 +52,14 @@ export const CODEX_CAVEATS: AgentCaveat[] = [
   {
     code: "questions_best_effort",
     note: "Blocking questions are tool-mediated and best-effort: the adapter injects developerInstructions steering the model to raise mid-task questions through the request-user-input tool, but a model can still answer in prose, in which case the lane completes instead of blocking.",
+  },
+  {
+    code: "task_surface_no_worktree_provisioning",
+    note: "--surface task creates and names a durable user-owned Codex thread at the supplied cwd, but Orca does not provision a Codex Desktop-managed project worktree or handoff environment.",
+  },
+  {
+    code: "thread_source_hint_host_normalized",
+    note: "Orca requests threadSource=subagent for lane and threadSource=user for task, but hosts may normalize or ignore it. Live Codex Desktop verification on 2026-07-13 persisted both as source=vscode with threadSource=null and indexed both threads, so --surface lane is not a sidebar-visibility filter.",
   },
 ];
 

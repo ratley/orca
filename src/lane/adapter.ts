@@ -5,6 +5,7 @@ import type {
   InspectSnapshot,
   LaneEventInput,
   LaneRecord,
+  LaneSurface,
 } from "../types/lane.js";
 
 /**
@@ -59,6 +60,8 @@ export interface DispatchRequest {
   laneId: string;
   prompt: string;
   cwd: string;
+  /** Internal worker lane (default) or user-owned durable task. */
+  surface?: LaneSurface;
   model?: string;
   label?: string;
   timeoutMs?: number;

@@ -34,6 +34,7 @@ import {
   ErrorCodeSchema,
   LANE_CONTRACT_VERSION,
   LaneProcessInfoSchema,
+  LaneSurfaceSchema,
   NativeStatusSchema,
   ResultInfoSchema,
 } from "../types/lane.js";
@@ -49,6 +50,7 @@ import type {
   LaneProcessInfo,
   LaneRecord,
   LaneStatus,
+  LaneSurface,
   NativeStatus,
   ResultInfo,
 } from "../types/lane.js";
@@ -252,7 +254,7 @@ export function attachLaneHelp(program: Command): void {
     [
       "",
       "Lane verbs (orca/v1 agent contract):",
-      "  dispatch --agent <agent> [--model <model>] [--cwd <dir>] [--label <label>] [--timeout <ms>] <prompt>",
+      "  dispatch --agent <agent> [--surface lane|task] [--model <model>] [--cwd <dir>] [--label <label>] [--timeout <ms>] <prompt>",
       "  inspect <laneId> [--follow] [--since <seq>] [--wait-for blocked|done] [--timeout <ms>]",
       "  answer <laneId> <text>",
       "  resume <laneId> [--timeout <ms>] <prompt>",
@@ -277,6 +279,7 @@ export function attachLaneHelp(program: Command): void {
 
 interface DispatchCommandOptions {
   agent: string;
+  surface?: LaneSurface;
   model?: string;
   cwd?: string;
   label?: string;
@@ -325,6 +328,14 @@ function createLaneProgram(ctx: LaneCliContext, setExit: (code: number) => void)
     .description("Create a lane and hand the prompt to the agent (synchronous in v0).")
     .argument("<prompt>", "prompt handed to the agent")
     .requiredOption("--agent <agent>", 'agent adapter to use (see "orca agents")')
+    .addOption(
+      new Option(
+        "--surface <surface>",
+        "dispatch ownership: lane is an internal worker; task is a user-owned Codex thread",
+      )
+        .choices(LaneSurfaceSchema.options)
+        .default("lane"),
+    )
     .option("--model <model>", "model override passed to the adapter")
     .option("--cwd <dir>", "working directory for the lane (default: current directory)")
     .option("--label <label>", "human-friendly lane label")
@@ -706,6 +717,30 @@ async function dispatchVerb(
     );
   }
 
+  const surface = options.surface ?? "lane";
+  const label = options.label?.trim();
+  if (surface === "task" && options.agent !== "codex") {
+    return printEnvelope(
+      ctx.stdout,
+      errorEnvelope({
+        code: "usage_error",
+        message: "--surface task is supported only with --agent codex.",
+        remediation:
+          'Use "--agent codex --surface task --label <title>", or omit --surface for an internal lane.',
+      }),
+    );
+  }
+  if (surface === "task" && !label) {
+    return printEnvelope(
+      ctx.stdout,
+      errorEnvelope({
+        code: "usage_error",
+        message: "--surface task requires a non-empty --label for the user-facing task title.",
+        remediation: 'Add --label "<concise task title>".',
+      }),
+    );
+  }
+
   const resolution = await resolveAdapter(ctx, options.agent);
   if (!resolution.ok) {
     return printEnvelope(ctx.stdout, resolution.envelope);
@@ -715,9 +750,10 @@ async function dispatchVerb(
   const cwd = path.resolve(options.cwd ?? process.cwd());
   const lane = await store.createLane({
     agent: options.agent,
+    surface,
     cwd,
     ...(options.model !== undefined ? { model: options.model } : {}),
-    ...(options.label !== undefined ? { label: options.label } : {}),
+    ...(label !== undefined && label !== "" ? { label } : {}),
   });
   printHandle(ctx.stdout, { laneId: lane.id, agent: lane.agent });
 
@@ -738,8 +774,9 @@ async function dispatchVerb(
       laneId: lane.id,
       prompt,
       cwd,
+      surface,
       ...(options.model !== undefined ? { model: options.model } : {}),
-      ...(options.label !== undefined ? { label: options.label } : {}),
+      ...(label !== undefined && label !== "" ? { label } : {}),
       ...(options.timeout !== undefined ? { timeoutMs: options.timeout } : {}),
       onEvent: eventSink.onEvent,
     });

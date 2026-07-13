@@ -166,6 +166,17 @@ describe("codex manifest", () => {
   test("declared facts pin the measurement source", () => {
     expect(CODEX_DECLARED_FACTS.measuredOn).toBe("codex-cli 0.144.1");
     expect(CODEX_DECLARED_FACTS.inputTokenOverhead).toBe(24000);
+    expect(CODEX_DECLARED_FACTS.threadSurfaces).toEqual(["lane", "task"]);
+    expect(CODEX_DECLARED_FACTS.requestedLaneThreadSource).toBe("subagent");
+    expect(CODEX_DECLARED_FACTS.requestedTaskThreadSource).toBe("user");
+    expect(CODEX_DECLARED_FACTS.taskVisibility).toContain("Codex Desktop");
+    expect(CODEX_DECLARED_FACTS.taskWorkspace).toContain("does not provision");
+    expect(buildCodexManifest().caveats?.map((caveat) => caveat.code)).toContain(
+      "task_surface_no_worktree_provisioning",
+    );
+    expect(buildCodexManifest().caveats?.map((caveat) => caveat.code)).toContain(
+      "thread_source_hint_host_normalized",
+    );
   });
 
   test("declared facts and caveats survive manifest JSON round-trip", () => {
