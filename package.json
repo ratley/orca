@@ -80,11 +80,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ratley/orca.git"
+    "url": "git+https://github.com/happycatlabs/orca.git"
   },
   "homepage": "https://orcastrator.dev",
   "bugs": {
-    "url": "https://github.com/ratley/orca/issues"
+    "url": "https://github.com/happycatlabs/orca/issues"
   },
   "keywords": [
     "ai",
