@@ -1,30 +1,51 @@
 {
   "name": "orcastrator",
   "version": "0.2.25",
+  "description": "Observable agent-lane harness",
+  "keywords": [
+    "agent",
+    "ai",
+    "cli",
+    "codex",
+    "orchestration"
+  ],
+  "homepage": "https://orcastrator.dev",
+  "bugs": {
+    "url": "https://github.com/happycatlabs/orca/issues"
+  },
+  "license": "MIT",
+  "author": "ratley",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/happycatlabs/orca.git"
+  },
+  "bin": {
+    "orca": "dist/cli/index.js"
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "dist/**/*.d.ts.map",
+    "!dist/**/*.test.js",
+    "!dist/**/__tests__/**",
+    "README.md",
+    "skills/**/SKILL.md",
+    "skills/**/scripts/**/*.py"
+  ],
   "type": "module",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    },
-    "./types": {
-      "types": "./dist/types/index.d.ts",
-      "default": "./dist/types/index.js"
     }
   },
-  "bin": {
-    "orca": "dist/cli/index.js"
-  },
   "scripts": {
-    "build": "tsc",
+    "build": "node ./scripts/build.mjs",
     "dev": "bun run src/cli/index.ts",
-    "lint": "oxlint src/ __tests__/",
+    "lint": "oxlint src/",
     "typecheck": "node ./scripts/typecheck.mjs",
-    "test": "bun test src ./__tests__",
-    "test:integration": "bun test ./__tests__/integration",
-    "test:setup": "bash scripts/test-setup.sh",
-    "test:postexec-json": "bun test src/cli/commands/run.postexec-json.integration.test.ts",
+    "test": "bun test src",
     "start": "bun run src/cli/index.ts",
     "prepare": "husky",
     "postbuild": "chmod +x dist/cli/index.js",
@@ -32,7 +53,6 @@
     "typecheck:native": "tsgo --noEmit",
     "typecheck:tsc": "tsc --noEmit",
     "validate": "npm run lint && npm run lint:type-aware && npm run typecheck && npm run test && npm run build",
-    "smoke:hooks": "npm run build && node ./specs/smoke/hooks/run-hooks-smoke.mjs",
     "type:check": "tsc -p tsconfig.json --noEmit",
     "pkg:lint": "publint",
     "pkg:attw": "attw -P . --profile esm-only",
@@ -40,10 +60,7 @@
     "validate:package-types": "npm run build && npm run type:check && npm run pkg:lint && npm run pkg:attw && npm run consumer:smoke"
   },
   "dependencies": {
-    "@inquirer/prompts": "^8.2.1",
     "@happycatlabs/codex-client": "^0.2.1",
-    "@ratley/codex-client": "^0.1.4",
-    "chalk": "^5.3.0",
     "commander": "^13.1.0",
     "zod": "^4.3.6"
   },
@@ -64,33 +81,5 @@
     "*.ts": [
       "oxlint --fix"
     ]
-  },
-  "files": [
-    "dist/**/*.js",
-    "dist/**/*.d.ts",
-    "dist/**/*.d.ts.map",
-    "!dist/**/*.test.js",
-    "README.md",
-    ".orca/skills/**/SKILL.md",
-    "skills/**/SKILL.md",
-    "skills/**/scripts/**/*.py"
-  ],
-  "description": "Coordinated agent run harness",
-  "author": "ratley",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/happycatlabs/orca.git"
-  },
-  "homepage": "https://orcastrator.dev",
-  "bugs": {
-    "url": "https://github.com/happycatlabs/orca/issues"
-  },
-  "keywords": [
-    "ai",
-    "agent",
-    "codex",
-    "orchestration",
-    "cli"
-  ]
+  }
 }

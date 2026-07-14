@@ -146,7 +146,6 @@ const NOTES: ReadonlyArray<string> = [
   "usage and timing cover the single turn the envelope settles (one dispatch or one resume), not the lane's cumulative history.",
   'lane.process (persisted in lane.json, surfaced by kind:"list") is historical spawn identity, not a liveness claim; liveness evidence surfaces as a stale-running warning on inspect.',
   "The manifest's capabilities slot includes optional browserUse (boolean, or a descriptive string when availability is conditional) declaring whether the agent can drive a browser.",
-  'The verbs "answer" and "resume" share their names with legacy orca commands: lane handling engages when the first argument starts with "lane_" (all lane ids do), or when the next argument is --help/-h; other values fall through to the legacy commands.',
 ];
 
 export function buildContractPayload(): ContractPayload {

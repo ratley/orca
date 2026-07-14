@@ -1,27 +1,19 @@
 #!/usr/bin/env node
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { execFileSync } from "node:child_process";
 
 const repoRoot = resolve(process.cwd());
 const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
 const npxCmd = process.platform === "win32" ? "npx.cmd" : "npx";
 
-function run(cmd, args, cwd, env = {}) {
-  execFileSync(cmd, args, {
-    cwd,
-    stdio: "inherit",
-    env: { ...process.env, ...env },
-  });
+function run(cmd, args, cwd) {
+  execFileSync(cmd, args, { cwd, stdio: "inherit", env: process.env });
 }
 
 function runCapture(cmd, args, cwd) {
-  return execFileSync(cmd, args, {
-    cwd,
-    encoding: "utf8",
-    env: process.env,
-  }).trim();
+  return execFileSync(cmd, args, { cwd, encoding: "utf8", env: process.env }).trim();
 }
 
 function createConsumerProject(baseDir, mode) {
@@ -35,9 +27,7 @@ function createConsumerProject(baseDir, mode) {
         name: `orca-consumer-${mode}`,
         private: true,
         type: "module",
-        scripts: {
-          typecheck: "tsc --noEmit",
-        },
+        scripts: { typecheck: "tsc --noEmit" },
       },
       null,
       2,
@@ -58,7 +48,7 @@ function createConsumerProject(baseDir, mode) {
           allowJs: true,
           checkJs: true,
         },
-        include: ["orca.config.ts", "orca.config.js", "types-negative.ts"],
+        include: ["consumer.ts", "consumer.js", "types-negative.ts"],
       },
       null,
       2,
@@ -66,63 +56,43 @@ function createConsumerProject(baseDir, mode) {
   );
 
   writeFileSync(
-    join(dir, "orca.config.ts"),
-    `import { defineOrcaConfig } from "orcastrator";
+    join(dir, "consumer.ts"),
+    `import { LaneStore, okEnvelope } from "orcastrator";
+import type { AgentManifest, DispatchRequest, Envelope } from "orcastrator";
 
-export default defineOrcaConfig({
-  hooks: {
-    onTaskComplete(event, context) {
-      event.taskId.toUpperCase();
-      event.taskName.toUpperCase();
-      context.cwd.toUpperCase();
-      context.pid.toFixed(0);
-      context.invokedAt.toUpperCase();
-    },
-    onError(event) {
-      event.error.toUpperCase();
-    }
-  }
-});
+const store = new LaneStore();
+const request: DispatchRequest = { laneId: "lane_a3f81c02", prompt: "test", cwd: process.cwd() };
+const manifest: AgentManifest = {
+  v: 1,
+  agent: "example",
+  capabilities: { resume: false, kill: false, questions: false, continuityMethods: [] },
+};
+const envelope: Envelope = okEnvelope({ kind: "agents", agents: [manifest] });
+
+void store;
+void request;
+void envelope;
 `,
   );
 
   writeFileSync(
-    join(dir, "orca.config.js"),
+    join(dir, "consumer.js"),
     `// @ts-check
-/** @type {import("orcastrator").OrcaConfig} */
-const config = {
-  hooks: {
-    onTaskComplete(event, context) {
-      event.taskId.toUpperCase();
-      event.taskName.toUpperCase();
-      context.cwd.toUpperCase();
-    },
-  },
-};
+/** @type {import("orcastrator").LaneStatus} */
+const status = "running";
 
-export default config;
+export { status };
 `,
   );
 
   writeFileSync(
     join(dir, "types-negative.ts"),
-    `import type { HookEventMap } from "orcastrator/types";
+    `import type { LaneStatus } from "orcastrator";
 
-// @ts-expect-error onTaskComplete requires taskId + taskName
-const badComplete: HookEventMap["onTaskComplete"] = {
-  hook: "onTaskComplete",
-  runId: "abc-123-ffff",
-  message: "m",
-  timestamp: new Date().toISOString(),
-};
+// @ts-expect-error unknown lane status
+const invalidStatus: LaneStatus = "planning";
 
-// @ts-expect-error onError requires error
-const badError: HookEventMap["onError"] = {
-  hook: "onError",
-  runId: "abc-123-ffff",
-  message: "m",
-  timestamp: new Date().toISOString(),
-};
+void invalidStatus;
 `,
   );
 
@@ -136,7 +106,6 @@ let tarballPath = "";
 try {
   console.log(`consumer smoke workspace: ${workspace}`);
 
-  // Ensure tarball reflects current package state.
   run(npmCmd, ["run", "build"], repoRoot);
   const tarballName = runCapture(npmCmd, ["pack", "--silent"], repoRoot).split("\n").at(-1);
   tarballPath = join(repoRoot, tarballName);
@@ -145,7 +114,7 @@ try {
     console.log(`\n==> validating consumer install (${mode})`);
     const projectDir = createConsumerProject(workspace, mode);
 
-    run(npmCmd, ["install", "--silent", "typescript@5"], projectDir);
+    run(npmCmd, ["install", "--silent", "typescript@5", "@types/node"], projectDir);
     run(npmCmd, ["install", "--silent", tarballPath], projectDir);
     run(npxCmd, ["tsc", "--pretty", "false", "--noEmit"], projectDir);
   }

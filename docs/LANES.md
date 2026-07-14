@@ -6,16 +6,11 @@ schemas win.
 
 ## 1. What orca is now
 
-The lane surface is a **substrate that orchestrators call, not an
+Orca is a **substrate that orchestrators call, not an
 orchestrator**. Any agent — a Claude session, a Codex thread, a CI script, a
 human in a shell — can dispatch work to another agent through orca and get
-back machine-readable, evidence-based state. The lane surface does not plan,
+back machine-readable, evidence-based state. Orca does not plan,
 decompose, route, or judge; the caller does.
-
-The graph pipeline documented in the README (`orca "<task>"`, `plan`, `run`,
-`status`, `pr ...`) is the **legacy flow**. It keeps working unchanged and its
-exports (`src/agents/codex/session.ts`, `src/state/store.ts`) are stable. New
-work happens on the lane primitive described here.
 
 ## 2. The lane primitive and the envelope
 
@@ -260,9 +255,7 @@ carries the outcome.
 
 The single DOCUMENTED exemption to one-envelope-per-command is `--help`/`-h`:
 help output stays human-readable and prints no envelope (also noted in the
-`orca contract` payload). `orca answer --help` and `orca resume --help` route
-to the LANE program's help — not the legacy commands of the same name — when
-no `lane_`/run positional disambiguates.
+`orca contract` payload).
 
 ### 2.3 Envelope shape (orca/v1)
 

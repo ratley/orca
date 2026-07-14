@@ -56,29 +56,10 @@ import type {
 } from "../types/lane.js";
 
 /**
- * orca/v1 lane verbs: dispatch, inspect, answer, resume, lanes, kill, agents,
+ * orca/v1 verbs: dispatch, inspect, answer, resume, lanes, kill, agents,
  * contract. Every verb routes its final stdout line through printEnvelope,
  * which is the single exit-code enforcement point.
- *
- * The verbs run on a dedicated commander program (not the legacy one) because
- * "answer" and "resume" collide with legacy command names: lane handling
- * engages only when the first positional starts with "lane_" (all lane ids
- * do), so legacy invocations are untouched.
  */
-
-const LANE_VERBS = new Set([
-  "dispatch",
-  "inspect",
-  "answer",
-  "resume",
-  "lanes",
-  "kill",
-  "agents",
-  "contract",
-]);
-
-/** Verb names shared with the legacy CLI; routed by lane_-prefixed ids. */
-const LEGACY_SHARED_VERBS = new Set(["answer", "resume"]);
 
 /** Adapter packages expected at src/adapters/<agent>; loaded lazily. */
 const BUILTIN_AGENTS: readonly string[] = ["claude", "codex", "cursor"];
@@ -106,17 +87,13 @@ const EXIT_CODE_HELP =
   "Exit codes: 0 ok (blocked is ok), 2 usage (malformed command line), " +
   "3 adapter/agent failure, 4 not-found/continuity/invalid-state, 5 timeout.";
 
-const LANE_ROUTING_HELP =
-  'Lane vs legacy routing: "orca answer"/"orca resume" run against the LANE contract when the' +
-  ' first argument starts with "lane_" (all lane ids do); any other first argument routes to the' +
-  " legacy answer/resume commands.";
-
 export interface LaneCliWriter {
   write(chunk: string): unknown;
 }
 
 /** Injection points for tests; every field falls back to the real thing. */
 export interface LaneCliDeps {
+  version?: string;
   registry?: AdapterRegistry;
   store?: LaneStore;
   /** Loads and explicitly registers a built-in adapter module. */
@@ -134,6 +111,7 @@ export interface LaneCliDeps {
 }
 
 interface LaneCliContext {
+  version: string | undefined;
   registry: AdapterRegistry;
   store: LaneStore;
   loadAdapterModule: (agent: string, registry: AdapterRegistry, store: LaneStore) => Promise<void>;
@@ -149,6 +127,7 @@ interface LaneCliContext {
 
 function resolveContext(deps: LaneCliDeps): LaneCliContext {
   return {
+    version: deps.version,
     registry: deps.registry ?? adapterRegistry,
     store: deps.store ?? new LaneStore(),
     loadAdapterModule: deps.loadAdapterModule ?? importBuiltinAdapter,
@@ -195,37 +174,7 @@ async function importBuiltinAdapter(
   }
 }
 
-/**
- * True when argv (already stripped of the node/script prefix) targets a lane
- * verb. "answer"/"resume" belong to the legacy CLI unless the first
- * positional is a lane id.
- */
-export function isLaneCliInvocation(args: readonly string[]): boolean {
-  const verb = args[0];
-  if (verb === undefined || !LANE_VERBS.has(verb)) {
-    return false;
-  }
-
-  if (!LEGACY_SHARED_VERBS.has(verb)) {
-    return true;
-  }
-
-  const target = args[1];
-  return target === "--help" || target === "-h" || target?.startsWith("lane_") === true;
-}
-
-/**
- * Runs a lane verb and returns its process exit code, or null when argv is
- * not a lane invocation (the caller should fall through to the legacy CLI).
- */
-export async function runLaneCli(
-  args: readonly string[],
-  deps: LaneCliDeps = {},
-): Promise<number | null> {
-  if (!isLaneCliInvocation(args)) {
-    return null;
-  }
-
+export async function runLaneCli(args: readonly string[], deps: LaneCliDeps = {}): Promise<number> {
   const ctx = resolveContext(deps);
   let exitCode: number = EXIT_CODES.ok;
   const program = createLaneProgram(ctx, (code) => {
@@ -233,44 +182,16 @@ export async function runLaneCli(
   });
 
   try {
+    if (args.length === 0) {
+      program.outputHelp();
+      return EXIT_CODES.ok;
+    }
+
     await program.parseAsync([...args], { from: "user" });
     return exitCode;
   } catch (error) {
     return laneCliErrorExit(ctx, error);
   }
-}
-
-/** Adds the orca-for-agents pitch and lane verb summary to the root help. */
-export function attachLaneHelp(program: Command): void {
-  program.addHelpText(
-    "beforeAll",
-    "orca runs coding agents in observable lanes that always reply with one" +
-      ' machine-readable JSON envelope — run "orca contract" for the full agent contract.\n' +
-      `${LANE_ROUTING_HELP}\n`,
-  );
-
-  program.addHelpText(
-    "after",
-    [
-      "",
-      "Lane verbs (orca/v1 agent contract):",
-      "  dispatch --agent <agent> [--surface lane|task] [--model <model>] [--cwd <dir>] [--label <label>] [--timeout <ms>] <prompt>",
-      "  inspect <laneId> [--follow] [--since <seq>] [--wait-for blocked|done] [--timeout <ms>]",
-      "  answer <laneId> <text>",
-      "  resume <laneId> [--timeout <ms>] <prompt>",
-      "  lanes | kill <laneId> | agents | contract [--schema envelope|event|manifest]",
-      "",
-      `  ${LANE_ROUTING_HELP}`,
-      '  Add --help to any lane verb (e.g. "orca dispatch --help") for details.',
-      "",
-      "AGENTS:",
-      "  Every lane verb prints exactly one JSON envelope as the final stdout line;",
-      "  dispatch prints a handle line first.",
-      `  ${EXIT_CODE_HELP}`,
-      '  Example: orca dispatch --agent codex --cwd . "Fix the flaky store test"',
-      "",
-    ].join("\n"),
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -313,6 +234,7 @@ function createLaneProgram(ctx: LaneCliContext, setExit: (code: number) => void)
 
   program
     .name("orca")
+    .helpCommand(false)
     .description(
       "orca runs coding agents in observable lanes that always reply with one" +
         ' machine-readable JSON envelope. Run "orca contract" for the full agent contract.',
@@ -321,7 +243,19 @@ function createLaneProgram(ctx: LaneCliContext, setExit: (code: number) => void)
     .configureOutput({
       writeOut: (str: string) => void ctx.stdout.write(str),
       writeErr: (str: string) => void ctx.stderr.write(str),
-    });
+    })
+    .addHelpText(
+      "after",
+      agentsHelp(
+        "Every command prints exactly one JSON envelope as the final stdout line; dispatch" +
+          " prints a handle line first.",
+        'orca dispatch --agent codex --cwd . "Fix the flaky store test"',
+      ),
+    );
+
+  if (ctx.version !== undefined) {
+    program.version(ctx.version);
+  }
 
   program
     .command("dispatch")
@@ -386,9 +320,7 @@ function createLaneProgram(ctx: LaneCliContext, setExit: (code: number) => void)
 
   program
     .command("answer")
-    .description(
-      "Deliver an answer to a blocked lane's pending question. " + `${LANE_ROUTING_HELP}`,
-    )
+    .description("Deliver an answer to a blocked lane's pending question.")
     .argument("<laneId>", 'lane id (matches "lane_" plus 8 hex digits)', parseLaneId)
     .argument("<text>", "answer text; stored until the live or resumed agent consumes it")
     .addHelpText(
@@ -408,8 +340,7 @@ function createLaneProgram(ctx: LaneCliContext, setExit: (code: number) => void)
     .command("resume")
     .description(
       "Continue a blocked (non-live) or completed lane with a follow-up prompt " +
-        "(continuity-verified). " +
-        `${LANE_ROUTING_HELP}`,
+        "(continuity-verified).",
     )
     .argument("<laneId>", 'lane id (matches "lane_" plus 8 hex digits)', parseLaneId)
     .argument("<prompt>", "follow-up prompt for the agent")

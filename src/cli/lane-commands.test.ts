@@ -9,7 +9,7 @@ import { pathToFileURL } from "node:url";
 import { AdapterRegistry, ContinuityError, LaneStore } from "../lane/index.js";
 import type { AgentAdapter } from "../lane/index.js";
 import type { DispatchOutcome, DispatchRequest, LaneRecord } from "../types/lane.js";
-import { isLaneCliInvocation, runLaneCli } from "./lane-commands.js";
+import { runLaneCli } from "./lane-commands.js";
 import type { LaneCliDeps } from "./lane-commands.js";
 
 interface CaptureWriter {
@@ -124,7 +124,7 @@ describe("lane-commands CLI", () => {
   async function run(
     args: string[],
     deps: LaneCliDeps = {},
-  ): Promise<{ exitCode: number | null; stdout: CaptureWriter; stderr: CaptureWriter }> {
+  ): Promise<{ exitCode: number; stdout: CaptureWriter; stderr: CaptureWriter }> {
     const stdout = capture();
     const stderr = capture();
     const exitCode = await runLaneCli(args, {
@@ -139,34 +139,73 @@ describe("lane-commands CLI", () => {
     return { exitCode, stdout, stderr };
   }
 
-  describe("routing", () => {
-    test("non-lane verbs fall through to the legacy CLI", async () => {
-      expect(isLaneCliInvocation(["status"])).toBe(false);
-      expect(await runLaneCli(["status"])).toBeNull();
+  describe("command surface", () => {
+    test("removed graph commands fail as usage errors", async () => {
+      for (const verb of [
+        "run",
+        "plan",
+        "status",
+        "list",
+        "skills",
+        "flows",
+        "cancel",
+        "pr",
+        "pr-finalize",
+        "setup",
+      ]) {
+        const { exitCode, stdout } = await run([verb]);
+        expect(exitCode).toBe(2);
+        expect(stdout.lastJson().code).toBe("usage_error");
+        expect((stdout.lastJson().error as { message: string }).message).toContain(
+          `unknown command '${verb}'`,
+        );
+      }
     });
 
-    test("answer/resume fall through unless the id starts with lane_", async () => {
-      expect(isLaneCliInvocation(["answer", "run-123", "hi"])).toBe(false);
-      expect(isLaneCliInvocation(["resume"])).toBe(false);
-      expect(isLaneCliInvocation(["resume", "--run", "run-123"])).toBe(false);
-      expect(await runLaneCli(["answer", "run-123", "hi"])).toBeNull();
-
-      expect(isLaneCliInvocation(["answer", "lane_a3f8b901", "hi"])).toBe(true);
-      expect(isLaneCliInvocation(["dispatch", "--agent", "stub", "task"])).toBe(true);
+    test("answer and resume accept lane ids only", async () => {
+      for (const args of [
+        ["answer", "run-123", "hi"],
+        ["resume", "run-123", "continue"],
+      ]) {
+        const { exitCode, stdout } = await run(args);
+        expect(exitCode).toBe(2);
+        expect(stdout.lastJson().code).toBe("usage_error");
+        expect((stdout.lastJson().error as { message: string }).message).toContain(
+          "lane_[0-9a-f]{8}",
+        );
+      }
     });
 
-    test("bare answer/resume help routes to the lane CLI and explains the routing", async () => {
+    test("root help lists only the lane contract", async () => {
+      for (const args of [[], ["--help"]]) {
+        const { exitCode, stdout } = await run(args);
+        expect(exitCode).toBe(0);
+        const text = stdout.chunks.join("");
+        expect(text).toContain("dispatch");
+        expect(text).toContain("inspect");
+        expect(text).toContain("contract");
+        expect(text).not.toContain("Run pre-planning");
+        expect(text).not.toContain("Pull request workflow");
+        expect(text).not.toContain("first-time setup");
+        expect(text).not.toContain("help [command]");
+      }
+    });
+
+    test("version remains available as a root option", async () => {
+      const { exitCode, stdout } = await run(["--version"], { version: "1.2.3-test" });
+      expect(exitCode).toBe(0);
+      expect(stdout.chunks.join("").trim()).toBe("1.2.3-test");
+    });
+
+    test("answer and resume help describe the lane commands directly", async () => {
       for (const verb of ["answer", "resume"]) {
-        expect(isLaneCliInvocation([verb, "--help"])).toBe(true);
         const { exitCode, stdout } = await run([verb, "--help"]);
         expect(exitCode).toBe(0);
         const text = stdout.chunks.join("");
         expect(text).toContain("AGENTS:");
         expect(text).toContain(`orca ${verb} lane_a3f81c02`);
-        // Lane-vs-legacy routing is stated in the verb description itself,
-        // not buried in a footnote.
-        expect(text).toContain("Lane vs legacy routing");
-        expect(text).toContain("legacy answer/resume commands");
+        expect(text).not.toContain("routing");
+        expect(text).not.toContain("legacy");
       }
     });
 

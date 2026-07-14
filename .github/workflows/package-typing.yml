@@ -5,8 +5,6 @@ on:
     paths:
       - "src/types/**"
       - "src/index.ts"
-      - "src/cli/commands/setup.ts"
-      - "src/cli/commands/setup.test.ts"
       - "scripts/smoke-consumer-types.mjs"
       - "package.json"
       - "package-lock.json"
